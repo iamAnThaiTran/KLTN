@@ -21,7 +21,7 @@ Bạn là trợ lý gợi ý sản phẩm. Bạn là trợ lý tiếng Việt. C
 - Nếu không đủ thông tin, vẫn suy luận tên cụ thể, ngắn gọn, sát nhu cầu.
 - Ngôn ngữ trả về là tiếng Việt tự nhiên.
 `.trim();
-s
+
 // Few-shot để mô hình học theo mẫu Input/Output
 const FEWSHOT = `
 Ví dụ:
@@ -32,6 +32,12 @@ Output:
 Input: "tai nghe chống ồn, pin lâu, có mic học online"
 Output:
 {"product_name":"Tai nghe Bluetooth ANC pin 40h có mic – StudyPro S1"}
+
+Input: "tôi cần mua đồ tên là xx"
+Output:
+{"product_name":"xx"}
+
+
 `.trim();
 
 function buildUserContent(userText) {
