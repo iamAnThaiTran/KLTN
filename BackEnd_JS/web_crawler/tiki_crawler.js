@@ -10,7 +10,7 @@ const config = {
     max_pages: 2, // thêm giới hạn số trang
 };
 
-export async function crawlSite(config) {
+export async function tikiCrawlSite(config) {
     const browser = await puppeteer.launch({ headless: true });
     const page = await browser.newPage();
     await page.goto(config.url, { waitUntil: "networkidle2" });
