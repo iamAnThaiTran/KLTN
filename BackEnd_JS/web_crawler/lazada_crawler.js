@@ -85,8 +85,9 @@ export async function lazadaCrawlSite(config) {
           image = src;
         }
       }
+      const trust_value  = Math.floor(Math.random() * 10) + 1;
 
-      response.push({ title, price, link, image });
+      response.push({ title, price, link, image, trust_value });
     }
 
     // Chuyển trang
