@@ -1,4 +1,5 @@
 const StorageService = {
+  // Chat Management
   saveChat: (chat) => {
     const chats = StorageService.getAllChats();
     chats.unshift(chat);
@@ -17,8 +18,39 @@ const StorageService = {
   
   clearAll: () => {
     localStorage.removeItem('chatHistories');
+  },
+
+  // Auth Management
+  setToken: (token) => {
+    localStorage.setItem('authToken', token);
+  },
+
+  getToken: () => {
+    return localStorage.getItem('authToken');
+  },
+
+  setUser: (user) => {
+    localStorage.setItem('user', JSON.stringify(user));
+  },
+
+  getUser: () => {
+    const user = localStorage.getItem('user');
+    return user ? JSON.parse(user) : null;
+  },
+
+  removeToken: () => {
+    localStorage.removeItem('authToken');
+  },
+
+  removeUser: () => {
+    localStorage.removeItem('user');
+  },
+
+  clearAuth: () => {
+    StorageService.removeToken();
+    StorageService.removeUser();
   }
 };
 
-
+export { StorageService };
 export default StorageService;

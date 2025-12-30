@@ -24,13 +24,6 @@ function WelcomeScreen({ onPromptClick }) {
     image: 'https://img.lazcdn.com/g/ff/kf/S20b9405a7a0247b5ab3464cf57a806ecl.jpg_720x720q80.jpg_.webp'
   };
 
-  // Tạo mock products cho từng ngành (12 items mỗi ngành để grid đầy đặn)
-  const createMockProducts = (categoryTitle) => {
-    return Array(12).fill(null).map((_, i) => ({
-      ...baseProduct,
-      title: `${categoryTitle} - Sản phẩm hot ${i + 1}`,
-    }));
-  };
 
   const categories = [
     { icon: '🎮', title: 'Gaming Gear Hot 🔥', products: gamingGear },
