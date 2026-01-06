@@ -66,7 +66,7 @@ function Sidebar({ currentChatId, onNewChat, onSelectChat }) {
       </nav>
       
       {/* Footer */}
-      <div className="p-3 border-t border-gray-200">
+      <div className="p-3 border-t border-gray-200 space-y-3">
         <button
           onClick={() => {
             if (window.confirm('Xóa tất cả lịch sử?')) {

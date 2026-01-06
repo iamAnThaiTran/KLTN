@@ -29,12 +29,12 @@ export default function LoginPage() {
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center p-4">
+        <div className="min-h-screen  flex items-center justify-center p-4">
             <div className="bg-white rounded-lg shadow-xl p-8 w-full max-w-md">
                 {/* Header */}
                 <div className="text-center mb-8">
                     <div className="inline-block mb-4">
-                        <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-3xl">
+                        <div className="w-16 h-16  rounded-full flex items-center justify-center text-3xl">
                             🤖
                         </div>
                     </div>

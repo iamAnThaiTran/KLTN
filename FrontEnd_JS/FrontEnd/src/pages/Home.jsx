@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import StorageService from "../services/StorageService";
 import Sidebar from "../layout/Sidebar";
+import Header from "../layout/Header";
 import WelcomeScreen from "../home/WelcomeScreen";
 import ChatInput from "../chat/ChatInput";
 import ChatMessage from "../chat/ChatMessage";
@@ -32,7 +33,7 @@ export default function Home() {
     }, [messages]);
 
 
-    const handleNewChat = () => {
+    const handleNewChat = () => { 
         setCurrentChatId(null);
         setMessages([]);
     };
@@ -98,14 +99,16 @@ export default function Home() {
     };
 
     return (
-        <div className="flex h-screen bg-gray-50">
-            <Sidebar
-                currentChatId={currentChatId}
-                onNewChat={handleNewChat}
-                onSelectChat={handleSelectChat}
-            />
+        <div className="flex flex-col h-screen bg-gray-50 ">
+            <Header />
+            <div className="flex flex-1">
+                <Sidebar
+                    currentChatId={currentChatId}
+                    onNewChat={handleNewChat}
+                    onSelectChat={handleSelectChat}
+                />
 
-            <main className="flex-1 flex flex-col">
+                <main className="flex-1 flex flex-col">
                 {messages.length === 0 ? (
                     <WelcomeScreen onPromptClick={handlePromptClick} />
                 ) : (
@@ -139,9 +142,10 @@ export default function Home() {
                         </div>
                     </div>
                 )}
-
+    </main>
+            </div>
                 <ChatInput onSend={handleSendMessage} disabled={isLoading} />
-            </main>
+           
         </div>
     );
 }
