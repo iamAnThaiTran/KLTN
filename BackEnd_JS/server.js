@@ -1,7 +1,7 @@
 import app from './src/app.js';
 import { config } from './src/config/env.js';
 import { logger } from './src/utils/logger.js';
-import { startJobs } from './src/jobs/index.js';
+// import { startJobs } from './src/jobs/index.js';
 
 const PORT = config.port || 3000;
 
@@ -10,7 +10,7 @@ const server = app.listen(PORT, () => {
   logger.info(`📊 Environment: ${config.env}`);
   
   // Start background jobs
-  startJobs();
+  // startJobs();
 });
 
 // Graceful shutdown

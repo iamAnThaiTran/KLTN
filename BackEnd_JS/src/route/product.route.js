@@ -7,6 +7,6 @@ const router = express.Router();
 
 router.get('/search', optionalAuth, validateSearch, search);
 router.get('/:id', getById);
-router.post('/compare', compareProducts);
+router.post('/compare', compare);
 
 export default router;

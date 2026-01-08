@@ -1,10 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import routes from './routes/index.js';
+import router from './route/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/logger.js';
-import { rateLimiter } from './middleware/rateLimiter.js';
+// import { rateLimiter } from './middleware/rateLimiter.js';
 
 const app = express();
 
@@ -18,7 +18,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Middleware
 app.use(requestLogger);
-app.use(rateLimiter);
+// app.use(rateLimiter); // Disabled for auth testing
 
 // Health check
 app.get('/health', (req, res) => {
@@ -26,7 +26,7 @@ app.get('/health', (req, res) => {
 });
 
 // Routes
-app.use('/api/v1', routes);
+app.use('/api/v1', router);
 
 // Error handling
 app.use(errorHandler);
