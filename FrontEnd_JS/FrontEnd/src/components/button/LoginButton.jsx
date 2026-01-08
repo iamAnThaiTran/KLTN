@@ -43,17 +43,17 @@ export default function LoginButton() {
 
     // Not logged in - show login and register buttons
     return (
-        <div className="space-y-2">
+        <div className="flex gap-2">
             <button
                 onClick={() => navigate('/login')}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
+                className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
             >
                 <LogIn className="w-4 h-4" />
                 Đăng Nhập
             </button>
             <button
                 onClick={() => navigate('/register')}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-200 text-gray-900 rounded-lg hover:bg-gray-300 transition-colors font-medium text-sm"
+                className="flex items-center justify-center gap-2 px-4 py-2 bg-gray-200 text-gray-900 rounded-lg hover:bg-gray-300 transition-colors font-medium text-sm"
             >
                 <User className="w-4 h-4" />
                 Đăng Ký

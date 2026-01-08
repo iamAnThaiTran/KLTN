@@ -99,16 +99,16 @@ export default function Home() {
     };
 
     return (
-        <div className="flex flex-col h-screen bg-gray-50 ">
+        <div className="flex flex-col h-screen ">
             <Header />
-            <div className="flex flex-1">
+            <div className="flex flex-1 pt-32">
                 <Sidebar
                     currentChatId={currentChatId}
                     onNewChat={handleNewChat}
                     onSelectChat={handleSelectChat}
                 />
 
-                <main className="flex-1 flex flex-col">
+                <main className="flex-1 flex flex-col ml-64">
                 {messages.length === 0 ? (
                     <WelcomeScreen onPromptClick={handlePromptClick} />
                 ) : (

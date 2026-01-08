@@ -1,0 +1,21 @@
+# Environment variables
+.env
+
+# Data volumes
+postgres/backups/*.sql
+postgres/backups/*.dump
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Dependencies
+node_modules/

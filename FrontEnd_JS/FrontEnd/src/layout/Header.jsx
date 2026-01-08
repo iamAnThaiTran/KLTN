@@ -4,7 +4,7 @@ import LoginButton from '../components/button/LoginButton';
 
 export default function Header() {
     return (
-        <header className=" top-0 left-0 right-0 bg-white shadow-md ">
+        <header className="fixed top-0 left-64 right-0 bg-white shadow-md z-40">
             {/* Top Navigation */}
             <nav className="bg-gray-50 border-b border-gray-200">
                 <div className="max-w-full px-6 py-2 flex justify-between items-center text-sm">
