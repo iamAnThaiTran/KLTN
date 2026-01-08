@@ -20,9 +20,9 @@ function Sidebar({ currentChatId, onNewChat, onSelectChat }) {
   );
   
   return (
-    <aside className="w-64 bg-white border-r border-gray-200 flex flex-col h-full">
+    <aside className="w-64 bg-white border-r border-gray-200 flex flex-col fixed left-0 top-0 h-screen overflow-hidden">
       {/* Header */}
-      <div className="p-4 border-b border-gray-200">
+      <div className="p-4 border-b border-gray-200 flex-shrink-0">
         <button
           onClick={onNewChat}
           className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
@@ -33,7 +33,7 @@ function Sidebar({ currentChatId, onNewChat, onSelectChat }) {
       </div>
       
       {/* Search */}
-      <div className="p-3 border-b border-gray-200">
+      <div className="p-3 border-b border-gray-200 flex-shrink-0">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
@@ -46,8 +46,8 @@ function Sidebar({ currentChatId, onNewChat, onSelectChat }) {
         </div>
       </div>
       
-      {/* History List */}
-      <nav className="flex-1 overflow-y-auto p-3 space-y-1">
+      {/* History List - Scrollable */}
+      <nav className="flex-1 overflow-y-auto p-3 space-y-1 min-h-0">
         {filteredHistories.length === 0 ? (
           <div className="text-center py-8 text-gray-400 text-sm">
             {searchTerm ? 'Không tìm thấy' : 'Chưa có lịch sử'}
@@ -66,7 +66,7 @@ function Sidebar({ currentChatId, onNewChat, onSelectChat }) {
       </nav>
       
       {/* Footer */}
-      <div className="p-3 border-t border-gray-200">
+      <div className="p-3 border-t border-gray-200 space-y-3 flex-shrink-0">
         <button
           onClick={() => {
             if (window.confirm('Xóa tất cả lịch sử?')) {
