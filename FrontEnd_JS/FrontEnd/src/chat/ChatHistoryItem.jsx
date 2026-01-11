@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { MessageCircle, Plus, Search, Trash2, Send, Sparkles } from 'lucide-react';
+import { MessageCircle, Trash2 } from 'lucide-react';
 
 function ChatHistoryItem({ chat, isActive, onClick, onDelete }) {
   const [isHovered, setIsHovered] = useState(false);
@@ -8,7 +8,7 @@ function ChatHistoryItem({ chat, isActive, onClick, onDelete }) {
     <div
       className={`group relative flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all ${
         isActive 
-          ? 'bg-blue-50 border border-blue-200' 
+          ? 'bg-indigo-50 border border-indigo-200' 
           : 'hover:bg-gray-100'
       }`}
       onClick={onClick}

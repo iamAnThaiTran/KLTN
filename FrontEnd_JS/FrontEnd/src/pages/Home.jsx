@@ -1,19 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 
-import {
-    MessageCircle,
-    Plus,
-    Search,
-    Trash2,
-    Send,
-    Sparkles,
-} from "lucide-react";
 import StorageService from "../services/StorageService";
 import Sidebar from "../layout/Sidebar";
 import Header from "../layout/Header";
 import WelcomeScreen from "../home/WelcomeScreen";
 import ChatInput from "../chat/ChatInput";
 import ChatMessage from "../chat/ChatMessage";
+import AssistantBubble from "../components/AssistantBubble";
 import { getProductFromTiki } from "../services/productServices";
 
 
@@ -21,6 +14,7 @@ export default function Home() {
     const [currentChatId, setCurrentChatId] = useState(null);
     const [messages, setMessages] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const bottomRef = useRef(null);
 
     useEffect(() => {
@@ -99,27 +93,29 @@ export default function Home() {
     };
 
     return (
-        <div className="flex flex-col h-screen ">
-            <Header />
+        <div className="flex flex-col h-screen bg-gray-50">
+            <Header onMenuToggle={() => setIsSidebarOpen(!isSidebarOpen)} />
             <div className="flex flex-1 pt-32">
                 <Sidebar
                     currentChatId={currentChatId}
                     onNewChat={handleNewChat}
                     onSelectChat={handleSelectChat}
+                    isOpen={isSidebarOpen}
+                    onClose={() => setIsSidebarOpen(false)}
                 />
 
-                <main className="flex-1 flex flex-col ml-64">
+                <main className="flex-1 flex flex-col">
                 {messages.length === 0 ? (
                     <WelcomeScreen onPromptClick={handlePromptClick} />
                 ) : (
                     <div className="flex-1 overflow-y-auto p-6">
-                        <div className="max-w-7xl mx-auto">
+                        <div className="max-w-4xl mx-auto">
                             {messages.map((message) => (
                                 <ChatMessage key={message.id} message={message} />
                             ))}
                             {isLoading && (
                                 <div className="flex gap-3 mb-4">
-                                    <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
+                                    <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center text-white">
                                         🤖
                                     </div>
                                     <div className="bg-gray-100 rounded-2xl px-4 py-3">
@@ -145,7 +141,7 @@ export default function Home() {
     </main>
             </div>
                 <ChatInput onSend={handleSendMessage} disabled={isLoading} />
-           
+                <AssistantBubble />
         </div>
     );
 }
