@@ -10,9 +10,9 @@ export default function LoginButton() {
     if (isAuthenticated && user) {
         // Logged in - show user info and logout
         return (
-            <div className="space-y-3">
+            <div className="flex space-x-3">
                 {/* User Info Card */}
-                <div className="bg-gradient-to-r from-blue-50 to-purple-50 p-3 rounded-lg border border-blue-200">
+                <div className="p-0.5 rounded-lg border border-blue-200">
                     <div className="flex items-center gap-3 mb-3">
                         <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
                             {user.name ? user.name[0].toUpperCase() : 'U'}

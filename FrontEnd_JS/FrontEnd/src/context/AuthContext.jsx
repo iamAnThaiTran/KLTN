@@ -23,10 +23,14 @@ export const AuthProvider = ({ children }) => {
 
     const login = async (email, password) => {
         try {
+            // Ensure all parameters are strings
+            const emailStr = String(email || '').trim();
+            const passwordStr = String(password || '').trim();
+
             const response = await fetch('http://localhost:3000/api/v1/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password })
+                body: JSON.stringify({ email: emailStr, password: passwordStr })
             });
 
             const data = await response.json();
@@ -47,10 +51,15 @@ export const AuthProvider = ({ children }) => {
 
     const register = async (email, password, name) => {
         try {
+            // Ensure all parameters are strings
+            const emailStr = String(email || '').trim();
+            const passwordStr = String(password || '').trim();
+            const nameStr = String(name || '').trim();
+
             const response = await fetch('http://localhost:3000/api/v1/auth/register', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password, name })
+                body: JSON.stringify({ email: emailStr, password: passwordStr, name: nameStr })
             });
 
             const data = await response.json();

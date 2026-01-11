@@ -5,6 +5,8 @@ import router from './route/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/logger.js';
 // import { rateLimiter } from './middleware/rateLimiter.js';
+import dotenv from 'dotenv';
+dotenv.config();
 
 const app = express();
 

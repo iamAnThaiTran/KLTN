@@ -7,14 +7,15 @@ import {
     refreshToken
 } from '../controllers/auth.controller.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { validateLogin, validateRegister } from '../validators/auth.validator.js';
 
 const router = express.Router();
 
 /**
  * Public routes - no authentication required
  */
-router.post('/register', register);
-router.post('/login', login);
+router.post('/register', validateRegister, register);
+router.post('/login', validateLogin, login);
 
 /**
  * Protected routes - authentication required
