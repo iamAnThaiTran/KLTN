@@ -20,7 +20,12 @@ export default function LoginPage() {
         const result = await login(email, String(password));
         
         if (result.success) {
-            navigate('/');
+            // Check if user is admin
+            if (result.user?.role === 'admin') {
+                navigate('/admin/dashboard');
+            } else {
+                navigate('/');
+            }
         } else {
             setError(result.message || 'Đăng nhập thất bại');
         }

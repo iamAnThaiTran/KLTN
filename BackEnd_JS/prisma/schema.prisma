@@ -12,6 +12,7 @@ model User {
   passwordHash    String           @map("password_hash")
   fullName        String?          @map("full_name")
   phone           String?
+  role            String           @default("user") // "user" or "admin"
   isVerified      Boolean          @default(false) @map("is_verified")
   isActive        Boolean          @default(true) @map("is_active")
   lastLogin       DateTime?        @map("last_login")

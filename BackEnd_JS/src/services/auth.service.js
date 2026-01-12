@@ -59,6 +59,7 @@ class AuthService {
         'SELECT * FROM users WHERE email = $1',
         [email]
       );
+      logger.info('User found during login:', user);
 
       if (!user) {
         throw new Error('Invalid email or password');

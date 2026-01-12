@@ -1,3 +1,19 @@
+-- ==========================================
+-- DATABASE INITIALIZATION
+-- ==========================================
+
+-- Set timezone to UTC
+SET timezone = 'UTC';
+
+-- Create extensions
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+CREATE EXTENSION IF NOT EXISTS "unaccent";
+
+-- ==========================================
+-- TABLES
+-- ==========================================
+
 -- Categories Table 
 CREATE TABLE categories (
     id SERIAL PRIMARY KEY,
@@ -102,32 +118,78 @@ CREATE TABLE user_preferences (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Product Views Table (Tracking)
-CREATE TABLE product_views (
+-- Chat History Table
+CREATE TABLE chat_history (
     id SERIAL PRIMARY KEY,
-    product_id INT REFERENCES products(id) ON DELETE CASCADE,
-    user_id INT REFERENCES users(id) ON DELETE SET NULL,
-    viewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    session_id VARCHAR(100)
+    user_id INT REFERENCES users(id) ON DELETE CASCADE,
+    message TEXT NOT NULL,
+    is_user_message BOOLEAN DEFAULT true,
+    product_suggestions INT[] DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Trigger để tự động update updated_at
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
+-- Alerts Table
+CREATE TABLE alerts (
+    id SERIAL PRIMARY KEY,
+    user_id INT REFERENCES users(id) ON DELETE CASCADE,
+    product_id INT REFERENCES products(id) ON DELETE CASCADE,
+    alert_type VARCHAR(50) CHECK (alert_type IN ('price_drop', 'back_in_stock', 'new_product')),
+    target_price DECIMAL(12, 2),
+    is_triggered BOOLEAN DEFAULT false,
+    triggered_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
-CREATE TRIGGER update_categories_updated_at BEFORE UPDATE ON categories
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- Reviews Table
+CREATE TABLE reviews (
+    id SERIAL PRIMARY KEY,
+    product_id INT REFERENCES products(id) ON DELETE CASCADE,
+    user_id INT REFERENCES users(id) ON DELETE CASCADE,
+    rating INT CHECK (rating >= 1 AND rating <= 5),
+    comment TEXT,
+    helpful_count INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- Affiliate Links Table
+CREATE TABLE affiliate_links (
+    id SERIAL PRIMARY KEY,
+    product_id INT REFERENCES products(id) ON DELETE CASCADE,
+    platform VARCHAR(100),
+    affiliate_url TEXT NOT NULL,
+    commission_percent DECIMAL(5, 2),
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
-CREATE TRIGGER update_products_updated_at BEFORE UPDATE ON products
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- Price History Table (for tracking price changes)
+CREATE TABLE price_history (
+    id SERIAL PRIMARY KEY,
+    product_id INT REFERENCES products(id) ON DELETE CASCADE,
+    old_price DECIMAL(12, 2),
+    new_price DECIMAL(12, 2),
+    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
-CREATE TRIGGER update_user_preferences_updated_at BEFORE UPDATE ON user_preferences
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- ==========================================
+-- INDEXES
+-- ==========================================
+
+CREATE INDEX idx_categories_slug ON categories(slug);
+CREATE INDEX idx_categories_parent_id ON categories(parent_id);
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_products_slug ON products(slug);
+CREATE INDEX idx_products_category_id ON products(category_id);
+CREATE INDEX idx_products_sku ON products(sku);
+CREATE INDEX idx_search_terms_normalized ON search_terms(normalized_term);
+CREATE INDEX idx_search_history_user_id ON search_history(user_id);
+CREATE INDEX idx_search_history_created_at ON search_history(searched_at);
+CREATE INDEX idx_alerts_user_id ON alerts(user_id);
+CREATE INDEX idx_alerts_product_id ON alerts(product_id);
+CREATE INDEX idx_reviews_product_id ON reviews(product_id);
+CREATE INDEX idx_reviews_user_id ON reviews(user_id);
+CREATE INDEX idx_chat_history_user_id ON chat_history(user_id);
+CREATE INDEX idx_price_history_product_id ON price_history(product_id);

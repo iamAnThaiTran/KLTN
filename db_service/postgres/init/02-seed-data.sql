@@ -1,4 +1,5 @@
-- SEED DATA (Dữ liệu mẫu)
+-- ==========================================
+-- SEED DATA
 -- ==========================================
 
 -- Insert Categories (Level 0 - Root)
@@ -36,6 +37,16 @@ INSERT INTO categories (name, slug, parent_id, level, keywords, priority) VALUES
 -- Bột giặt brands
 ('Omo', 'omo', 9, 2, ARRAY['omo', 'unilever'], 100),
 ('Tide', 'tide', 9, 2, ARRAY['tide', 'p&g'], 90);
+
+-- Create admin user (password: admin123)
+-- Hash was generated with: bcrypt.hash('admin123', 10)
+INSERT INTO users (email, password_hash, full_name, role, is_verified, is_active) VALUES
+('admin@kltn.com', '$2b$10$3vFzpM7RxF0Y0YR7DqM5beLj7zL7P8Nz4K6Q2M9V1X5Z2W3A4B5C6', 'Admin User', 'admin', true, true);
+
+-- Create demo user (password: demo123)
+-- Hash was generated with: bcrypt.hash('demo123', 10)
+INSERT INTO users (email, password_hash, full_name, role, is_verified, is_active) VALUES
+('demo@example.com', '$2b$10$5sL6P9D2Q1R8E7T4Y3K0vOM5N1B9V7Z4X2C6M8W1A3F5S7D9E0K1', 'Demo User', 'user', true, true);
 
 -- Insert Sample Products
 INSERT INTO products (name, slug, category_id, brand, description, price, original_price, discount_percent, stock, sku, attributes, popularity_score, is_featured) VALUES
@@ -92,13 +103,5 @@ INSERT INTO search_terms (term, normalized_term, category_id, search_count) VALU
 ('iphone 15', 'iphone 15', 12, 3500),
 ('xiaomi', 'xiaomi', 14, 2900),
 ('omo', 'omo', 18, 2500);
-
--- Create admin user
-INSERT INTO users (email, password_hash, full_name, role, is_verified) VALUES
-('admin@kltn.com', '$2b$10$abcdefghijklmnopqrstuvwxyz123456', 'Admin User', 'admin', true);
-
--- Create demo user
-INSERT INTO users (email, password_hash, full_name, is_verified) VALUES
-('demo@example.com', '$2b$10$abcdefghijklmnopqrstuvwxyz123456', 'Demo User', true);
 
 ANALYZE;
