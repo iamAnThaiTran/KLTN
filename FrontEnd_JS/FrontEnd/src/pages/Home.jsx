@@ -4,20 +4,22 @@ import { useNavigate } from "react-router-dom";
 import Sidebar from "../layout/Sidebar";
 import Header from "../layout/Header";
 import AIUnderstandingPanel from "../components/AIUnderstandingPanel";
+import AssistOverlay from "../components/AssistOverlay";
 import ProductGrid from "../components/ProductGrid";
 import { useAuth } from "../context/AuthContext";
 import { getProductFromTiki } from "../services/productServices";
-import { hotProducts } from "../data/mockProducts";
 
 export default function Home() {
     const navigate = useNavigate();
     const { user, loading } = useAuth();
 
-    const [searchMode, setSearchMode] = useState('recommended'); // "recommended", "clarify", "query"
-    const [products, setProducts] = useState(hotProducts); // Load mock data by default
+    const [searchMode, setSearchMode] = useState('recommended');
+    const [products, setProducts] = useState([]);
     const [isSearching, setIsSearching] = useState(false);
     const [currentQuery, setCurrentQuery] = useState("");
-    const [clarifyData, setClarifyData] = useState(null); // { question, options, understanding }
+    const [clarifyData, setClarifyData] = useState(null);
+    const [showAssistOverlay, setShowAssistOverlay] = useState(false);
+    const [assistOverlayData, setAssistOverlayData] = useState(null);
 
     // Redirect admin users to dashboard
     useEffect(() => {
@@ -35,48 +37,37 @@ export default function Home() {
         setCurrentQuery(query);
 
         try {
-            // Call backend search API
-            const response = await fetch('http://localhost:3000/api/v1/search', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query })
-            });
-
-            const data = await response.json();
-
-            if (data.type === 'query') {
-                // Clear query - show products
+            const response = await getProductFromTiki(query);
+            console.log('handleSearch - response:', response);
+            
+            // Handle overlay assist response
+            if (response.ui_mode === 'OVERLAY_ASSIST') {
+                console.log('Setting overlay data and showing overlay');
+                setAssistOverlayData(response);
+                setShowAssistOverlay(true);
+                return;
+            }
+            
+            // Handle clarification response type
+            if (response.type === 'clarify') {
+                setClarifyData({
+                    question: response.question,
+                    options: response.options || [],
+                    understanding: response.understanding
+                });
+                setSearchMode('clarify');
+                setProducts([]);
+            } else {
+                // Handle query response type
+                setProducts(response.products || []);
                 setSearchMode('query');
                 setClarifyData(null);
-                
-                // Fetch products (using existing service)
-                try {
-                    const productResponse = await getProductFromTiki(query);
-                    setProducts(productResponse || []);
-                } catch (error) {
-                    console.error('Error fetching products:', error);
-                    setProducts([]);
-                }
-            } else if (data.type === 'clarify') {
-                // Ambiguous query - show clarification panel
-                setSearchMode('clarify');
-                setClarifyData({
-                    question: data.question,
-                    options: data.options,
-                    understanding: data.understanding
-                });
-                setProducts([]);
             }
         } catch (error) {
             console.error('Search error:', error);
-            // Fallback: treat as regular product search
+            setProducts([]);
             setSearchMode('query');
-            try {
-                const productResponse = await getProductFromTiki(query);
-                setProducts(productResponse || []);
-            } catch {
-                setProducts([]);
-            }
+            setClarifyData(null);
         } finally {
             setIsSearching(false);
         }
@@ -88,46 +79,70 @@ export default function Home() {
         setIsSearching(true);
 
         try {
-            // Send option selection back to backend with context
-            const response = await fetch('http://localhost:3000/api/v1/search', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    query: currentQuery,
-                    selectedOption: option
-                })
-            });
-
-            const data = await response.json();
-
-            if (data.type === 'query') {
+            const combinedQuery = currentQuery + ' ' + option;
+            const response = await getProductFromTiki(combinedQuery);
+            
+            // Handle overlay assist response
+            if (response.ui_mode === 'OVERLAY_ASSIST') {
+                setAssistOverlayData(response);
+                setShowAssistOverlay(true);
+                setIsSearching(false);
+                return;
+            }
+            
+            // Handle clarification response type
+            if (response.type === 'clarify') {
+                setClarifyData({
+                    question: response.question,
+                    options: response.options || [],
+                    understanding: response.understanding
+                });
+                setSearchMode('clarify');
+                setProducts([]);
+            } else {
+                // Handle query response type
+                setProducts(response.products || []);
                 setSearchMode('query');
                 setClarifyData(null);
-                
-                try {
-                    const productResponse = await getProductFromTiki(currentQuery + ' ' + option);
-                    setProducts(productResponse || []);
-                } catch (error) {
-                    console.error('Error fetching products:', error);
-                    setProducts([]);
-                }
-            } else if (data.type === 'clarify') {
-                setClarifyData({
-                    question: data.question,
-                    options: data.options,
-                    understanding: data.understanding
-                });
-                setProducts([]);
             }
         } catch (error) {
             console.error('Option selection error:', error);
+            setProducts([]);
+            setSearchMode('query');
+            setClarifyData(null);
         } finally {
             setIsSearching(false);
         }
     };
 
+    const handleAssistOptionSelect = async (optionKey) => {
+        const combinedQuery = currentQuery + ' ' + optionKey;
+        setShowAssistOverlay(false);
+        setAssistOverlayData(null);
+        await handleSearch(combinedQuery);
+    };
+
+    const handleAssistSkip = () => {
+        setShowAssistOverlay(false);
+        setAssistOverlayData(null);
+        setSearchMode('query');
+    };
+
+    const handleAssistClose = () => {
+        setShowAssistOverlay(false);
+        setAssistOverlayData(null);
+    };
+
     return (
         <div className="flex flex-col h-screen bg-gray-50">
+            <AssistOverlay
+                isOpen={showAssistOverlay}
+                data={assistOverlayData}
+                onOptionSelect={handleAssistOptionSelect}
+                onSkip={handleAssistSkip}
+                onClose={handleAssistClose}
+            />
+            
             <Header 
                 onMenuToggle={() => {}} 
                 onSearch={handleSearch}
@@ -160,6 +175,23 @@ export default function Home() {
                             onSelectOption={handleSelectOption}
                             isLoading={isSearching}
                         />
+                    )}
+
+                    {/* Intent Analysis Summary - shown when query is clear */}
+                    {searchMode === 'query' && currentQuery && (
+                        <div className="px-6 pt-4 pb-2">
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                                <p className="text-sm text-gray-700">
+                                    <span className="font-semibold">✓ Đã hiểu:</span> {currentQuery}
+                                </p>
+                                {/* Show search criteria if available */}
+                                {products && products.length === 0 && (
+                                    <p className="text-xs text-gray-500 mt-2">
+                                        💡 Chúng tôi hiểu bạn tìm kiếm: <span className="font-medium">{currentQuery}</span>
+                                    </p>
+                                )}
+                            </div>
+                        </div>
                     )}
 
                     {/* Product Grid - shown when query is clear, clarifying, or recommended */}

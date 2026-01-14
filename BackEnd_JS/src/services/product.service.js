@@ -1,105 +1,171 @@
-import { prisma } from '../config/database.js';
-import { crawlerService } from './crawler.service.js';
-import { rankingService } from './ranking.service.js';
-import { cacheService } from './cache.service.js';
-import { normalizeProductKey } from '../utils/normalizer.js';
 import { logger } from '../utils/logger.js';
-import { llmService } from './llm.service.js';
 
+/**
+ * Product Service
+ * Xử lý search và filter products từ database
+ * Layer này KHÔNG dùng LLM, chỉ query DB thuần túy
+ */
 class ProductService {
-  async search({ query, message, forceRefresh, userId }) {
-    // 1. Get product name
-    const productName = query || await llmService.extractProductName(message);
-    const productKey = normalizeProductKey(productName);
-    
-    // 2. Check cache
-    if (!forceRefresh) {
-      const cached = await cacheService.get(productKey);
-      if (cached) {
-        logger.info(`Cache hit for: ${productKey}`);
-        
-        // Track search
-        if (userId) {
-          await this.trackSearch(userId, productName, productKey);
-        }
-        
-        return {
-          data: cached,
-          cached: true,
-          timestamp: new Date()
-        };
-      }
-    }
-    
-    // 3. Crawl fresh data
-    logger.info(`Crawling fresh data for: ${productKey}`);
-    const products = await crawlerService.crawlAll(productName);
-    
-    // 4. Save to database
-    const savedProducts = await this.saveProducts(products, productKey);
-    
-    // 5. Rank products
-    const rankedProducts = rankingService.rank(savedProducts);
-    
-    // 6. Cache results
-    await cacheService.set(productKey, rankedProducts);
-    
-    // 7. Track search
-    if (userId) {
-      await this.trackSearch(userId, productName, productKey);
-    }
-    
-    return {
-      data: rankedProducts,
-      cached: false,
-      timestamp: new Date()
-    };
+  constructor() {
+    // TODO: Initialize database connection
+    // this.db = database connection
   }
-  
-  async saveProducts(products, productKey) {
-    const saved = [];
-    
-    for (const product of products) {
-      const savedProduct = await prisma.product.upsert({
-        where: { link: product.link },
-        update: {
-          price: product.price,
-          title: product.title,
-          image: product.image,
-          trust_value: product.trust_value,
-          updated_at: new Date()
-        },
-        create: {
-          ...product,
-          product_key: productKey
-        }
-      });
+
+  /**
+   * Search products từ database
+   * @param {string} searchQuery - Search query đã được extract từ intent
+   * @param {object} filters - Structured filters (price, category, brand...)
+   * @returns {Promise<Array>} - Danh sách products
+   */
+  async searchProducts(searchQuery, filters = {}) {
+    try {
+      logger.info(`[ProductService] Searching: "${searchQuery}"`);
+      logger.info(`[ProductService] Filters:`, filters);
+
+      // === BUILD DATABASE QUERY ===
+      const query = this.buildDatabaseQuery(searchQuery, filters);
       
-      saved.push(savedProduct);
+      // === EXECUTE SEARCH ===
+      // TODO: Implement actual database search
+      // const results = await this.db.search(query);
+      
+      // TODO: Remove this mock data - implement real database query above
+      const results = [];
+      
+      // === RANK RESULTS ===
+      const rankedProducts = this.rankProducts(results, searchQuery, filters);
+      
+      logger.info(`[ProductService] Found ${rankedProducts.length} products`);
+      
+      return rankedProducts;
+
+    } catch (error) {
+      logger.error('[ProductService] Search error:', error);
+      throw error;
     }
-    
-    return saved;
   }
-  
-  async trackSearch(userId, query, productKey) {
-    await prisma.searchHistory.create({
-      data: { user_id: userId, query, product_key: productKey }
-    });
+
+  /**
+   * Build database query từ search query và filters
+   */
+  buildDatabaseQuery(searchQuery, filters) {
+    const query = {
+      text_search: searchQuery,
+      filters: {}
+    };
+
+    // Price range filter
+    if (filters.price_min !== undefined || filters.price_max !== undefined) {
+      query.filters.price = {};
+      if (filters.price_min) query.filters.price.$gte = filters.price_min;
+      if (filters.price_max) query.filters.price.$lte = filters.price_max;
+    }
+
+    // Category filter
+    if (filters.category) {
+      query.filters.category = filters.category;
+    }
+
+    // Brand filter
+    if (filters.brand) {
+      query.filters.brand = filters.brand;
+    }
+
+    // Usage filter (có thể map với tags hoặc specs)
+    if (filters.usage) {
+      query.filters.tags = { $contains: filters.usage };
+    }
+
+    return query;
   }
-  
-  async getById(id) {
-    return await prisma.product.findUnique({
-      where: { id },
-      include: { price_history: { orderBy: { recorded_at: 'desc' }, take: 30 } }
-    });
+
+  /**
+   * Rank products dựa trên relevance
+   * Simple scoring algorithm
+   */
+  rankProducts(products, searchQuery, filters) {
+    return products.map(product => {
+      let score = 0;
+
+      // Text relevance score
+      const queryTerms = searchQuery.toLowerCase().split(' ');
+      const titleLower = product.title.toLowerCase();
+      const descLower = (product.description || '').toLowerCase();
+
+      queryTerms.forEach(term => {
+        if (titleLower.includes(term)) score += 10;
+        if (descLower.includes(term)) score += 5;
+      });
+
+      // Category match
+      if (filters.category && product.category === filters.category) {
+        score += 20;
+      }
+
+      // Brand match
+      if (filters.brand && product.brand === filters.brand) {
+        score += 15;
+      }
+
+      // Price preference (products closer to max price get higher score)
+      if (filters.price_max) {
+        const priceRatio = product.price / filters.price_max;
+        if (priceRatio <= 1) {
+          score += (1 - priceRatio) * 10; // Cheaper = better
+        }
+      }
+
+      // Rating boost
+      if (product.rating) {
+        score += product.rating * 2;
+      }
+
+      return {
+        ...product,
+        match_score: Math.round(score * 10) / 10
+      };
+    })
+    .sort((a, b) => b.match_score - a.match_score);
   }
-  
-  async compare(productIds) {
-    const products = await prisma.product.findMany({
-      where: { id: { in: productIds } }
-    });
-    
-    return rankingService.compare(products);
+
+  /**
+   * Get product by ID
+   */
+  async getProductById(productId) {
+    try {
+      logger.info(`[ProductService] Getting product: ${productId}`);
+      
+      // TODO: Implement real database query
+      // return await this.db.findOne({ id: productId });
+      
+      return null; // No mock data - needs real database implementation
+    } catch (error) {
+      logger.error('[ProductService] Error getting product:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get similar products
+   */
+  async getSimilarProducts(productId, limit = 5) {
+    try {
+      logger.info(`[ProductService] Getting similar products for: ${productId}`);
+      
+      const product = await this.getProductById(productId);
+      if (!product) return [];
+
+      // Search by same category and similar price range
+      return await this.searchProducts(product.category, {
+        category: product.category,
+        price_min: product.price * 0.7,
+        price_max: product.price * 1.3
+      });
+
+    } catch (error) {
+      logger.error('[ProductService] Error getting similar products:', error);
+      return [];
+    }
   }
 }
 

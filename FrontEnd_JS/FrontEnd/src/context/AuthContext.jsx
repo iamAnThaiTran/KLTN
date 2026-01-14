@@ -23,6 +23,7 @@ export const AuthProvider = ({ children }) => {
 
     const login = async (email, password) => {
         try {
+
             // Ensure all parameters are strings
             const emailStr = String(email || '').trim();
             const passwordStr = String(password || '').trim();
@@ -51,6 +52,7 @@ export const AuthProvider = ({ children }) => {
 
     const register = async (email, password, name) => {
         try {
+
             // Ensure all parameters are strings
             const emailStr = String(email || '').trim();
             const passwordStr = String(password || '').trim();

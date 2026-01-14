@@ -1,0 +1,330 @@
+/* AssistOverlay.css - Enhanced UI for intent clarification */
+
+.assist-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: assist-overlay-fade-in 0.2s ease-out;
+}
+
+@keyframes assist-overlay-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Backdrop blur effect */
+.assist-overlay__backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* Content container */
+.assist-overlay__content {
+  position: relative;
+  z-index: 1001;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+  padding: 0;
+  max-width: 550px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  animation: assist-content-scale-in 0.3s ease-out;
+}
+
+@keyframes assist-content-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Header section */
+.assist-overlay__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+.assist-overlay__header-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.assist-overlay__header-title h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0;
+}
+
+.assist-overlay__icon {
+  color: #3b82f6;
+  flex-shrink: 0;
+}
+
+.assist-overlay__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.assist-overlay__query-tag {
+  display: inline-block;
+  background: #3b82f6;
+  color: white;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Close button */
+.assist-overlay__close {
+  background: none;
+  border: none;
+  padding: 6px;
+  cursor: pointer;
+  color: #6b7280;
+  transition: color 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.assist-overlay__close:hover {
+  color: #1f2937;
+  background-color: #e5e7eb;
+}
+
+/* Helper text */
+.assist-overlay__helper-text {
+  padding: 20px 24px 16px;
+  color: #d97706;
+  font-size: 14px;
+  line-height: 1.5;
+  background: #fef3c7;
+  border-radius: 8px;
+  margin: 20px 24px 0;
+}
+
+.assist-overlay__helper-text p {
+  margin: 0;
+}
+
+/* Questions container */
+.assist-overlay__questions-container {
+  flex: 1;
+  padding: 20px 24px;
+  overflow-y: auto;
+}
+
+/* Question section */
+.assist-overlay__question-section {
+  margin-bottom: 28px;
+}
+
+.assist-overlay__question-section:last-child {
+  margin-bottom: 0;
+}
+
+.assist-overlay__question-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0 0 14px 0;
+  line-height: 1.4;
+}
+
+/* Options grid */
+.assist-overlay__options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.assist-overlay__option-chip {
+  background: white;
+  border: 1px solid #d1d5db;
+  border-radius: 20px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.assist-overlay__option-chip:hover {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  color: #3b82f6;
+  transform: translateY(-2px);
+}
+
+.assist-overlay__option-chip:active {
+  transform: translateY(0);
+}
+
+.assist-overlay__option-chip:focus {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* Input section */
+.assist-overlay__input-section {
+  padding: 16px 24px 20px;
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
+  flex-shrink: 0;
+}
+
+.assist-overlay__input-wrapper {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.assist-overlay__input {
+  flex: 1;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #1f2937;
+  background: white;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.assist-overlay__input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.assist-overlay__input::placeholder {
+  color: #9ca3af;
+}
+
+.assist-overlay__submit-btn {
+  background: #3b82f6;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.assist-overlay__submit-btn:hover:not(:disabled) {
+  background: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+.assist-overlay__submit-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.assist-overlay__submit-btn:disabled {
+  background: #d1d5db;
+  cursor: not-allowed;
+}
+
+/* Scrollbar styling */
+.assist-overlay__content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.assist-overlay__content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.assist-overlay__content::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.assist-overlay__content::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Responsive design */
+@media (max-width: 640px) {
+  .assist-overlay__content {
+    max-width: 100%;
+    width: calc(100% - 32px);
+    margin: 0 16px;
+    max-height: calc(100vh - 40px);
+  }
+
+  .assist-overlay__header {
+    padding: 16px 20px;
+  }
+
+  .assist-overlay__header-title h2 {
+    font-size: 16px;
+  }
+
+  .assist-overlay__helper-text {
+    margin: 16px 20px 0;
+    padding: 16px;
+  }
+
+  .assist-overlay__questions-container {
+    padding: 16px 20px;
+  }
+
+  .assist-overlay__input-section {
+    padding: 12px 20px 16px;
+  }
+
+  .assist-overlay__options-grid {
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  }
+
+  .assist-overlay__query-tag {
+    padding: 5px 12px;
+    font-size: 12px;
+  }
+}
+
