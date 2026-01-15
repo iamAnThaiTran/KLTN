@@ -8,7 +8,7 @@ class CrawlerService {
     this.crawlers = {
       lazada: new LazadaCrawler(),
       tiki: new TikiCrawler(),
-      shopee: new ShopeeCrawler()
+      // shopee: new ShopeeCrawler()
     };
   }
   
@@ -16,13 +16,13 @@ class CrawlerService {
     const results = await Promise.allSettled([
       this.crawlers.lazada.crawl(productName),
       this.crawlers.tiki.crawl(productName),
-      this.crawlers.shopee.crawl(productName)
+      // this.crawlers.shopee.crawl(productName)
     ]);
     
     const products = [];
     
     results.forEach((result, index) => {
-      const platform = ['lazada', 'tiki', 'shopee'][index];
+      const platform = ['lazada', 'tiki'][index];
       
       if (result.status === 'fulfilled') {
         products.push(...result.value);

@@ -2,9 +2,21 @@ import cron from 'node-cron';
 import { refreshPopularProducts } from './refreshPrices.job.js';
 import { checkPriceAlerts } from './checkAlerts.job.js';
 import { cleanupOldData } from './cleanupOldData.job.js';
+import { syncCrawlerData } from './syncCrawlerData.job.js';
 import { logger } from '../utils/logger.js';
 
 export function startJobs() {
+  // Crawl and sync products every 12 hours
+  cron.schedule('0 */12 * * *', async () => {
+    logger.info('🕷️ Starting crawler data sync...');
+    try {
+      await syncCrawlerData();
+      logger.info('✅ Crawler data sync completed');
+    } catch (error) {
+      logger.error('❌ Crawler data sync failed:', error);
+    }
+  });
+  
   // Refresh prices every 6 hours
   cron.schedule('0 */6 * * *', async () => {
     logger.info('🔄 Starting scheduled price refresh...');

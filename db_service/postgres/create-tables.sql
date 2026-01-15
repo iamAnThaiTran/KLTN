@@ -44,6 +44,8 @@ CREATE TABLE products (
     sku VARCHAR(100) UNIQUE,
     attributes JSONB DEFAULT '{}',
     images TEXT[] DEFAULT '{}',
+    link TEXT,
+    platform VARCHAR(50),
     
     -- Metrics
     view_count INT DEFAULT 0,

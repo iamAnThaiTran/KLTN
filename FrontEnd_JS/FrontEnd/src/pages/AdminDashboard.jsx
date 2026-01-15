@@ -39,7 +39,7 @@ export default function AdminDashboard() {
           </div>
         </header>
 
-        <div className="p-8">
+        <div className="mx-auto max-w-7xl w-full px-4 md:px-6 lg:px-8 py-8">
           {activeTab === 'dashboard' && <DashboardTab />}
           {activeTab === 'products' && <ProductsTab />}
           {activeTab === 'statistics' && <StatisticsTab />}

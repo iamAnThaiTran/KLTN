@@ -20,7 +20,7 @@ export default function Header({ onMenuToggle, onSearch, isSearching }) {
     return (
         <header className="fixed top-0 left-0 right-0 bg-white shadow-md z-40">
             {/* Main Header - Clean and focused */}
-            <div className="px-6 py-4 flex items-center justify-between gap-6 border-b border-gray-100">
+            <div className="mx-auto max-w-7xl w-full px-4 md:px-6 lg:px-8 py-4 flex items-center justify-between gap-6 border-b border-gray-100">
                 {/* Menu Button + Logo */}
                 <div className="flex items-center gap-4 flex-shrink-0">
                     <button
@@ -74,13 +74,15 @@ export default function Header({ onMenuToggle, onSearch, isSearching }) {
             </div>
 
             {/* Quick Categories - Horizontal, Compact */}
-            <div className="px-6 py-3 border-t border-gray-100 bg-gray-50 overflow-x-auto">
-                <div className="flex gap-4 whitespace-nowrap text-sm">
-                    <button onClick={() => onSearch('Laptop')} className="px-3 py-1 hover:text-indigo-600 transition text-gray-700 font-medium">💻 Laptop</button>
-                    <button onClick={() => onSearch('Điện thoại')} className="px-3 py-1 hover:text-indigo-600 transition text-gray-700 font-medium">📱 Điện thoại</button>
-                    <button onClick={() => onSearch('Gaming')} className="px-3 py-1 hover:text-indigo-600 transition text-gray-700 font-medium">🎮 Gaming</button>
-                    <button onClick={() => onSearch('Mỹ phẩm')} className="px-3 py-1 hover:text-indigo-600 transition text-gray-700 font-medium">🧴 Mỹ phẩm</button>
-                    <button onClick={() => onSearch('Nhà cửa')} className="px-3 py-1 hover:text-indigo-600 transition text-gray-700 font-medium">🏠 Nhà cửa</button>
+            <div className="border-t border-gray-100 bg-gray-50 overflow-x-auto">
+                <div className="mx-auto max-w-7xl w-full px-4 md:px-6 lg:px-8 py-3">
+                    <div className="flex gap-4 whitespace-nowrap text-sm">
+                        <button onClick={() => onSearch('Laptop')} className="px-3 py-1 hover:text-indigo-600 transition text-gray-700 font-medium">💻 Laptop</button>
+                        <button onClick={() => onSearch('Điện thoại')} className="px-3 py-1 hover:text-indigo-600 transition text-gray-700 font-medium">📱 Điện thoại</button>
+                        <button onClick={() => onSearch('Gaming')} className="px-3 py-1 hover:text-indigo-600 transition text-gray-700 font-medium">🎮 Gaming</button>
+                        <button onClick={() => onSearch('Mỹ phẩm')} className="px-3 py-1 hover:text-indigo-600 transition text-gray-700 font-medium">🧴 Mỹ phẩm</button>
+                        <button onClick={() => onSearch('Nhà cửa')} className="px-3 py-1 hover:text-indigo-600 transition text-gray-700 font-medium">🏠 Nhà cửa</button>
+                    </div>
                 </div>
             </div>
         </header>

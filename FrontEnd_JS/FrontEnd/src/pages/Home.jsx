@@ -1,13 +1,16 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 
-import Sidebar from "../layout/Sidebar";
-import Header from "../layout/Header";
-import AIUnderstandingPanel from "../components/AIUnderstandingPanel";
-import AssistOverlay from "../components/AssistOverlay";
-import ProductGrid from "../components/ProductGrid";
-import { useAuth } from "../context/AuthContext";
-import { getProductFromTiki } from "../services/productServices";
+import Sidebar from '../layout/Sidebar';
+import Header from '../layout/Header';
+import AIUnderstandingPanel from '../components/AIUnderstandingPanel';
+import AssistOverlay from '../components/AssistOverlay';
+import ProductGrid from '../components/ProductGrid';
+import HomeCategorySection from '../components/HomeCategorySection';
+import { useAuth } from '../context/AuthContext';
+import { getProductFromTiki } from '../services/productServices';
+import Footer from '../layout/Footer';
+import NewsSection from '../components/NewsSection';
 
 export default function Home() {
     const navigate = useNavigate();
@@ -16,7 +19,7 @@ export default function Home() {
     const [searchMode, setSearchMode] = useState('recommended');
     const [products, setProducts] = useState([]);
     const [isSearching, setIsSearching] = useState(false);
-    const [currentQuery, setCurrentQuery] = useState("");
+    const [currentQuery, setCurrentQuery] = useState('');
     const [clarifyData, setClarifyData] = useState(null);
     const [showAssistOverlay, setShowAssistOverlay] = useState(false);
     const [assistOverlayData, setAssistOverlayData] = useState(null);
@@ -39,7 +42,7 @@ export default function Home() {
         try {
             const response = await getProductFromTiki(query);
             console.log('handleSearch - response:', response);
-            
+
             // Handle overlay assist response
             if (response.ui_mode === 'OVERLAY_ASSIST') {
                 console.log('Setting overlay data and showing overlay');
@@ -47,13 +50,13 @@ export default function Home() {
                 setShowAssistOverlay(true);
                 return;
             }
-            
+
             // Handle clarification response type
             if (response.type === 'clarify') {
                 setClarifyData({
                     question: response.question,
                     options: response.options || [],
-                    understanding: response.understanding
+                    understanding: response.understanding,
                 });
                 setSearchMode('clarify');
                 setProducts([]);
@@ -81,7 +84,7 @@ export default function Home() {
         try {
             const combinedQuery = currentQuery + ' ' + option;
             const response = await getProductFromTiki(combinedQuery);
-            
+
             // Handle overlay assist response
             if (response.ui_mode === 'OVERLAY_ASSIST') {
                 setAssistOverlayData(response);
@@ -89,13 +92,13 @@ export default function Home() {
                 setIsSearching(false);
                 return;
             }
-            
+
             // Handle clarification response type
             if (response.type === 'clarify') {
                 setClarifyData({
                     question: response.question,
                     options: response.options || [],
-                    understanding: response.understanding
+                    understanding: response.understanding,
                 });
                 setSearchMode('clarify');
                 setProducts([]);
@@ -142,13 +145,13 @@ export default function Home() {
                 onSkip={handleAssistSkip}
                 onClose={handleAssistClose}
             />
-            
-            <Header 
-                onMenuToggle={() => {}} 
+
+            <Header
+                onMenuToggle={() => {}}
                 onSearch={handleSearch}
                 isSearching={isSearching}
             />
-            
+
             <div className="flex flex-1 pt-32">
                 <Sidebar
                     currentChatId={null}
@@ -159,49 +162,67 @@ export default function Home() {
                 />
 
                 <main className="flex-1 flex flex-col">
-                    {/* Show recommended products label when on home */}
-                    {searchMode === 'recommended' && (
-                        <div className="px-6 pt-4 pb-2">
-                            <h2 className="text-lg font-semibold text-gray-900">🔥 Sản phẩm nổi bật</h2>
-                        </div>
-                    )}
-
-                    {/* AI Understanding Panel - shown when clarifying */}
-                    {searchMode === 'clarify' && clarifyData && (
-                        <AIUnderstandingPanel
-                            understanding={clarifyData.understanding}
-                            question={clarifyData.question}
-                            options={clarifyData.options}
-                            onSelectOption={handleSelectOption}
-                            isLoading={isSearching}
-                        />
-                    )}
-
-                    {/* Intent Analysis Summary - shown when query is clear */}
-                    {searchMode === 'query' && currentQuery && (
-                        <div className="px-6 pt-4 pb-2">
-                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
-                                <p className="text-sm text-gray-700">
-                                    <span className="font-semibold">✓ Đã hiểu:</span> {currentQuery}
-                                </p>
-                                {/* Show search criteria if available */}
-                                {products && products.length === 0 && (
-                                    <p className="text-xs text-gray-500 mt-2">
-                                        💡 Chúng tôi hiểu bạn tìm kiếm: <span className="font-medium">{currentQuery}</span>
-                                    </p>
-                                )}
+                    <div className="mx-auto max-w-7xl w-full px-4 md:px-6 lg:px-8">
+                        {/* Show recommended products label when on home */}
+                        {searchMode === 'recommended' && <NewsSection />}
+                        {searchMode === 'recommended' && (
+                            <div className="pt-4 pb-2">
+                                <h2 className="text-lg font-semibold text-gray-900">
+                                    🔥 Sản phẩm nổi bật
+                                </h2>
                             </div>
-                        </div>
-                    )}
+                        )}
 
-                    {/* Product Grid - shown when query is clear, clarifying, or recommended */}
-                    <ProductGrid
-                        products={products}
-                        isLoading={isSearching && searchMode === 'query'}
-                        isHidden={false}
-                    />
+                        
+
+                        {/* Category Product List - shown when on recommended view */}
+                        {searchMode === 'recommended' && <HomeCategorySection />}
+
+                        {/* AI Understanding Panel - shown when clarifying */}
+                        {searchMode === 'clarify' && clarifyData && (
+                            <AIUnderstandingPanel
+                                understanding={clarifyData.understanding}
+                                question={clarifyData.question}
+                                options={clarifyData.options}
+                                onSelectOption={handleSelectOption}
+                                isLoading={isSearching}
+                            />
+                        )}
+
+                        {/* Intent Analysis Summary - shown when query is clear */}
+                        {searchMode === 'query' && currentQuery && (
+                            <div className="pt-4 pb-2">
+                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                                    <p className="text-sm text-gray-700">
+                                        <span className="font-semibold">
+                                            ✓ Đã hiểu:
+                                        </span>{' '}
+                                        {currentQuery}
+                                    </p>
+                                    {/* Show search criteria if available */}
+                                    {products && products.length === 0 && (
+                                        <p className="text-xs text-gray-500 mt-2">
+                                            💡 Chúng tôi hiểu bạn tìm kiếm:{' '}
+                                            <span className="font-medium">
+                                                {currentQuery}
+                                            </span>
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Product Grid - shown when query is clear, clarifying, or recommended */}
+                        <ProductGrid
+                            products={products}
+                            isLoading={isSearching && searchMode === 'query'}
+                            isHidden={false}
+                        />
+                    </div>
                 </main>
             </div>
+
+            <Footer />
         </div>
     );
 }
