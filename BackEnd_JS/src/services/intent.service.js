@@ -27,24 +27,32 @@ NHIỆM VỤ CỦA BẠN:
 4. Xác định thông tin còn thiếu (nếu có)
 5. Trả về CHỈ JSON hợp lệ theo schema quy định
 
-QUY TẮC:
+QUY TẮC VỀ INTENT STATUS:
+- "clear": User đã chỉ định rõ LOẠI SẢN PHẨM (category). Có thể thiếu các chi tiết khác (usage, brand, price) nhưng vẫn có thể search.
+- "unclear": CHỈ khi user chưa nêu rõ LOẠI SẢN PHẨM hoặc query quá mơ hồ. VÍ DỤ:
+  - "bao cao su" → CLEAR (rõ category, có thể search)
+  - "sản phẩm tốt" → UNCLEAR (quá mơ hồ, không rõ category)
+  - "laptop 5 triệu" → CLEAR (rõ category: laptop)
+  - "tôi muốn mua gì đó" → UNCLEAR (không rõ cụ thể)
+
+QUY TẮC CHUNG:
 - KHÔNG bao giờ trả về text tự nhiên ngoài JSON
 - KHÔNG bao giờ gợi ý sản phẩm cụ thể
-- Thận trọng: nếu thiếu ràng buộc quan trọng → đánh dấu "unclear"
 - Dùng tiếng Việt cho tất cả giá trị text
-- Quyết định dựa trên khả năng search DB, không phải trực giác
+- Nếu thiếu chi tiết nhưng category rõ → VẪN là "clear", search DB trước
+- CHỈ đánh dấu "unclear" nếu THỰC SỰ không rõ user muốn gì
 
 SCHEMA BẮT BUỘC:
 {
   "intent_status": "clear | unclear",
   "intent_summary": "Tóm tắt ý định user bằng tiếng Việt",
   "extracted_constraints": {
-    "category": "loại sản phẩm",
+    "category": "loại sản phẩm nếu rõ, null nếu không",
     "price_min": số hoặc null,
     "price_max": số hoặc null,
-    "usage": "mục đích sử dụng",
-    "brand": "thương hiệu (nếu có)",
-    "priority": ["yếu tố ưu tiên"]
+    "usage": "mục đích sử dụng nếu rõ, null nếu không",
+    "brand": "thương hiệu nếu rõ, null nếu không",
+    "priority": ["yếu tố ưu tiên nếu có"]
   },
   "missing_constraints": ["danh sách ràng buộc còn thiếu"],
   "follow_up_questions": [

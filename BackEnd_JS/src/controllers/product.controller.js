@@ -7,38 +7,63 @@ import {pool} from '../config/database.js';
 
 export async function search(req, res, next) {
   try {
-    const { q, message, force_refresh } = req.query;
+    const { q, message, force_refresh, skip_clarify } = req.query;
     const userId = req.user?.id;
     
-    logger.info(`[ProductController] Search request: "${q}"`);
+    logger.info(`[ProductController] Search request: "${q}", skip_clarify: ${skip_clarify}`);
     
-    // Step 1: Analyze intent using SLM
+    // Step 1: Analyze intent using SLM (unless skip_clarify is true)
     let intentAnalysis;
-    try {
-      intentAnalysis = await intentService.analyzeIntent(q, [], {});
-      logger.info('[ProductController] Intent analysis:', intentAnalysis);
-    } catch (error) {
-      logger.error('[ProductController] Intent analysis failed:', error);
-      // Continue with basic search if intent analysis fails
+    if (skip_clarify === 'true') {
+      logger.info('[ProductController] Skipping intent analysis');
       intentAnalysis = {
         intent_status: 'clear',
         extracted_constraints: {},
         intent_summary: q
       };
+    } else {
+      try {
+        intentAnalysis = await intentService.analyzeIntent(q, [], {});
+        logger.info('[ProductController] Intent analysis:', intentAnalysis);
+      } catch (error) {
+        logger.error('[ProductController] Intent analysis failed:', error);
+        // Continue with basic search if intent analysis fails
+        intentAnalysis = {
+          intent_status: 'clear',
+          extracted_constraints: {},
+          intent_summary: q
+        };
+      }
     }
 
     // Step 2: Check if intent is clear enough to search
-    if (intentAnalysis.intent_status === 'unclear') {
+    if (intentAnalysis.intent_status === 'unclear' && skip_clarify !== 'true') {
       // Ask for clarification using overlay format
+      const followUpQuestions = intentAnalysis.follow_up_questions || [];
+      const firstQuestion = followUpQuestions[0];
+      
+      // Handle both string array and object array formats
+      let options = [];
+      if (firstQuestion) {
+        if (typeof firstQuestion === 'string') {
+          // If it's a string, use it directly
+          options = [{ key: firstQuestion, label: firstQuestion }];
+        } else if (firstQuestion.options && Array.isArray(firstQuestion.options)) {
+          // If it's an object with options array
+          options = firstQuestion.options.map(opt => ({
+            key: typeof opt === 'string' ? opt : opt.key || opt,
+            label: typeof opt === 'string' ? opt : opt.label || opt
+          }));
+        }
+      }
+      
       return successResponse(res, {
         ui_mode: 'OVERLAY_ASSIST',
-        summary: `✔ Đã hiểu: ${q}`,
-        question: intentAnalysis.follow_up_questions?.[0] || 'Bạn có thể cung cấp thêm thông tin?',
-        options: (intentAnalysis.follow_up_questions || []).map((q, index) => ({
-          key: `option_${index}`,
-          label: q
-        })),
-        allow_skip: true
+        intent_summary: intentAnalysis.intent_summary || `✔ Đã hiểu: ${q}`,
+        question: firstQuestion?.question || firstQuestion || 'Bạn có thể cung cấp thêm thông tin?',
+        options: options,
+        allow_skip: true,
+        follow_up_questions: followUpQuestions
       }, 'Clarification needed');
     }
 

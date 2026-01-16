@@ -46,7 +46,27 @@ export default function Home() {
             // Handle overlay assist response
             if (response.ui_mode === 'OVERLAY_ASSIST') {
                 console.log('Setting overlay data and showing overlay');
-                setAssistOverlayData(response);
+                // Transform follow_up_questions array into the format AssistOverlay expects
+                if (response.follow_up_questions && response.follow_up_questions.length > 0) {
+                    const firstQuestion = response.follow_up_questions[0];
+                    // Handle both string array and object array for options
+                    const processedOptions = firstQuestion.options.map(opt => {
+                        if (typeof opt === 'string') {
+                            return { key: opt, label: opt };
+                        }
+                        return opt; // Already an object with key/label
+                    });
+                    const transformedData = {
+                        summary: response.intent_summary || '',
+                        question: firstQuestion.question || '',
+                        options: processedOptions || [],
+                        allow_skip: true,
+                    };
+                    console.log('Transformed overlay data:', transformedData);
+                    setAssistOverlayData(transformedData);
+                } else {
+                    setAssistOverlayData(response);
+                }
                 setShowAssistOverlay(true);
                 return;
             }
@@ -87,7 +107,27 @@ export default function Home() {
 
             // Handle overlay assist response
             if (response.ui_mode === 'OVERLAY_ASSIST') {
-                setAssistOverlayData(response);
+                // Transform follow_up_questions array into the format AssistOverlay expects
+                if (response.follow_up_questions && response.follow_up_questions.length > 0) {
+                    const firstQuestion = response.follow_up_questions[0];
+                    // Handle both string array and object array for options
+                    const processedOptions = firstQuestion.options.map(opt => {
+                        if (typeof opt === 'string') {
+                            return { key: opt, label: opt };
+                        }
+                        return opt; // Already an object with key/label
+                    });
+                    const transformedData = {
+                        summary: response.intent_summary || '',
+                        question: firstQuestion.question || '',
+                        options: processedOptions || [],
+                        allow_skip: true,
+                    };
+                    console.log('Transformed overlay data:', transformedData);
+                    setAssistOverlayData(transformedData);
+                } else {
+                    setAssistOverlayData(response);
+                }
                 setShowAssistOverlay(true);
                 setIsSearching(false);
                 return;
@@ -125,10 +165,30 @@ export default function Home() {
         await handleSearch(combinedQuery);
     };
 
-    const handleAssistSkip = () => {
+    const handleAssistSkip = async () => {
         setShowAssistOverlay(false);
         setAssistOverlayData(null);
-        setSearchMode('query');
+        setIsSearching(true);
+        
+        try {
+            // Make search request with skip_clarify parameter
+            const response = await fetch(`http://localhost:3000/api/v1/products/search?q=${encodeURIComponent(currentQuery)}&skip_clarify=true`);
+            const jsonResponse = await response.json();
+            const data = jsonResponse?.data || { type: 'query', products: [] };
+            
+            if (data.type === 'query' || !data.ui_mode) {
+                setProducts(data.products || []);
+                setSearchMode('query');
+                setClarifyData(null);
+            }
+        } catch (error) {
+            console.error('Search error:', error);
+            setProducts([]);
+            setSearchMode('query');
+            setClarifyData(null);
+        } finally {
+            setIsSearching(false);
+        }
     };
 
     const handleAssistClose = () => {

@@ -54,6 +54,8 @@ class ProductService {
    */
   async searchDatabase(searchQuery, filters) {
     try {
+      logger.info(`[ProductService] searchDatabase called with query: "${searchQuery}", filters:`, filters);
+      
       // Build SQL query
       let sql = `
         SELECT 
@@ -72,27 +74,36 @@ class ProductService {
         OR description ILIKE $${paramCount}
         OR brand ILIKE $${paramCount}
       )`;
-      params.push(`%${searchQuery}%`);
+      const searchPattern = `%${searchQuery}%`;
+      params.push(searchPattern);
       paramCount++;
 
+      logger.info(`[ProductService] Database search pattern: "${searchPattern}"`);
+
       // Price range filter
-      if (filters.price_min !== undefined) {
+      if (filters.price_min !== undefined && filters.price_min !== null) {
         sql += ` AND price >= $${paramCount}`;
         params.push(filters.price_min);
         paramCount++;
       }
 
-      if (filters.price_max !== undefined) {
+      if (filters.price_max !== undefined && filters.price_max !== null) {
         sql += ` AND price <= $${paramCount}`;
         params.push(filters.price_max);
         paramCount++;
       }
 
-      // Category filter
+      // Category filter - ONLY if it's a valid integer (actual category ID)
       if (filters.category) {
-        sql += ` AND category_id = $${paramCount}`;
-        params.push(filters.category);
-        paramCount++;
+        const categoryId = parseInt(filters.category, 10);
+        if (!isNaN(categoryId) && categoryId > 0) {
+          sql += ` AND category_id = $${paramCount}`;
+          params.push(categoryId);
+          paramCount++;
+          logger.info(`[ProductService] Applied category filter: ${categoryId}`);
+        } else {
+          logger.warn(`[ProductService] Invalid category ID, skipping filter: "${filters.category}"`);
+        }
       }
 
       // Brand filter
@@ -105,7 +116,10 @@ class ProductService {
       // Order and limit
       sql += ` ORDER BY popularity_score DESC, rating_avg DESC LIMIT 100`;
 
+      logger.info(`[ProductService] Executing query with params:`, params);
       const result = await pool.query(sql, params);
+      
+      logger.info(`[ProductService] Database search returned ${result.rows.length} results`);
       
       return result.rows.map(row => ({
         id: row.id,
