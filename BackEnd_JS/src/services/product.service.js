@@ -68,17 +68,20 @@ class ProductService {
       const params = [];
       let paramCount = 1;
 
-      // Text search using full text search or LIKE
+      // Text search: Match whole words using word boundaries (\m \M)
+      // This prevents "hoa" from matching "khoa", but will match "hoa" as a standalone word
+      // Pattern: \m{search}\M means word boundaries
+      const searchPattern = `\\m${searchQuery}\\M`;
+      
       sql += ` AND (
-        name ILIKE $${paramCount} 
-        OR description ILIKE $${paramCount}
-        OR brand ILIKE $${paramCount}
+        name ~* $${paramCount}
+        OR description ~* $${paramCount}
+        OR brand ~* $${paramCount}
       )`;
-      const searchPattern = `%${searchQuery}%`;
       params.push(searchPattern);
       paramCount++;
 
-      logger.info(`[ProductService] Database search pattern: "${searchPattern}"`);
+      logger.info(`[ProductService] Database search pattern (regex word boundary): "${searchPattern}"`);
 
       // Price range filter
       if (filters.price_min !== undefined && filters.price_min !== null) {

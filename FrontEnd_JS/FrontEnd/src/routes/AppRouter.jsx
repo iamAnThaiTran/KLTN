@@ -1,4 +1,5 @@
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
+import ShoeFinder from "../components/ShoeFinder";
 import Home from "../pages/Home";
 import ProductDetailPage from "../common/ProductPageDetail";
 import LoginPage from "../pages/LoginPage";
@@ -46,9 +47,10 @@ export default function AppRouter() {
     return (
         <BrowserRouter>
             <Routes>
+                <Route path="/" element={<ShoeFinder />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/register" element={<RegisterPage />} />
-                <Route path="/" element={<Home />} />
+                <Route path="/home" element={<Home />} />
                 <Route path="/product/:title" element={<ProductDetailPage />} />
                 <Route 
                     path="/admin/dashboard" 

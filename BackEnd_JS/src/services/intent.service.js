@@ -41,6 +41,8 @@ QUY TẮC CHUNG:
 - Dùng tiếng Việt cho tất cả giá trị text
 - Nếu thiếu chi tiết nhưng category rõ → VẪN là "clear", search DB trước
 - CHỈ đánh dấu "unclear" nếu THỰC SỰ không rõ user muốn gì
+- KHI intent = "unclear": CHỈ TRẢ VỀ MỘT (1) follow_up_question duy nhất, là câu hỏi QUAN TRỌNG NHẤT
+- LUÔN INCLUDE "options" array với ít nhất 2-3 tùy chọn cụ thể (không để trống!)
 
 SCHEMA BẮT BUỘC:
 {
@@ -57,13 +59,18 @@ SCHEMA BẮT BUỘC:
   "missing_constraints": ["danh sách ràng buộc còn thiếu"],
   "follow_up_questions": [
     {
-      "key": "usage",
-      "question": "Câu hỏi làm rõ",
-      "options": ["tùy chọn 1", "tùy chọn 2"]
+      "key": "category_or_usage_or_price",
+      "question": "Một câu hỏi LÀM RÕ duy nhất (QUAN TRỌNG NHẤT)",
+      "options": ["tùy chọn 1", "tùy chọn 2", "tùy chọn 3"]
     }
   ],
   "ui_state": "SEARCH_RESULT | INTENT_CLARIFICATION"
 }
+
+GHI CHÚ QUAN TRỌNG:
+- follow_up_questions là ARRAY nhưng chỉ chứa 1 phần tử (1 câu hỏi duy nhất)
+- Chọn câu hỏi QUAN TRỌNG NHẤT để hỏi user (thường là category nếu chưa rõ)
+- options phải là array của strings, KHÔNG ĐƯỢC TRỐNG
 `.trim();
   }
 
@@ -207,6 +214,31 @@ Hãy phân tích và trả về JSON theo schema đã định.
         : [],
       ui_state: result.ui_state || 'INTENT_CLARIFICATION'
     };
+
+    // Keep ONLY the first follow-up question (most important)
+    if (validated.follow_up_questions.length > 1) {
+      logger.info(`[IntentService] Keeping only first question (had ${validated.follow_up_questions.length})`);
+      validated.follow_up_questions = [validated.follow_up_questions[0]];
+    }
+
+    // Ensure options are always populated for unclear intent
+    if (validated.intent_status === 'unclear' && validated.follow_up_questions.length > 0) {
+      validated.follow_up_questions = validated.follow_up_questions.map(q => {
+        // If options is empty, provide smart defaults based on the key
+        if (!Array.isArray(q.options) || q.options.length === 0) {
+          logger.warn(`[IntentService] Empty options for question "${q.key}", providing defaults`);
+          const defaults = {
+            category: ['điện thoại', 'laptop', 'tai nghe', 'quần áo', 'đồ chơi', 'khác'],
+            usage: ['sức khỏe', 'trò chơi', 'công việc', 'học tập', 'giải trí'],
+            price_min: ['dưới 100k', '100k-500k', '500k-1M', 'trên 1M'],
+            price_max: ['dưới 100k', '100k-500k', '500k-1M', 'trên 1M'],
+            brand: ['không quan tâm', 'nổi tiếng', 'giá rẻ', 'chất lượng cao']
+          };
+          q.options = defaults[q.key] || ['có', 'không'];
+        }
+        return q;
+      });
+    }
 
     // Auto-correct ui_state based on intent_status
     if (validated.intent_status === 'clear' && validated.ui_state !== 'SEARCH_RESULT') {
