@@ -24,6 +24,11 @@ GIAY_SCHEMA = CategorySchema(
     name="giày",
     keywords=["giày", "giầy", "shoe", "sneaker", "sandal", "dép"],
     attributes={
+        "brand": AttributeConstraint(
+            type="enum",
+            values=["nike", "adidas", "puma", "reebok", "asics", "new balance", "converse", "vans", "on", "saucony"],
+            required=False
+        ),
         "gender": AttributeConstraint(
             type="enum",
             values=["nam", "nữ", "unisex"],
@@ -35,7 +40,7 @@ GIAY_SCHEMA = CategorySchema(
                 "thể thao", "chạy bộ", "sneaker", 
                 "tây", "sandal", "dép", "boot"
             ],
-            required=True  # BẮT BUỘC phải có
+            required=False  # Không bắt buộc - user có thể bỏ qua
         ),
         "muc_dich": AttributeConstraint(
             type="enum",

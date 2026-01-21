@@ -32,8 +32,11 @@ class ProductMatcher:
         schema = get_schema(expected_category)
         matched = []
         
-        for product in products:
+        for idx, product in enumerate(products):
             result = self._validate_product(product, schema, user_attributes)
+            
+            print(f"DEBUG Match [{idx}]: {product.get('name', 'N/A')[:50]}")
+            print(f"  Valid: {result['is_valid']}, Score: {result['score']}, Reasons: {result['reasons']}")
             
             if result["is_valid"]:
                 product["match_score"] = result["score"]
@@ -70,6 +73,8 @@ class ProductMatcher:
             # Thiếu category → dùng LLM classify
             product_category = self._llm_classify_product(product, schema.name)
         
+        print(f"    Category check: inferred='{product_category}', expected='{schema.name}'")
+        
         if product_category != schema.name:
             # Sai category
             return {
@@ -78,11 +83,15 @@ class ProductMatcher:
                 "reasons": [f"Không phải {schema.name}"]
             }
         
+        score += 10  # Base score for correct category
+        
         # Step 2: So sánh attributes
         for attr_name, user_value in user_attributes.items():
             product_value = self._extract_product_attribute(
                 product, attr_name
             )
+            
+            print(f"    Attr {attr_name}: user='{user_value}', product='{product_value}'")
             
             if product_value == user_value:
                 score += 20
@@ -98,6 +107,15 @@ class ProductMatcher:
         
         # Step 3: Bonus cho completeness
         completeness = self._calculate_completeness(product, schema)
+        score += completeness * 10
+        
+        print(f"    Final score: {score}")
+        
+        return {
+            "is_valid": score > 0,
+            "score": max(0, min(100, score)),  # Clamp 0-100
+            "reasons": reasons
+        }
         score += completeness * 10
         
         return {
@@ -142,26 +160,89 @@ Respond ONLY with "yes" or "no".
         Extract attribute value từ product data
         Tùy thuộc vào crawler của bạn trả về gì
         """
-        # Giả sử product có structure:
-        # {"name": "", "price": 0, "attributes": {"size": "42", ...}}
-        
-        if "attributes" in product:
+        # Ưu tiên: attributes dict (crawl detail)
+        if "attributes" in product and product["attributes"]:
             return product["attributes"].get(attr_name)
+        
+        # Nếu tìm brand, lấy trực tiếp từ product["brand"]
+        if attr_name == "brand" and "brand" in product:
+            return product["brand"]
         
         # Fallback: parse từ name/description
         return self._parse_from_text(product, attr_name)
     
     def _parse_from_text(self, product: Dict[str, Any], attr_name: str):
         """Parse attribute từ text (name, description)"""
-        # Simple heuristics
+        import re
+        import unicodedata
+        
+        def normalize(s: str) -> str:
+            s = unicodedata.normalize('NFD', s)
+            s = ''.join(c for c in s if unicodedata.category(c) != 'Mn')
+            return s.lower().strip()
+        
         text = f"{product.get('name', '')} {product.get('description', '')}".lower()
+        text_normalized = normalize(text)
         
         # Ví dụ cho size
         if attr_name == "size":
-            import re
-            match = re.search(r'size\s*(\d+)', text)
-            if match:
-                return match.group(1)
+            # Tìm size như "size 42", "42", "L", "XL", v.v.
+            patterns = [
+                r'size\s*(\d+)',  # size 42
+                r'(\d{2,3})',      # 42
+                r'\b([SML]|XL|XXL)\b'  # S, M, L, XL, XXL
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, text)
+                if match:
+                    return match.group(1)
+        
+        # Ví dụ cho loai (type) - bột, nước, áo, quần, etc.
+        if attr_name in ["loai", "type"]:
+            types = {
+                "bột": "bot",
+                "nước": "nuoc",
+                "chạy bộ": "chay bo",
+                "bóng chuyền": "bong chuyen",
+                "cầu lông": "cau long",
+                "tennis": "tennis",
+                "bóng rổ": "bong ro",
+                "đá banh": "da banh"
+            }
+            for type_vn, type_en in types.items():
+                norm_vn = normalize(type_vn)
+                if norm_vn in text_normalized or type_en in text_normalized:
+                    return type_vn
+        
+        # Ví dụ cho color/mau_sac
+        if attr_name in ["mau_sac", "color", "colors"]:
+            colors = {
+                "đen": "den",
+                "trắng": "trang",
+                "đỏ": "do",
+                "xanh": "xanh",
+                "vàng": "vang",
+                "hồng": "hong",
+                "nâu": "nau",
+                "xám": "xam"
+            }
+            for color_vn, color_en in colors.items():
+                norm_vn = normalize(color_vn)
+                if norm_vn in text_normalized or color_en in text_normalized:
+                    return color_vn
+        
+        # Material/chất liệu
+        if attr_name in ["chat_lieu", "material", "materials"]:
+            materials = {
+                "da": "leather",
+                "vải": "fabric",
+                "cotton": "cotton",
+                "leather": "da"
+            }
+            for mat_vn, mat_en in materials.items():
+                norm_vn = normalize(mat_vn)
+                if norm_vn in text_normalized or mat_en in text_normalized:
+                    return mat_vn
         
         return None
     

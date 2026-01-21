@@ -60,7 +60,7 @@ class IntentDetector:
         
         # Method 1: Keyword matching (fastest)
         result = self._keyword_match(user_input)
-        if result["confidence"] > 0.9:
+        if result["confidence"] >= 0.9:
             return result
         
         # Method 2: Sentence embedding similarity (fast + accurate)

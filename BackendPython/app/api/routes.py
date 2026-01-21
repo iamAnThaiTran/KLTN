@@ -67,7 +67,7 @@ class MockCrawler:
             }
         ]
 
-orchestrator = RecommendationOrchestrator(MockCrawler())
+orchestrator = RecommendationOrchestrator()
 
 # ===== ENDPOINTS =====
 
@@ -92,7 +92,7 @@ async def process_query(request: QueryRequest):
     conversation_state = sessions.get(conversation_id)
     
     # Process
-    result = orchestrator.process_query(
+    result = await orchestrator.process_query(
         user_input=request.user_input,
         conversation_state=conversation_state
     )
