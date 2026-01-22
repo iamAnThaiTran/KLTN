@@ -29,6 +29,10 @@ GIAY_SCHEMA = CategorySchema(
             values=["nike", "adidas", "puma", "reebok", "asics", "new balance", "converse", "vans", "on", "saucony"],
             required=False
         ),
+        "dong": AttributeConstraint(
+            type="text",
+            required=False
+        ),
         "gender": AttributeConstraint(
             type="enum",
             values=["nam", "nữ", "unisex"],

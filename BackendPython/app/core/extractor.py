@@ -58,6 +58,21 @@ class AttributeExtractor:
         """Extract một attribute bằng rules"""
         text = text.lower()
         
+        if attr_name == "dong":
+            # Trích xuất dòng sản phẩm (Air Force 1, Pegasus, etc.)
+            patterns = [
+                r'(?:dòng|model|series|line)\s+([a-z0-9\s]+?)(?:\s+size|\s+giá|\s+màu|$)',
+                r'(air force one|air force 1|af1|air force)',
+                r'(pegasus|revolution|cortez|blazer)',
+                r'(jordan|max|zoom)',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, text)
+                if match:
+                    value = match.group(1).strip()
+                    return value, 0.9
+            return None, 0.0
+        
         if constraint.type == "enum":
             # Tìm value trong enum values
             for value in constraint.values:
@@ -81,6 +96,10 @@ class AttributeExtractor:
                         elif "k" in text or "nghìn" in text:
                             value *= 1000
                         return value, 0.8
+        
+        elif constraint.type == "text":
+            # Cho text type, dùng LLM
+            return None, 0.0
         
         return None, 0.0
     

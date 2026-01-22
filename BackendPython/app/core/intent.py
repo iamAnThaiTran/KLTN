@@ -1,39 +1,49 @@
-# app/core/intent.py
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import re
 from .schema import get_all_categories, get_schema
 
-class IntentDetector:
-    """Phát hiện category từ user input"""
+class EnhancedIntentDetector:
+    """
+    Phát hiện intent phức tạp:
+    - Category switching (đổi sản phẩm)
+    - Attribute refinement (chỉnh sửa tiêu chí)
+    - Attribute conflict (tiêu chí mâu thuẫn)
+    """
     
     def __init__(self):
         self.categories = get_all_categories()
         self._init_embedding_model()
+        
+        # Từ khóa chỉ sự thay đổi ý định
+        self.change_signals = [
+            "thôi", "khỏi", "không", "đổi", "thay", "chuyển",
+            "hoặc", "hay là", "còn", "thế còn", "giờ",
+            "instead", "or", "how about", "what about"
+        ]
+        
+        # Từ khóa chỉ refinement (cùng category)
+        self.refinement_signals = [
+            "thêm", "và", "kèm", "có", "với", "thay vì",
+            "also", "with", "plus", "and"
+        ]
     
     def _init_embedding_model(self):
-        """Initialize sentence embedding model (lazy loading)"""
         self.embedding_model = None
         self.category_embeddings = None
     
     def _load_embedding_model(self):
-        """Load model khi cần (không load lúc init)"""
         if self.embedding_model is None:
             try:
                 from sentence_transformers import SentenceTransformer
-                
-                # Model nhẹ, support tiếng Việt
                 self.embedding_model = SentenceTransformer(
                     'paraphrase-multilingual-MiniLM-L12-v2'
                 )
                 
-                # Pre-encode category descriptions
                 from .schema import get_schema
                 category_texts = {}
-                
                 for cat in self.categories:
                     schema = get_schema(cat)
-                    # Kết hợp tên + keywords
                     category_texts[cat] = f"{cat} {' '.join(schema.keywords)}"
                 
                 self.category_embeddings = {
@@ -41,40 +51,129 @@ class IntentDetector:
                     for cat, text in category_texts.items()
                 }
             except ImportError:
-                print("Warning: sentence-transformers not installed. Falling back to keyword matching.")
                 self.embedding_model = "not_available"
     
-    def detect(self, user_input: str) -> Dict[str, Any]:
+    def detect_intent_change(
+        self,
+        user_input: str,
+        current_state: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
-        Detect category từ user input
+        Phát hiện loại thay đổi intent:
         
         Returns:
             {
-                "has_category": bool,
-                "category": str hoặc None,
+                "intent_type": "new_search" | "refine" | "switch_category" | "switch_attribute",
+                "new_category": str | None,
+                "should_reset": bool,
                 "confidence": float,
-                "method": "keyword" | "embedding" | "llm"
+                "reason": str  # Giải thích tại sao
             }
         """
+        user_input_lower = user_input.lower().strip()
+        
+        # Case 1: Chưa có category → new search
+        if not current_state.get("has_category"):
+            category_result = self._detect_category(user_input)
+            return {
+                "intent_type": "new_search",
+                "new_category": category_result.get("category"),
+                "should_reset": True,
+                "confidence": category_result.get("confidence", 0.0),
+                "reason": "First query in conversation"
+            }
+        
+        current_category = current_state.get("category")
+        
+        # Case 2: Detect change signals → có khả năng đổi intent
+        has_change_signal = any(signal in user_input_lower for signal in self.change_signals)
+        
+        # Case 3: Detect category mention
+        category_result = self._detect_category(user_input)
+        mentioned_category = category_result.get("category")
+        
+        # DECISION TREE
+        
+        # Scenario A: Explicit category change (mention category khác)
+        if mentioned_category and mentioned_category != current_category:
+            return {
+                "intent_type": "switch_category",
+                "new_category": mentioned_category,
+                "should_reset": True,
+                "confidence": category_result["confidence"],
+                "reason": f"User mentioned new category: '{mentioned_category}'"
+            }
+        
+        # Scenario B: Change signal + no category mention
+        # → Có thể là đổi attribute trong cùng category
+        if has_change_signal and not mentioned_category:
+            # Check xem có extract được attributes mới không
+            from .extractor import AttributeExtractor
+            extractor = AttributeExtractor()
+            new_attrs = extractor.extract(user_input, current_category)
+            
+            if new_attrs["extracted"]:
+                # Có attributes mới → đổi attribute
+                conflicting = self._check_attribute_conflict(
+                    current_state.get("extracted", {}),
+                    new_attrs["extracted"]
+                )
+                
+                if conflicting:
+                    return {
+                        "intent_type": "switch_attribute",
+                        "new_category": current_category,  # Same category
+                        "should_reset": False,  # Không reset toàn bộ
+                        "should_replace_attributes": True,
+                        "conflicting_attributes": conflicting,
+                        "confidence": 0.8,
+                        "reason": f"User wants to change attributes: {conflicting}"
+                    }
+        
+        # Scenario C: Refinement (thêm điều kiện)
+        has_refinement_signal = any(signal in user_input_lower for signal in self.refinement_signals)
+        
+        if has_refinement_signal or (not has_change_signal and not mentioned_category):
+            # Đang refine trong cùng category
+            return {
+                "intent_type": "refine",
+                "new_category": current_category,
+                "should_reset": False,
+                "confidence": 0.7,
+                "reason": "User is refining current search"
+            }
+        
+        # Default: tiếp tục search hiện tại
+        return {
+            "intent_type": "refine",
+            "new_category": current_category,
+            "should_reset": False,
+            "confidence": 0.5,
+            "reason": "Continuing current search"
+        }
+    
+    def _detect_category(self, user_input: str) -> Dict[str, Any]:
+        """Detect category từ input (giống code cũ)"""
         user_input = user_input.lower().strip()
         
-        # Method 1: Keyword matching (fastest)
+        # Keyword matching
         result = self._keyword_match(user_input)
         if result["confidence"] >= 0.9:
             return result
         
-        # Method 2: Sentence embedding similarity (fast + accurate)
+        # Embedding
         result = self._embedding_classify(user_input)
         if result["confidence"] > 0.7:
             return result
         
-        # Method 3: Zero-shot LLM (slowest, most expensive, last resort)
-        return self._llm_classify(user_input)
+        return {
+            "has_category": False,
+            "category": None,
+            "confidence": 0.0
+        }
     
     def _keyword_match(self, text: str) -> Dict[str, Any]:
-        """Match bằng keywords trong schema"""
         matches = []
-        
         for cat_name in self.categories:
             schema = get_schema(cat_name)
             for keyword in schema.keywords:
@@ -82,44 +181,28 @@ class IntentDetector:
                     matches.append({
                         "category": cat_name,
                         "keyword": keyword,
-                        "confidence": 0.9  # Keyword match có độ tin cậy cao
+                        "confidence": 0.9
                     })
         
         if not matches:
-            return {
-                "has_category": False,
-                "category": None,
-                "confidence": 0.0,
-                "method": "keyword"
-            }
+            return {"has_category": False, "category": None, "confidence": 0.0}
         
-        # Nếu có nhiều match, chọn cái có keyword dài nhất (cụ thể nhất)
         best_match = max(matches, key=lambda x: len(x["keyword"]))
-        
         return {
             "has_category": True,
             "category": best_match["category"],
-            "confidence": best_match["confidence"],
-            "method": "keyword"
+            "confidence": best_match["confidence"]
         }
     
     def _embedding_classify(self, text: str) -> Dict[str, Any]:
-        """
-        Classify bằng sentence embeddings
-        Nhanh hơn LLM, chính xác hơn keyword
-        """
         self._load_embedding_model()
         
         if self.embedding_model == "not_available":
-            # Fallback to keyword
-            return {"has_category": False, "category": None, "confidence": 0.0, "method": "embedding"}
+            return {"has_category": False, "category": None, "confidence": 0.0}
         
         from sentence_transformers import util
-        
-        # Encode query
         query_emb = self.embedding_model.encode(text, convert_to_tensor=True)
         
-        # Calculate similarities
         scores = {}
         for cat, cat_emb in self.category_embeddings.items():
             similarity = util.cos_sim(query_emb, cat_emb).item()
@@ -128,65 +211,30 @@ class IntentDetector:
         best_cat = max(scores, key=scores.get)
         best_score = scores[best_cat]
         
-        # Threshold
-        if best_score < 0.4:  # Too low confidence
-            return {
-                "has_category": False,
-                "category": None,
-                "confidence": best_score,
-                "method": "embedding"
-            }
+        if best_score < 0.4:
+            return {"has_category": False, "category": None, "confidence": best_score}
         
         return {
             "has_category": True,
             "category": best_cat,
-            "confidence": best_score,
-            "method": "embedding"
+            "confidence": best_score
         }
     
-    def _llm_classify(self, text: str) -> Dict[str, Any]:
+    def _check_attribute_conflict(
+        self,
+        old_attrs: Dict[str, Any],
+        new_attrs: Dict[str, Any]
+    ) -> List[str]:
         """
-        Zero-shot classification với LLM
-        Chỉ dùng khi keyword matching thất bại
+        Kiểm tra attributes có conflict không
+        
+        Ví dụ:
+        - old: {"loai": "sneaker"}
+        - new: {"loai": "chạy bộ"}
+        → conflict vì cùng attribute nhưng khác value
         """
-        from .llm_utils import call_llm
-        
-        prompt = f"""Classify the user query into ONE of these categories:
-{', '.join(self.categories)}
-
-If the query doesn't match any category, respond with "UNKNOWN".
-
-Query: "{text}"
-
-Respond ONLY with the category name (lowercase) or "UNKNOWN".
-"""
-        
-        response = call_llm(prompt, max_tokens=10)
-        category = response.strip().lower()
-        
-        if category == "unknown" or category not in self.categories:
-            return {
-                "has_category": False,
-                "category": None,
-                "confidence": 0.0,
-                "method": "llm"
-            }
-        
-        return {
-            "has_category": True,
-            "category": category,
-            "confidence": 0.7,  # LLM confidence thấp hơn keyword
-            "method": "llm"
-        }
-
-# ============================================
-# HELPER: Phát hiện ý định mua quà
-# ============================================
-def is_gift_intent(text: str) -> bool:
-    """Kiểm tra có phải ý định mua quà không"""
-    gift_keywords = [
-        "quà", "tặng", "gift", "biếu", "sinh nhật",
-        "kỷ niệm", "valentine", "noel", "tết"
-    ]
-    text = text.lower()
-    return any(kw in text for kw in gift_keywords)
+        conflicts = []
+        for attr, new_value in new_attrs.items():
+            if attr in old_attrs and old_attrs[attr] != new_value:
+                conflicts.append(attr)
+        return conflicts

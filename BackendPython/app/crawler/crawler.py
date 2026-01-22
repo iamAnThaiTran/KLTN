@@ -142,6 +142,7 @@ class TikiCrawler:
         """
         Build search query tối ưu
         - Nếu user mention brand → thêm vào query
+        - Nếu user mention dong (dòng/model) → thêm vào query
         - Nếu user mention loai → thêm vào query
         - Category luôn có
         """
@@ -150,6 +151,10 @@ class TikiCrawler:
         # Thêm brand nếu user specify (ví dụ: "giày nike")
         if "brand" in attributes and attributes["brand"]:
             query_parts.append(str(attributes["brand"]))
+        
+        # Thêm dong/model nếu có (ví dụ: "Air Force 1", "Pegasus")
+        if "dong" in attributes and attributes["dong"]:
+            query_parts.append(str(attributes["dong"]))
         
         # Thêm loai/type nếu có (ví dụ: "giày chạy bộ")
         if "loai" in attributes and attributes["loai"]:

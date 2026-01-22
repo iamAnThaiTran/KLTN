@@ -2,7 +2,6 @@
 
 from typing import Dict, Any, List
 from .schema import get_schema, get_all_categories
-from .intent import is_gift_intent
 
 class DialogueManager:
     """Quản lý hội thoại với user khi thiếu thông tin"""
@@ -50,10 +49,11 @@ class DialogueManager:
         """Hỏi user muốn mua gì (khi không detect được category)"""
         
         # Special case: Ý định mua quà
-        if is_gift_intent(user_input):
-            question = "Bạn muốn mua quà gì? Chọn một loại sản phẩm:"
-        else:
-            question = "Bạn đang tìm loại sản phẩm nào?"
+        # if is_gift_intent(user_input):
+        #     question = "Bạn muốn mua quà gì? Chọn một loại sản phẩm:"
+        # else:
+            
+        question = "Bạn đang tìm loại sản phẩm nào?"
         
         categories = get_all_categories()
         
