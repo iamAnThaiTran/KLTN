@@ -40,7 +40,8 @@ class RecommendationOrchestrator:
                 "category": None,
                 "extracted": {},
                 "missing_required": [],
-                "search_history": []  # Track lịch sử search
+                "search_history": [],  # Track lịch sử search
+                "attributes_asked": []  # Track những attributes đã hỏi
             }
         
         # ===== STEP 1: DETECT INTENT CHANGE =====
@@ -136,20 +137,54 @@ class RecommendationOrchestrator:
             }
         
         schema = get_schema(conversation_state["category"])
-        conversation_state["missing_required"] = [
+        
+        # ===== IDENTIFY CRITICAL ATTRIBUTES =====
+        # Critical attributes là những attributes quan trọng để phân biệt sản phẩm
+        # - Các attribute required
+        # - Hoặc attribute kiểu enum có tác động lớn (như "loai")
+        critical_attrs = [
             attr for attr, constraint in schema.attributes.items()
-            if constraint.required and attr not in conversation_state["extracted"]
+            if constraint.required or attr == "loai"
         ]
         
-        if conversation_state["missing_required"]:
-            question = self.dialogue_manager.generate_question(conversation_state)
+        # ===== GET ALL ENUM ATTRIBUTES (để hỏi theo thứ tự ưu tiên) =====
+        enum_attrs = [
+            attr for attr, constraint in schema.attributes.items()
+            if constraint.type == "enum"
+        ]
+        
+        # ===== PRIORITY ORDER: critical trước, rồi đến enum khác =====
+        all_attrs_to_ask = critical_attrs + [a for a in enum_attrs if a not in critical_attrs]
+        
+        # ===== CHECK: Tìm attribute chưa được hỏi và chưa có value =====
+        attrs_not_asked = [
+            attr for attr in all_attrs_to_ask
+            if attr not in conversation_state.get("attributes_asked", [])
+            and attr not in conversation_state["extracted"]
+        ]
+        
+        if attrs_not_asked:
+            # Hỏi attribute tiếp theo
+            next_attr = attrs_not_asked[0]
+            conversation_state["attributes_asked"].append(next_attr)
+            
+            question = self.dialogue_manager.generate_question({
+                "has_category": True,
+                "category": conversation_state["category"],
+                "extracted": conversation_state["extracted"],
+                "missing_required": [next_attr],  # Hỏi về attribute này
+                "user_input": user_input
+            })
             return {
                 "status": "need_info",
                 "question": question["question"],
                 "options": question["options"],
                 "attribute_name": question.get("attribute_name"),
+                "progress": f"{len(conversation_state['extracted'])}/{len(all_attrs_to_ask)} thuộc tính",  # Progress indicator
                 "state": conversation_state
             }
+        
+        # ===== Nếu đã hỏi đủ attributes, tiến hành crawl =====
         
         # ===== STEP 5: CRAWL & MATCH & RANK =====
         products = await self.crawler.crawl(
@@ -203,6 +238,27 @@ class RecommendationOrchestrator:
         if "title" in product and "name" not in product:
             product["name"] = product["title"]
         return product
-    """
-    Main orchestrator - điều phối toàn bộ pipeline
-    """
+    
+    def update_state(self, conversation_state: Dict[str, Any], response: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Update conversation state based on user response
+        
+        response = {
+            "question_type": "category" | "attribute",
+            "value": str,
+            "attribute_name": str (optional, for attribute questions)
+        }
+        """
+        if response["question_type"] == "category":
+            # User chọn category
+            conversation_state["has_category"] = True
+            conversation_state["category"] = response["value"]
+            conversation_state["extracted"] = {}
+            conversation_state["missing_required"] = []
+        
+        elif response["question_type"] == "attribute":
+            # User cung cấp attribute value
+            if response.get("attribute_name"):
+                conversation_state["extracted"][response["attribute_name"]] = response["value"]
+        
+        return conversation_state

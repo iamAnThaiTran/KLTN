@@ -44,7 +44,7 @@ GIAY_SCHEMA = CategorySchema(
                 "thể thao", "chạy bộ", "sneaker", 
                 "tây", "sandal", "dép", "boot"
             ],
-            required=False  # Không bắt buộc - user có thể bỏ qua
+            required=False  # Không bắt buộc -  có thể bỏ qua
         ),
         "muc_dich": AttributeConstraint(
             type="enum",

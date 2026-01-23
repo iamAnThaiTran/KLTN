@@ -57,14 +57,16 @@ class ProductMatcher:
         """
         Validate một product
         
-        Xử lý:
-        1. Product thiếu category → dùng heuristics hoặc LLM
-        2. Product có category sai → filter out
-        3. Product có thừa/thiếu attributes → tính score
+        Logic:
+        1. Category sai → loại bỏ (is_valid = False)
+        2. Attribute missing → CHẤP NHẬN (vẫn match, score cao)
+        3. Attribute có nhưng MISMATCH → giảm điểm (nhưng không loại bỏ)
         """
         
-        score = 0
+        score = 100  # Start with 100
         reasons = []
+        is_valid = True
+        mismatch_count = 0
         
         # Step 1: Kiểm tra category
         product_category = self._infer_category(product, schema)
@@ -76,14 +78,12 @@ class ProductMatcher:
         print(f"    Category check: inferred='{product_category}', expected='{schema.name}'")
         
         if product_category != schema.name:
-            # Sai category
+            # Sai category → loại bỏ
             return {
                 "is_valid": False,
                 "score": 0,
                 "reasons": [f"Không phải {schema.name}"]
             }
-        
-        score += 10  # Base score for correct category
         
         # Step 2: So sánh attributes
         for attr_name, user_value in user_attributes.items():
@@ -93,33 +93,63 @@ class ProductMatcher:
             
             print(f"    Attr {attr_name}: user='{user_value}', product='{product_value}'")
             
-            if product_value == user_value:
-                score += 20
-                reasons.append(f"✓ {attr_name}: {user_value}")
-            elif product_value:
-                score += 5  # Có attribute nhưng không match
+            # Check if user_value is a range (dict with min/max)
+            is_range = isinstance(user_value, dict) and "min" in user_value and "max" in user_value
+            
+            if is_range:
+                # Range matching
+                min_val = user_value["min"]
+                max_val = user_value["max"]
+                
+                if product_value is None or product_value == "":
+                    # Missing attribute
+                    score -= 2
+                    reasons.append(f"⊘ {attr_name}: không có thông tin")
+                elif isinstance(product_value, (int, float)):
+                    if min_val <= product_value <= max_val:
+                        # Within range
+                        reasons.append(f"✓ {attr_name}: {product_value} (trong {min_val}-{max_val})")
+                    else:
+                        # Outside range
+                        score -= 30
+                        mismatch_count += 1
+                        reasons.append(f"✗ {attr_name}: {product_value} (mong đợi {min_val}-{max_val})")
+                else:
+                    # Cannot compare
+                    score -= 2
+                    reasons.append(f"⊘ {attr_name}: không thể so sánh")
             else:
-                # Thiếu attribute → không trừ điểm nếu là optional
-                constraint = schema.attributes.get(attr_name)
-                if constraint and constraint.required:
-                    score -= 10
-                    reasons.append(f"✗ Thiếu {attr_name}")
+                # Exact matching
+                if product_value == user_value:
+                    # Match tuyệt đối
+                    reasons.append(f"✓ {attr_name}: {user_value}")
+                elif product_value is None or product_value == "":
+                    # Missing attribute
+                    score -= 2
+                    reasons.append(f"⊘ {attr_name}: không có thông tin")
+                else:
+                    # Attribute có nhưng MISMATCH
+                    score -= 30
+                    mismatch_count += 1
+                    reasons.append(f"✗ {attr_name}: {product_value} (mong đợi {user_value})")
         
-        # Step 3: Bonus cho completeness
+        # Step 3: Nếu quá nhiều mismatches → có thể loại bỏ
+        # (Nếu > 50% attributes bị mismatch thì loại bỏ)
+        if user_attributes and mismatch_count > len(user_attributes) * 0.5:
+            return {
+                "is_valid": False,
+                "score": 0,
+                "reasons": [f"Quá nhiều attributes không match"]
+            }
+        
+        # Step 4: Bonus cho completeness (sản phẩm đầy đủ thông tin)
         completeness = self._calculate_completeness(product, schema)
         score += completeness * 10
         
-        print(f"    Final score: {score}")
+        print(f"    Final score: {score}, mismatch_count: {mismatch_count}")
         
         return {
-            "is_valid": score > 0,
-            "score": max(0, min(100, score)),  # Clamp 0-100
-            "reasons": reasons
-        }
-        score += completeness * 10
-        
-        return {
-            "is_valid": score > 0,
+            "is_valid": True,  # Luôn True trừ khi category sai hoặc quá nhiều mismatch
             "score": max(0, min(100, score)),  # Clamp 0-100
             "reasons": reasons
         }

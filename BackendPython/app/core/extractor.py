@@ -81,13 +81,37 @@ class AttributeExtractor:
             return None, 0.0
         
         elif constraint.type == "range":
-            # Tìm số trong text (ví dụ: giá)
+            # Tìm range (min-max) hoặc single value
             if attr_name == "gia":
-                patterns = [
+                # Pattern: "200-300k", "200k-300k", "từ 200 đến 300k", etc.
+                range_patterns = [
+                    r'(\d+(?:\.\d+)?)\s*(?:triệu|tr|million)\s*(?:[-đến])\s*(\d+(?:\.\d+)?)\s*(?:triệu|tr|million)',
+                    r'(\d+(?:\.\d+)?)\s*(?:k|nghìn)\s*(?:[-đến])\s*(\d+(?:\.\d+)?)\s*(?:k|nghìn)',
+                    r'(?:từ|from)\s+(\d+(?:\.\d+)?)\s*(?:triệu|tr|k|nghìn)\s+(?:đến|to)\s+(\d+(?:\.\d+)?)\s*(?:triệu|tr|k|nghìn)',
+                ]
+                
+                for pattern in range_patterns:
+                    match = re.search(pattern, text)
+                    if match:
+                        min_val = float(match.group(1))
+                        max_val = float(match.group(2))
+                        
+                        # Convert to consistent unit (VND)
+                        if "triệu" in text or "tr" in text:
+                            min_val *= 1000000
+                            max_val *= 1000000
+                        elif "k" in text or "nghìn" in text:
+                            min_val *= 1000
+                            max_val *= 1000
+                        
+                        return {"min": min_val, "max": max_val}, 0.9
+                
+                # Single value patterns (fallback)
+                single_patterns = [
                     r'(\d+(?:\.\d+)?)\s*(?:triệu|tr|million)',
                     r'(\d+(?:\.\d+)?)\s*(?:k|nghìn)',
                 ]
-                for pattern in patterns:
+                for pattern in single_patterns:
                     match = re.search(pattern, text)
                     if match:
                         value = float(match.group(1))

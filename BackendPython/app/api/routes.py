@@ -118,7 +118,7 @@ async def respond_to_question(request: ResponseUpdate):
     
     conversation_state = sessions[conversation_id]
     
-    # Update state
+    # Update state với response của user
     updated_state = orchestrator.update_state(
         conversation_state,
         {
@@ -132,7 +132,7 @@ async def respond_to_question(request: ResponseUpdate):
     
     # Continue processing với state mới
     # Gửi empty string vì user đã trả lời rồi
-    result = orchestrator.process_query(
+    result = await orchestrator.process_query(
         user_input="",  
         conversation_state=updated_state
     )
