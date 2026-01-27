@@ -2,6 +2,7 @@
 from typing import Optional, Dict, Any, List
 import re
 from .schema import get_all_categories, get_schema
+from .dynamic_schema import DynamicCategoryDetector, DynamicSchemaManager
 
 class EnhancedIntentDetector:
     """
@@ -9,10 +10,14 @@ class EnhancedIntentDetector:
     - Category switching (đổi sản phẩm)
     - Attribute refinement (chỉnh sửa tiêu chí)
     - Attribute conflict (tiêu chí mâu thuẫn)
+    
+    Sử dụng DynamicCategoryDetector để tự động detect ANY category
     """
     
     def __init__(self):
         self.categories = get_all_categories()
+        self.category_detector = DynamicCategoryDetector()  # Dynamic detection
+        self.schema_manager = DynamicSchemaManager()  # Dynamic schema
         self._init_embedding_model()
         
         # Từ khóa chỉ sự thay đổi ý định
@@ -153,71 +158,23 @@ class EnhancedIntentDetector:
         }
     
     def _detect_category(self, user_input: str) -> Dict[str, Any]:
-        """Detect category từ input (giống code cũ)"""
-        user_input = user_input.lower().strip()
+        """
+        Detect category từ input sử dụng DynamicCategoryDetector
         
-        # Keyword matching
-        result = self._keyword_match(user_input)
-        if result["confidence"] >= 0.9:
-            return result
-        
-        # Embedding
-        result = self._embedding_classify(user_input)
-        if result["confidence"] > 0.7:
-            return result
-        
-        return {
-            "has_category": False,
-            "category": None,
-            "confidence": 0.0
-        }
-    
-    def _keyword_match(self, text: str) -> Dict[str, Any]:
-        matches = []
-        for cat_name in self.categories:
-            schema = get_schema(cat_name)
-            for keyword in schema.keywords:
-                if keyword in text:
-                    matches.append({
-                        "category": cat_name,
-                        "keyword": keyword,
-                        "confidence": 0.9
-                    })
-        
-        if not matches:
-            return {"has_category": False, "category": None, "confidence": 0.0}
-        
-        best_match = max(matches, key=lambda x: len(x["keyword"]))
-        return {
-            "has_category": True,
-            "category": best_match["category"],
-            "confidence": best_match["confidence"]
-        }
-    
-    def _embedding_classify(self, text: str) -> Dict[str, Any]:
-        self._load_embedding_model()
-        
-        if self.embedding_model == "not_available":
-            return {"has_category": False, "category": None, "confidence": 0.0}
-        
-        from sentence_transformers import util
-        query_emb = self.embedding_model.encode(text, convert_to_tensor=True)
-        
-        scores = {}
-        for cat, cat_emb in self.category_embeddings.items():
-            similarity = util.cos_sim(query_emb, cat_emb).item()
-            scores[cat] = similarity
-        
-        best_cat = max(scores, key=scores.get)
-        best_score = scores[best_cat]
-        
-        if best_score < 0.4:
-            return {"has_category": False, "category": None, "confidence": best_score}
+        Returns:
+            {
+                "has_category": bool,
+                "category": str | None,
+                "confidence": float
+            }
+        """
+        # Use DynamicCategoryDetector - works for ANY category!
+        category, confidence = self.category_detector.detect_category(user_input)
         
         return {
-            "has_category": True,
-            "category": best_cat,
-            "confidence": best_score
+            "has_category": category is not None,
+            "category": category,
+            "confidence": confidence
         }
     
     def _check_attribute_conflict(

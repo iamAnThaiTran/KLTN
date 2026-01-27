@@ -68,10 +68,16 @@ class ProductRanker:
         # Price penalty (nếu quá ngân sách)
         price_penalty = 0
         if "gia" in user_attributes:
-            user_price = user_attributes["gia"]
+            user_price_data = user_attributes["gia"]
+            # Extract max price from dict (user_price_data could be {"min": 100, "max": 500})
+            if isinstance(user_price_data, dict):
+                user_price = user_price_data.get("max", float('inf'))
+            else:
+                user_price = user_price_data
+            
             product_price = product.get("price", 0)
             
-            if product_price > user_price * 1.2:  # Quá 20%
+            if user_price != float('inf') and product_price > user_price * 1.2:  # Quá 20%
                 price_penalty = -10
         
         return base_score + popularity_bonus + price_penalty

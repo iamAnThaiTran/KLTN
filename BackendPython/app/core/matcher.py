@@ -87,6 +87,10 @@ class ProductMatcher:
         
         # Step 2: So sánh attributes
         for attr_name, user_value in user_attributes.items():
+            # SKIP "chưa rõ" - không evaluate trường này
+            if user_value == "chưa rõ" or user_value is None:
+                continue
+            
             product_value = self._extract_product_attribute(
                 product, attr_name
             )

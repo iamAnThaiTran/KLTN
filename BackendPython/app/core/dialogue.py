@@ -45,14 +45,26 @@ class DialogueManager:
             state.get("extracted", {})
         )
     
-    def _ask_category(self, user_input: str) -> Dict[str, Any]:
-        """Hỏi user muốn mua gì (khi không detect được category)"""
+    def _ask_category(self, user_input: str, intent_map: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Hỏi user muốn mua gì (khi không detect được category)
         
-        # Special case: Ý định mua quà
-        # if is_gift_intent(user_input):
-        #     question = "Bạn muốn mua quà gì? Chọn một loại sản phẩm:"
-        # else:
-            
+        Args:
+            user_input: User's text input
+            intent_map: Optional - pre-detected intent + filtered categories
+                {"intent": str, "categories": [list], "confidence": float}
+        """
+        
+        # If intent was pre-detected → use SMART question with filtered categories
+        if intent_map and intent_map.get("intent") and intent_map.get("categories"):
+            # Use intent mapper's smart question
+            from .intent_mapper import IntentMapper
+            mapper = IntentMapper()
+            return mapper.get_fallback_question(
+                intent_map["intent"],
+                intent_map["categories"]
+            )
+        
+        # Fallback: Generic question (when no intent detected or intent_map not provided)
         question = "Bạn đang tìm loại sản phẩm nào?"
         
         categories = get_all_categories()
@@ -79,6 +91,20 @@ class DialogueManager:
         
         # Hỏi attribute đầu tiên trong missing
         attr_name = missing[0]
+        
+        # Handle KeyError: attribute không tồn tại trong schema
+        if attr_name not in schema.attributes:
+            print(f"DEBUG: Attribute '{attr_name}' not in schema for category '{category}'")
+            print(f"DEBUG: Available attributes: {list(schema.attributes.keys())}")
+            # Skip this attribute và hỏi attribute khác
+            return {
+                "question": f"Vui lòng cung cấp thêm thông tin",
+                "options": [],
+                "question_type": "open",
+                "attribute_name": attr_name,
+                "skipped": True  # Mark as skipped
+            }
+        
         constraint = schema.attributes[attr_name]
         
         # Tạo câu hỏi thân thiện
