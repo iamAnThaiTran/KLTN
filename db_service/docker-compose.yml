@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your_password}
       POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=en_US.UTF-8"
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "15432:5432"  # Use high port to avoid Windows reserved range
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d
@@ -26,7 +26,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: product_redis
+    container_name: product_redis 
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:

@@ -5,6 +5,7 @@ import ProductDetailPage from "../common/ProductPageDetail";
 import LoginPage from "../pages/LoginPage";
 import RegisterPage from "../pages/RegisterPage";
 import AdminDashboard from "../pages/AdminDashboard";
+import ProductSearchPage from "../pages/ProductSearchPage";
 import { useAuth } from "../context/AuthContext";
 
 // Protected route wrapper for authenticated users
@@ -52,6 +53,7 @@ export default function AppRouter() {
                 <Route path="/register" element={<RegisterPage />} />
                 <Route path="/home" element={<Home />} />
                 <Route path="/product/:title" element={<ProductDetailPage />} />
+                <Route path="/search-products" element={<ProductSearchPage />} />
                 <Route 
                     path="/admin/dashboard" 
                     element={

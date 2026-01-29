@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Any
 from urllib.parse import urlencode, urlparse, parse_qs
 from playwright.async_api import async_playwright, Page, Browser
 import logging
+from app.core.dynamic_schema import UNIVERSAL_KEYWORDS
 
 # FIX cho Windows event loop
 if sys.platform == 'win32':
@@ -28,6 +29,46 @@ class TikiCrawler:
             "max_products": 30,  # Số sản phẩm tối đa để crawl detail
             "concurrent_details": 3,  # Số sản phẩm crawl detail đồng thời
         }
+    
+    def _normalize_category(self, category: str) -> str:
+        """
+        Normalize category name to base category from UNIVERSAL_KEYWORDS
+        
+        Ví dụ:
+        - "giày thể thao nam" → "giày"
+        - "đồng hồ thông minh" → "đồng hồ"
+        - "mỹ phẩm chăm sóc" → "mỹ phẩm"
+        
+        Args:
+            category: Original category name from user/crawler
+        
+        Returns:
+            Base category name that exists in UNIVERSAL_KEYWORDS
+        """
+        category_lower = category.lower().strip()
+        
+        # Exact match
+        for base_category in UNIVERSAL_KEYWORDS.keys():
+            if base_category.lower() == category_lower:
+                return base_category
+        
+        # Check if user's category is in keywords of any base category
+        for base_category, keywords in UNIVERSAL_KEYWORDS.items():
+            if category_lower in [kw.lower() for kw in keywords]:
+                return base_category
+        
+        # Substring match (for variants like "giày thể thao nam" → "giày")
+        for base_category, keywords in UNIVERSAL_KEYWORDS.items():
+            for keyword in keywords:
+                keyword_lower = keyword.lower()
+                if keyword_lower in category_lower or category_lower in keyword_lower:
+                    if len(keyword_lower) > 2:  # Avoid false positive với từ ngắn
+                        logger.debug(f"   Category '{category}' matched to '{base_category}' via keyword '{keyword}'")
+                        return base_category
+        
+        # Nếu không tìm thấy, return original (để system sau xử lý)
+        logger.warning(f"   ⚠️ Category '{category}' không match UNIVERSAL_KEYWORDS. Using original.")
+        return category
 
     async def crawl(
         self, 
@@ -112,6 +153,14 @@ class TikiCrawler:
             logger.info(f"❌ Sản phẩm không đạt: {len(products) - len(filtered)}")
             logger.info("=" * 60 + "\n")
             
+            # AUTO-SAVE vào SKU database nếu crawl được details
+            if get_details and len(detailed_products) > 0:
+                logger.info("💾 Auto-saving products to SKU database...")
+                try:
+                    self._save_to_sku_database(detailed_products, category)
+                except Exception as e:
+                    logger.error(f"❌ Error during auto-save: {e}", exc_info=True)
+            
             return filtered
             
         except Exception as e:
@@ -133,10 +182,17 @@ class TikiCrawler:
                     logger.warning(f"Lỗi khi stop playwright: {e}")
 
     def _needs_detail_crawl(self, attributes: Dict) -> bool:
-        """Kiểm tra có cần crawl detail không"""
-        # Các attributes phức tạp cần crawl detail
-        complex_attrs = ["size", "mau_sac", "chat_lieu", "sizes", "colors", "materials"]
-        return any(key in attributes for key in complex_attrs)
+        """Kiểm tra có cần crawl detail không
+        
+        ALWAYS crawl detail vì Tiki API luôn có:
+        - configurable_options (sizes, colors)
+        - specifications (material, brand)
+        
+        Thậm chí khi user không specify attributes, ta cũng extract toàn bộ
+        từ API để lưu flexible attributes vào database.
+        """
+        # Luôn crawl detail để extract attributes từ Tiki API
+        return True
 
     def _build_search_query(self, category: str, attributes: Dict) -> str:
         """
@@ -307,6 +363,20 @@ class TikiCrawler:
                 """)
                 
                 logger.info(f"✅ Đã extract {len(products)} sản phẩm")
+                
+                # Log chi tiết từng sản phẩm
+                logger.info("\n" + "="*70)
+                logger.info("📦 CHI TIẾT SẢN PHẨM CRAWL ĐƯỢC:")
+                logger.info("="*70)
+                for i, p in enumerate(products[:5], 1):  # Show first 5
+                    logger.info(f"\n[{i}] {p.get('title', 'N/A')[:60]}...")
+                    logger.info(f"    💰 Price: {p.get('price', 0):,} VNĐ")
+                    logger.info(f"    🏷️  Brand: {p.get('brand', 'N/A')}")
+                    logger.info(f"    🔗 Link: {p.get('link', '')[:50]}...")
+                    logger.info(f"    📸 Image: {p.get('image', '')[:50]}...")
+                    logger.info(f"    💸 Discount: {p.get('discount', 0)}%")
+                    logger.info(f"    📊 Sold: {p.get('sold', 0)}")
+                logger.info("="*70 + "\n")
                 
             except Exception as e:
                 logger.error(f"❌ Lỗi khi evaluate: {str(e)}")
@@ -487,10 +557,12 @@ class TikiCrawler:
             label = normalize(opt.get("name", ""))
             values = [v.get("label") for v in opt.get("values", []) if v.get("label")]
             
-            if re.search(r"size|kich co|kich thuoc", label):
+            if re.search(r"size|kich co|kich thuoc|chon size|kich thuoc\s*\(", label):
                 result["sizes"] = values
+                logger.info(f"      📏 Sizes extracted: {values[:3]}{'...' if len(values) > 3 else ''}")
             if re.search(r"mau|mau sac|color|colour", label):
                 result["colors"] = values
+                logger.info(f"      🎨 Colors extracted: {values[:3]}{'...' if len(values) > 3 else ''}")
         
         # DEBUG: In ra specifications
         specs = data.get("specifications", [])
@@ -500,26 +572,46 @@ class TikiCrawler:
                 attrs = group.get("attributes", [])
                 logger.info(f"      Group: {group.get('name')} - attrs: {[(a.get('name'), a.get('value')) for a in attrs[:3]]}")
         
-        # Lấy từ specifications (Material)
+        # Lấy từ specifications (Material, Brand details)
         for group in specs:
             for attr in group.get("attributes", []):
-                key = normalize(attr.get("code", "") or attr.get("name", ""))
+                attr_name = attr.get("name", "")
+                attr_code = attr.get("code", "")
+                key = normalize(attr_code or attr_name)
                 value = str(attr.get("value", "")).strip()
                 
-                if value and re.search(r"chat lieu|material|vat lieu", key):
-                    result["materials"].append(value)
+                # Parse material từ "Chất liệu" attribute
+                if value and (re.search(r"chat lieu|vat lieu|material", key) or 
+                             re.search(r"chat lieu|vat lieu|material", normalize(attr_name))):
+                    # Clean HTML tags if present (e.g., <ul><li>Vải</li><li>Đế cao su</li></ul>)
+                    clean_value = re.sub(r'<[^>]+>', '', value).strip()
+                    if clean_value:
+                        # Split by <li> or comma if multiple
+                        items = re.split(r'[,;]|<li>|</li>', clean_value)
+                        for item in items:
+                            item = item.strip()
+                            if item and item not in result["materials"]:
+                                result["materials"].append(item)
         
-        # Loại trùng
-        result["sizes"] = list(set(result["sizes"]))
-        result["colors"] = list(set(result["colors"]))
-        result["materials"] = list(set(result["materials"]))
+        if result["materials"]:
+            logger.info(f"      🧵 Materials extracted: {result['materials'][:2]}{'...' if len(result['materials']) > 2 else ''}")
+        
+        # Loại trùng - giữ thứ tự
+        result["sizes"] = list(dict.fromkeys(result["sizes"]))
+        result["colors"] = list(dict.fromkeys(result["colors"]))
+        result["materials"] = list(dict.fromkeys(result["materials"]))
         
         return result
 
     def _check_attribute_match(self, product_attrs: Dict, filter_attrs: Dict) -> Dict:
-        """Kiểm tra sản phẩm có match với filters không"""
+        """Kiểm tra sản phẩm có match với filters không
+        
+        Khi user KHÔNG specify bất kỳ filter nào → all products PASS
+        Khi user specify filters → kiểm tra sản phẩm có attributes đó không
+        """
         matches = []
         mismatches = []
+        has_any_filter = False
         
         def normalize(s: str) -> str:
             import unicodedata
@@ -530,6 +622,7 @@ class TikiCrawler:
         # Check sizes
         filter_sizes = filter_attrs.get("size") or filter_attrs.get("sizes") or []
         if filter_sizes:
+            has_any_filter = True
             if not isinstance(filter_sizes, list):
                 filter_sizes = [filter_sizes]
             
@@ -546,6 +639,7 @@ class TikiCrawler:
         # Check colors
         filter_colors = filter_attrs.get("mau_sac") or filter_attrs.get("colors") or []
         if filter_colors:
+            has_any_filter = True
             if not isinstance(filter_colors, list):
                 filter_colors = [filter_colors]
             
@@ -562,6 +656,7 @@ class TikiCrawler:
         # Check materials
         filter_materials = filter_attrs.get("chat_lieu") or filter_attrs.get("materials") or []
         if filter_materials:
+            has_any_filter = True
             if not isinstance(filter_materials, list):
                 filter_materials = [filter_materials]
             
@@ -575,14 +670,21 @@ class TikiCrawler:
             else:
                 mismatches.append(f"Chất liệu không có: {', '.join(filter_materials)}")
         
-        matched = len(mismatches) == 0 and len(matches) > 0
+        # LOGIC: Nếu user không specify filter → ALL PASS
+        if not has_any_filter:
+            matched = True
+            summary = f"✓ Không lọc (mọi sản phẩm đạt) | Sizes: {', '.join(product_attrs['sizes'][:2])} | Colors: {', '.join(product_attrs['colors'][:2])}"
+        else:
+            # Nếu user specify filter → kiểm tra từng filter
+            matched = len(mismatches) == 0 and len(matches) > 0
+            summary = f"Đạt: {' | '.join(matches)}" if matched else f"Không đạt: {' | '.join(mismatches)}"
         
         return {
             "matched": matched,
             "matches": matches,
             "mismatches": mismatches,
             "emoji": "✅" if matched else "❌",
-            "summary": f"Đạt: {' | '.join(matches)}" if matched else f"Không đạt: {' | '.join(mismatches)}"
+            "summary": summary
         }
 
     def _filter_by_attributes(self, products: List[Dict], attributes: Dict) -> List[Dict]:
@@ -595,6 +697,110 @@ class TikiCrawler:
             p for p in products 
             if p.get("attributes") and p.get("match_info", {}).get("matched", False)
         ]
+
+    def _save_to_sku_database(self, products: List[Dict], category: str):
+        """
+        Save crawled products with attributes to SKU database
+        
+        Args:
+            products: List of products with detailed attributes
+            category: Category name (e.g., "giày", "áo")
+        """
+        try:
+            from app.services.crawler_adapter import CrawlerToSKUAdapter
+            
+            # NORMALIZE category name to match database
+            normalized_category = self._normalize_category(category)
+            logger.info(f"   Category: '{category}' → '{normalized_category}'")
+            
+            adapter = CrawlerToSKUAdapter()
+            
+            # Convert detailed products to simple format with extracted attributes
+            products_to_save = []
+            logger.info(f"\n📦 Converting {len(products)} products to database format...")
+            
+            for idx, p in enumerate(products, 1):
+                logger.info(f"\n  [{idx}/{len(products)}] Processing: {p.get('title', 'N/A')[:60]}")
+                
+                # Base product info
+                product_dict = {
+                    "title": p.get("title"),
+                    "price": p.get("price"),
+                    "brand": p.get("brand"),
+                    "link": p.get("link"),
+                    "image": p.get("image"),
+                    "source": "tiki",
+                    "discount": p.get("discount", 0),
+                    "sold": p.get("sold", 0)
+                }
+                
+                logger.debug(f"     Base info: title={product_dict['title'][:30]}, price={product_dict['price']}, brand={product_dict['brand']}")
+                
+                # Add extracted attributes if available
+                if "attributes" in p:
+                    attrs = p["attributes"]
+                    if attrs is None:
+                        logger.warning(f"     ⚠️  attributes is None")
+                        product_dict["extracted_attributes"] = {
+                            "sizes": [],
+                            "colors": [],
+                            "materials": []
+                        }
+                    else:
+                        product_dict["extracted_attributes"] = {
+                            "sizes": attrs.get("sizes", []),
+                            "colors": attrs.get("colors", []),
+                            "materials": attrs.get("materials", [])
+                        }
+                        logger.debug(f"     Attributes: sizes={len(product_dict['extracted_attributes']['sizes'])}, colors={len(product_dict['extracted_attributes']['colors'])}, materials={len(product_dict['extracted_attributes']['materials'])}")
+                else:
+                    logger.warning(f"     ⚠️  No 'attributes' key in product")
+                    product_dict["extracted_attributes"] = {
+                        "sizes": [],
+                        "colors": [],
+                        "materials": []
+                    }
+                
+                products_to_save.append(product_dict)
+                logger.info(f"     ✅ Added to save list")
+            
+            logger.info(f"\n💾 Calling save_crawled_products with {len(products_to_save)} products to category '{normalized_category}'")
+            
+            # Save to database
+            try:
+                result = adapter.save_crawled_products(products_to_save, normalized_category)
+                logger.info(f"   Adapter returned: {result}")
+                
+                if result is None:
+                    logger.error(f"   ❌ Adapter returned None!")
+                elif not isinstance(result, dict):
+                    logger.error(f"   ❌ Adapter returned non-dict: {type(result)}")
+                elif result and result.get('success'):
+                    products_saved = result.get('products_saved', 0)
+                    skus_saved = result.get('skus_saved', 0)
+                    logger.info(f"   ✅ Saved {products_saved} products to SKU database")
+                    logger.info(f"      SKUs created: {skus_saved}")
+                    logger.info(f"      Category ID: {result.get('category_id', 'N/A')}")
+                else:
+                    error_msg = result.get('error', 'Unknown error') if result else "Result is None"
+                    logger.error(f"   ❌ Failed to save: {error_msg}")
+                    logger.error(f"   Full result: {result}")
+            except TypeError as te:
+                logger.error(f"   ❌ TypeError in save_crawled_products: {te}")
+                logger.error(f"   This usually means adapter.save_crawled_products returned wrong type")
+                import traceback
+                logger.error(f"   Traceback: {traceback.format_exc()}")
+            except Exception as e:
+                logger.error(f"   ❌ Exception in save_crawled_products: {e}")
+                logger.error(f"   Exception type: {type(e).__name__}")
+                import traceback
+                logger.error(f"   Traceback: {traceback.format_exc()}")
+                
+        except Exception as e:
+            logger.error(f"❌ Error in _save_to_sku_database: {e}")
+            logger.error(f"   Exception type: {type(e).__name__}")
+            import traceback
+            logger.error(f"   Full traceback:\n{traceback.format_exc()}")
 
 
 # ===== CÁCH SỬ DỤNG =====

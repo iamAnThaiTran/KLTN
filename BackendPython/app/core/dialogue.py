@@ -186,3 +186,59 @@ class DialogueManager:
             "question": None,
             "next_step": "search"
         }
+
+    def generate_clarifying_hints(
+        self,
+        category: str,
+        extracted: Dict[str, Any]
+    ) -> List[str]:
+        """
+        Generate 2-3 clarifying hints để refine search khi có category + partial attributes
+        
+        Logic:
+        1. Lấy schema của category
+        2. Xem attribute nào thiếu (required hoặc important optional)
+        3. Generate friendly questions từ missing attributes
+        4. Return danh sách 2-3 hints
+        
+        Args:
+            category: Tên category (e.g., "giày")
+            extracted: Đã extract được attributes nào (e.g., {"loai": "thể thao"})
+        
+        Returns:
+            List of hints, e.g.:
+            ["👟 Giày nam hay nữ?", "🏃 Dùng cho mục đích nào?", "💰 Giá bao nhiêu?"]
+        """
+        
+        schema = get_schema(category)
+        if not schema:
+            return []
+        
+        hints = []
+        
+        # Priority: attributes cần hỏi (required + important optional)
+        priority_attrs = [
+            ("gender", "👟 Giày nam hay nữ?"),
+            ("muc_dich", "🎯 Dùng cho mục đích nào?"),
+            ("size", "📏 Size của bạn là bao nhiêu?"),
+            ("loai", "🏷️ Loại nào bạn thích?"),
+            ("gia", "💰 Giá bao nhiêu?"),
+            ("mau", "🎨 Màu sắc ưa thích?"),
+            ("material", "🧵 Chất liệu như thế nào?"),
+            ("brand", "🏢 Thương hiệu nào?")
+        ]
+        
+        # Xem attribute nào thiếu
+        missing_important = []
+        for attr_key, hint_text in priority_attrs:
+            # Nếu attribute này trong schema và chưa extract được, thêm vào missing
+            if attr_key in schema.attributes and attr_key not in extracted:
+                constraint = schema.attributes[attr_key]
+                # Ưu tiên required attributes trước
+                if constraint.required or attr_key in ["gender", "muc_dich"]:
+                    missing_important.append(hint_text)
+        
+        # Trả về 2-3 hints (hoặc ít hơn nếu không có đủ)
+        hints = missing_important[:3]
+        
+        return hints

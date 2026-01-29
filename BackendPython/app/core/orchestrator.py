@@ -12,6 +12,8 @@ from .intent import EnhancedIntentDetector
 from .intent_mapper import IntentMapper
 from .dynamic_schema import DynamicSchemaManager, AVAILABLE_CATEGORIES
 from .llm_utils import call_openai
+from .category_cache import CategoryCache
+from app.services.category_validator import CategoryValidator
 
 class RecommendationOrchestrator:
     """
@@ -31,12 +33,21 @@ class RecommendationOrchestrator:
         self.product_matcher = ProductMatcher()
         self.product_ranker = ProductRanker()
         self.crawler = MultiCrawler()
+        self.category_validator = CategoryValidator()  # NEW: Category validation before crawl
         
         # Cache management (Lazada-style)
         self.enable_cache = True  # Set to False to disable caching
         
         # LLM suggestion cache - avoid repeated LLM calls
         self.llm_suggestion_cache = {}  # key: user_input hash, value: suggestions
+        
+        # Category cache - persistent storage for LLM suggestions
+        # Dùng PostgreSQL (đã có sẵn DATABASE_URL trong .env)
+        import os
+        self.category_cache = CategoryCache(
+            backend="postgres",
+            pg_url=os.getenv("DATABASE_URL")
+        )
         
         # Comparison keywords for Case 7 detection
         self.comparison_keywords = [
@@ -274,28 +285,60 @@ class RecommendationOrchestrator:
     ) -> Dict[str, Any]:
         """
         CASE 1: Clear request (NO LLM)
-        Direct extraction and crawling using rule-based logic
+        
+        Flow:
+        1. Detect category
+        2. VALIDATE category with DB (new!)
+        3. Extract attributes
+        4. Crawl with validated category
         """
         print(f"[CASE 1] Processing clear request with rule-based extraction")
         
         category = case_data["category"]
+        
+        # NEW: Validate category before crawling
+        print(f"[CASE 1] Validating category: '{category}'")
+        validation_result = self.category_validator.validate_category(category)
+        
+        if not validation_result["success"]:
+            print(f"[CASE 1] ❌ Category validation failed: {validation_result['reason']}")
+            return {
+                "status": "error",
+                "message": f"Không thể xác định danh mục sản phẩm '{category}'. {validation_result['reason']}",
+                "case": 1,
+                "state": conversation_state
+            }
+        
+        # Use validated category
+        validated_category = validation_result["category"]
+        category_id = validation_result["category_id"]
+        validation_status = validation_result["status"]
+        
+        print(f"[CASE 1] ✅ Category validated: '{category}' → '{validated_category}' (id={category_id}, status={validation_status})")
+        
         conversation_state["has_category"] = True
-        conversation_state["category"] = category
+        conversation_state["category"] = validated_category
+        conversation_state["category_id"] = category_id
+        conversation_state["category_validation"] = {
+            "original": category,
+            "normalized": validated_category,
+            "status": validation_status
+        }
         
         # Extract attributes using rule-based extractor (NO LLM)
         extract_result = self.attribute_extractor.extract(
             user_input,
-            category,
+            validated_category,
             use_llm=False  # CRITICAL: No LLM for Case 1
         )
         
         conversation_state["extracted"] = extract_result["extracted"]
         
         print(f"[CASE 1] Extracted attributes: {extract_result['extracted']}")
-        print(f"[CASE 1] Triggering crawler directly...")
+        print(f"[CASE 1] Triggering crawler with validated category...")
         
-        # Directly trigger crawler
-        products = await self.crawler.crawl(category, extract_result["extracted"])
+        # Crawl with VALIDATED category (not original)
+        products = await self.crawler.crawl(validated_category, extract_result["extracted"])
         
         if not products:
             return {
@@ -316,26 +359,62 @@ class RecommendationOrchestrator:
     ) -> Dict[str, Any]:
         """
         CASE 2: Unclear request but category detected with schema
-        Ask for missing mandatory attributes, NO LLM, NO crawl yet
+        
+        Flow:
+        1. Validate category
+        2. Ask for missing mandatory attributes
+        3. When ready → Crawl with validated category
         """
         print(f"[CASE 2] Request unclear but category '{case_data['category']}' detected")
         
         category = case_data["category"]
+        
+        # NEW: Validate category before proceeding
+        print(f"[CASE 2] Validating category: '{category}'")
+        validation_result = self.category_validator.validate_category(category)
+        
+        if not validation_result["success"]:
+            print(f"[CASE 2] ❌ Category validation failed: {validation_result['reason']}")
+            return {
+                "status": "error",
+                "message": f"Không thể xác định danh mục sản phẩm '{category}'. {validation_result['reason']}",
+                "case": 2,
+                "state": conversation_state
+            }
+        
+        # Use validated category
+        validated_category = validation_result["category"]
+        category_id = validation_result["category_id"]
+        
+        print(f"[CASE 2] ✅ Category validated: '{category}' → '{validated_category}'")
+        
         conversation_state["has_category"] = True
-        conversation_state["category"] = category
+        conversation_state["category"] = validated_category
+        conversation_state["category_id"] = category_id
+        conversation_state["category_validation"] = {
+            "original": category,
+            "normalized": validated_category,
+            "status": validation_result["status"]
+        }
         
         # Extract what we can from input (rule-based)
         extract_result = self.attribute_extractor.extract(
             user_input,
-            category,
+            validated_category,
             use_llm=False  # NO LLM
         )
         
         conversation_state["extracted"].update(extract_result["extracted"])
         
         # Load schema and identify missing required attributes
-        schema = get_schema(category)
-        schema_attrs = self.schema_manager.get_attributes_for_category(category)
+        schema = get_schema(validated_category)
+        schema_attrs = self.schema_manager.get_attributes_for_category(validated_category)
+        
+        # If no schema, we don't have required attributes list, so proceed to crawl
+        if schema is None:
+            print(f"[CASE 2] No schema found for '{validated_category}', proceeding to crawl immediately")
+            products = await self.crawler.crawl(validated_category, conversation_state["extracted"])
+            return await self._process_crawl_results(products, conversation_state, case=2)
         
         required_attrs = [
             attr for attr, constraint in schema_attrs.items()
@@ -349,9 +428,9 @@ class RecommendationOrchestrator:
         ]
         
         if not missing:
-            # All required attributes provided, proceed to crawl
+            # All required attributes provided, proceed to crawl with VALIDATED category
             print(f"[CASE 2] All required attributes provided, proceeding to crawl")
-            products = await self.crawler.crawl(category, conversation_state["extracted"])
+            products = await self.crawler.crawl(validated_category, conversation_state["extracted"])
             return await self._process_crawl_results(products, conversation_state, case=2)
         
         # Ask for next missing attribute
@@ -362,7 +441,7 @@ class RecommendationOrchestrator:
         
         question = self.dialogue_manager.generate_question({
             "has_category": True,
-            "category": category,
+            "category": validated_category,  # Use validated category
             "extracted": conversation_state["extracted"],
             "missing_required": [next_attr],
             "user_input": user_input
@@ -513,7 +592,7 @@ Be practical and culturally relevant for Vietnamese shopping."""
                 conversation_state["search_history"] = []
             conversation_state["search_history"].append({
                 "category": conversation_state["category"],
-                "extracted": conversation_state["extracted"].copy()
+                "extracted": conversation_state.get("extracted", {}).copy()
             })
         
         # Reset context
@@ -686,7 +765,7 @@ Be concise and helpful."""
         ranked_products = self.product_ranker.rank(
             matched_products,
             conversation_state["extracted"],
-            use_llm_explain=True
+            use_llm_explain=False  # Tắt LLM explanation để giảm API calls
         )
         
         comparison = self.product_ranker.generate_comparison(ranked_products, top_n=3)
@@ -886,9 +965,17 @@ Be concise. Attributes should be practical filtering criteria."""
                 "method": "llm"
             }
             
-            # Cache the result
+            # Cache the result in memory
             self.llm_suggestion_cache[cache_key] = result
             print(f"DEBUG: Cached suggestions for reuse")
+            
+            # 💾 Save suggestions to persistent storage (DB/file)
+            if suggestions:
+                try:
+                    saved_ids = self.category_cache.save_multiple(suggestions)
+                    print(f"💾 Saved {len(saved_ids)} categories to persistent cache")
+                except Exception as e:
+                    print(f"⚠️  Failed to save to persistent cache: {e}")
             
             return result
             

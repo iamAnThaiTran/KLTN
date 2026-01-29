@@ -47,17 +47,17 @@ class MultiCrawler:
             except Exception as e:
                 logger.error(f"❌ Tiki crawl error: {str(e)}")
 
-        # Crawl từ Lazada
-        if "lazada" in sources:
-            try:
-                logger.info("🟥 Crawling Lazada...")
-                search_query = self._build_search_query(category, attributes)
-                lazada_products = await crawl_lazada_full(search_query)
-                lazada_products = [self._normalize_lazada_product(p) for p in lazada_products]
-                logger.info(f"✅ Lazada: Found {len(lazada_products)} products")
-                all_products.extend(lazada_products)
-            except Exception as e:
-                logger.warning(f"⚠️ Lazada crawl skipped: {type(e).__name__}")
+        # Crawl từ Lazada - TEMPORARILY DISABLED
+        # if "lazada" in sources:
+        #     try:
+        #         logger.info("🟥 Crawling Lazada...")
+        #         search_query = self._build_search_query(category, attributes)
+        #         lazada_products = await crawl_lazada_full(search_query)
+        #         lazada_products = [self._normalize_lazada_product(p) for p in lazada_products]
+        #         logger.info(f"✅ Lazada: Found {len(lazada_products)} products")
+        #         all_products.extend(lazada_products)
+        #     except Exception as e:
+        #         logger.warning(f"⚠️ Lazada crawl skipped: {type(e).__name__}")
 
         logger.info(f"📊 Total products: {len(all_products)}")
         merged_products = self._deduplicate_products(all_products)
@@ -114,7 +114,9 @@ class MultiCrawler:
         seen = {}
         deduped = []
         for product in products:
-            key = self._normalize_name(product.get("name", ""))
+            # Use 'title' (from Tiki) or 'name' (from other sources)
+            product_name = product.get("title") or product.get("name", "")
+            key = self._normalize_name(product_name)
             if key not in seen:
                 seen[key] = True
                 deduped.append(product)

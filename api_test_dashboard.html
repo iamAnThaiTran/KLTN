@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test - Crawl Products vs Query</title>
+    <style>
+        body { font-family: Arial; max-width: 1200px; margin: 0 auto; padding: 20px; background: #f9f9f9; }
+        .container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .api-test { border: 2px solid #ddd; padding: 15px; border-radius: 5px; background: white; }
+        .api-test h2 { margin-top: 0; color: #333; }
+        button { background: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 3px; cursor: pointer; margin-top: 10px; }
+        button:hover { background: #0056b3; }
+        .response { background: #f5f5f5; padding: 10px; margin-top: 10px; border-radius: 3px; max-height: 500px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word; font-size: 12px; font-family: monospace; }
+        .success { color: green; font-weight: bold; }
+        .error { color: red; font-weight: bold; }
+        input, textarea { width: 100%; padding: 8px; margin: 5px 0; box-sizing: border-box; border: 1px solid #ddd; border-radius: 3px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        table td, table th { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        table th { background: #f0f0f0; }
+        h1 { color: #333; }
+        h3 { color: #666; margin-top: 30px; }
+    </style>
+</head>
+<body>
+    <h1>🔍 API Testing Dashboard</h1>
+    <p>Kiểm tra và so sánh 2 API: <strong>/api/v1/crawl-products</strong> vs <strong>/api/query</strong></p>
+    
+    <div class="container">
+        <!-- Test /api/v1/crawl-products -->
+        <div class="api-test">
+            <h2>📦 /api/v1/crawl-products</h2>
+            <p><strong>Trả về:</strong> Products + Filters + Pagination</p>
+            <label><strong>Category Name:</strong></label>
+            <input id="crawl-category" type="text" value="giày">
+            <label><strong>Filters (JSON):</strong></label>
+            <textarea id="crawl-filters">{}</textarea>
+            <button onclick="testCrawlProducts()">🚀 Test API</button>
+            <div id="crawl-response" class="response"></div>
+        </div>
+
+        <!-- Test /api/query -->
+        <div class="api-test">
+            <h2>💬 /api/query</h2>
+            <p><strong>Trả về:</strong> Conversation response (hỏi thêm thông tin)</p>
+            <label><strong>User Input:</strong></label>
+            <input id="query-input" type="text" value="tôi muốn mua giày">
+            <label><strong>Conversation ID (optional):</strong></label>
+            <input id="query-conv-id" type="text" placeholder="Leave empty for new conversation">
+            <button onclick="testQuery()">🚀 Test API</button>
+            <div id="query-response" class="response"></div>
+        </div>
+    </div>
+
+    <hr>
+    <h3>📊 So Sánh & Khuyến Nghị:</h3>
+    <table>
+        <tr style="background: #f0f0f0;">
+            <th>Yếu tố</th>
+            <th>/api/v1/crawl-products</th>
+            <th>/api/query</th>
+        </tr>
+        <tr>
+            <td><strong>Mục đích</strong></td>
+            <td>Tìm sản phẩm trực tiếp</td>
+            <td>Trò chuyện hỏi thêm thông tin</td>
+        </tr>
+        <tr>
+            <td><strong>Dữ liệu trả về</strong></td>
+            <td>✅ Products + Filters + Total</td>
+            <td>❌ Chỉ câu hỏi (chưa có sản phẩm)</td>
+        </tr>
+        <tr>
+            <td><strong>Số lần gọi API</strong></td>
+            <td>✅ 1 lần (lấy tất cả)</td>
+            <td>❌ Nhiều lần (hỏi từng bước)</td>
+        </tr>
+        <tr>
+            <td><strong>Độ phức tạp UI</strong></td>
+            <td>✅ Đơn giản (hiển thị products + filters)</td>
+            <td>❌ Phức tạp (chat UI + quản lý state)</td>
+        </tr>
+        <tr>
+            <td><strong>Tốc độ</strong></td>
+            <td>✅ Nhanh (1 lần gọi)</td>
+            <td>❌ Chậm (multiple round trips)</td>
+        </tr>
+        <tr style="background: #fff3cd;">
+            <td><strong>Khuyến nghị</strong></td>
+            <td>✅ <strong>USE THIS</strong> cho ProductSearchWithFilters.jsx</td>
+            <td>⚠️ Chỉ dùng cho ShoeFinder.jsx (chat mode)</td>
+        </tr>
+    </table>
+
+    <script>
+        async function testCrawlProducts() {
+            const category = document.getElementById('crawl-category').value;
+            const filterText = document.getElementById('crawl-filters').value;
+            let filters = {};
+            
+            try {
+                filters = JSON.parse(filterText);
+            } catch (e) {
+                document.getElementById('crawl-response').innerHTML = `<span class="error">❌ Invalid JSON in filters: ${e.message}</span>`;
+                return;
+            }
+
+            const responseDiv = document.getElementById('crawl-response');
+            responseDiv.innerHTML = '⏳ Loading...';
+
+            try {
+                const response = await fetch('http://localhost:8000/api/v1/crawl-products', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        category_name: category,
+                        selected_filters: filters,
+                        page: 1,
+                        page_size: 5
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                let summary = `<span class="success">✅ Success (${response.status})</span>\n\n`;
+                summary += `📊 Response Structure:\n`;
+                summary += `- Products: ${data.products?.length || 0} items\n`;
+                summary += `- Filters: ${data.filters?.length || 0} filter groups\n`;
+                summary += `- Total Pages: ${data.total_pages || 0}\n`;
+                summary += `- Total Items: ${data.total || 0}\n`;
+                summary += `- Pagination: page ${data.page}/${data.total_pages}\n\n`;
+                
+                if (data.filters && data.filters.length > 0) {
+                    summary += `🎯 Available Filters (${data.filters.length} groups):\n`;
+                    data.filters.forEach(f => {
+                        const optionCount = f.options?.length || 0;
+                        summary += `  • ${f.attribute_name} (${f.display_name || 'N/A'}): ${optionCount} options\n`;
+                    });
+                    summary += '\n';
+                }
+
+                if (data.products && data.products.length > 0) {
+                    summary += `🛍️ Products (${data.products.length} items):\n`;
+                    data.products.forEach((p, i) => {
+                        summary += `  ${i+1}. ${p.name || p.title || 'N/A'}\n`;
+                        summary += `     Price: ${p.price || 'N/A'}\n`;
+                    });
+                }
+                
+                summary += `\n\n📄 Full Response:\n${JSON.stringify(data, null, 2)}`;
+                responseDiv.textContent = summary;
+            } catch (error) {
+                responseDiv.textContent = `<span class="error">❌ Error: ${error.message}\nMake sure backend is running at http://localhost:8000</span>`;
+            }
+        }
+
+        async function testQuery() {
+            const userInput = document.getElementById('query-input').value;
+            const convId = document.getElementById('query-conv-id').value || null;
+            const responseDiv = document.getElementById('query-response');
+
+            responseDiv.innerHTML = '⏳ Loading...';
+
+            try {
+                const response = await fetch('http://localhost:8000/api/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_input: userInput,
+                        conversation_id: convId
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                let summary = `<span class="success">✅ Success (${response.status})</span>\n\n`;
+                summary += `📊 Response Structure:\n`;
+                summary += `- Status: ${data.status || 'N/A'}\n`;
+                summary += `- Conversation ID: ${data.conversation_id || 'N/A'}\n`;
+                summary += `- Has Question: ${!!data.question}\n`;
+                summary += `- Options: ${data.options?.length || 0}\n`;
+                summary += `- Products: ${data.products?.length || 0}\n\n`;
+                
+                if (data.question) {
+                    summary += `💬 Question from Backend:\n${data.question}\n\n`;
+                }
+                
+                if (data.options && data.options.length > 0) {
+                    summary += `📋 Options for user to choose:\n`;
+                    data.options.forEach((opt, i) => {
+                        summary += `  ${i+1}. ${opt.label || opt.value}\n`;
+                    });
+                    summary += '\n';
+                }
+
+                if (data.products && data.products.length > 0) {
+                    summary += `🛍️ Products (${data.products.length}):\n`;
+                    data.products.forEach((p, i) => {
+                        summary += `  ${i+1}. ${p.name || 'N/A'}\n`;
+                    });
+                    summary += '\n';
+                }
+
+                summary += `\n📄 Full Response:\n${JSON.stringify(data, null, 2)}`;
+                responseDiv.textContent = summary;
+            } catch (error) {
+                responseDiv.textContent = `<span class="error">❌ Error: ${error.message}\nMake sure backend is running at http://localhost:8000</span>`;
+            }
+        }
+
+        // Auto-test on load
+        window.onload = () => {
+            console.log('Ready to test APIs...');
+        };
+    </script>
+</body>
+</html>

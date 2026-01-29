@@ -30,6 +30,18 @@ class ProductMatcher:
         """
         
         schema = get_schema(expected_category)
+        
+        # Handle case when schema is not found (new category or dynamic category)
+        if schema is None:
+            print(f"WARNING: Schema not found for category '{expected_category}'. Accepting all products.")
+            # If no schema, accept all products (they're already crawled for this category)
+            matched = []
+            for idx, product in enumerate(products):
+                product["match_score"] = 80  # Default score
+                product["match_reasons"] = ["Category accepted (no schema available)"]
+                matched.append(product)
+            return matched
+        
         matched = []
         
         for idx, product in enumerate(products):
@@ -69,21 +81,25 @@ class ProductMatcher:
         mismatch_count = 0
         
         # Step 1: Kiểm tra category
-        product_category = self._infer_category(product, schema)
-        
-        if not product_category:
-            # Thiếu category → dùng LLM classify
-            product_category = self._llm_classify_product(product, schema.name)
-        
-        print(f"    Category check: inferred='{product_category}', expected='{schema.name}'")
-        
-        if product_category != schema.name:
-            # Sai category → loại bỏ
-            return {
-                "is_valid": False,
-                "score": 0,
-                "reasons": [f"Không phải {schema.name}"]
-            }
+        # If schema is None, skip category check (already validated by crawler)
+        if schema is None:
+            print(f"    Category check: skipped (no schema available)")
+        else:
+            product_category = self._infer_category(product, schema)
+            
+            if not product_category:
+                # Thiếu category → dùng LLM classify
+                product_category = self._llm_classify_product(product, schema.name)
+            
+            print(f"    Category check: inferred='{product_category}', expected='{schema.name}'")
+            
+            if product_category != schema.name:
+                # Sai category → loại bỏ
+                return {
+                    "is_valid": False,
+                    "score": 0,
+                    "reasons": [f"Không phải {schema.name}"]
+                }
         
         # Step 2: So sánh attributes
         for attr_name, user_value in user_attributes.items():
@@ -163,7 +179,15 @@ class ProductMatcher:
         Infer category từ product data
         Dùng keywords trong tên/mô tả
         """
+        # Handle None schema (new or dynamic category)
+        if schema is None:
+            return None
+        
         text = f"{product.get('name', '')} {product.get('description', '')}".lower()
+        
+        # Handle case when schema has no keywords
+        if not hasattr(schema, 'keywords') or schema.keywords is None:
+            return None
         
         for keyword in schema.keywords:
             if keyword in text:
