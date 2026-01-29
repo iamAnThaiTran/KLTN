@@ -229,6 +229,14 @@
   border-top: 1px solid #f0f0f0;
 }
 
+.filter-option-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s;
+  padding: 4px 0;
+}
+
 .filter-option {
   display: flex;
   align-items: center;
@@ -238,6 +246,7 @@
   padding: 6px 4px;
   border-radius: 4px;
   transition: background 0.2s;
+  flex: 1;
 }
 
 .filter-option:hover {
@@ -264,6 +273,42 @@
   font-size: 12px;
   color: #999;
   margin-left: auto;
+}
+
+/* Quick filter button */
+.quick-filter-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #e0e0e0;
+  background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ff9800;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.quick-filter-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #ffe0b2 0%, #ffd699 100%);
+  border-color: #ff9800;
+  box-shadow: 0 2px 8px rgba(255, 152, 0, 0.3);
+  transform: scale(1.05);
+}
+
+.quick-filter-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.quick-filter-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .no-options {

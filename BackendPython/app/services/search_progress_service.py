@@ -19,7 +19,7 @@ import json
 
 from app.core.intent_mapper import IntentMapper
 from app.db.sku_repository import SKURepository
-from app.crawler.crawler import TikiCrawler, LazadaCrawler
+from app.crawler.crawler import TikiCrawler
 
 
 class SearchState(str, Enum):
@@ -136,7 +136,6 @@ class SearchProgressService:
         self.intent_mapper = IntentMapper()
         self.sku_repo = SKURepository()
         self.tiki_crawler = TikiCrawler()
-        self.lazada_crawler = LazadaCrawler()
         
         # In production, use Redis
         # For now, use in-memory storage

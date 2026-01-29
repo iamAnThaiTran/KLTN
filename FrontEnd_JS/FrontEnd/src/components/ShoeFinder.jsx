@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Sparkles, CheckCircle2, AlertCircle, ShoppingBag, Mic, MicOff, Volume2 } from 'lucide-react';
 import axios from 'axios';
+import SuggestionsPopup from './SuggestionsPopup';
 
 const API_BASE_URL = 'http://localhost:8000';
 
@@ -20,6 +21,8 @@ const ShoeFinder = () => {
   const [selectedFilters, setSelectedFilters] = useState({}); // Track selected filters
   const [clarifyingHints, setClarifyingHints] = useState([]); // Suggestions to refine search
   const [hintStyle] = useState('chat-bubble'); // 'chat-bubble', 'banner', or 'tooltip'
+  const [showSuggestionsPopup, setShowSuggestionsPopup] = useState(false); // Show/hide SuggestionsPopup
+  const [suggestionsPopupFilters, setSuggestionsPopupFilters] = useState([]); // Filter options for popup
   const messagesEndRef = useRef(null);
   const recognitionRef = useRef(null);
 
@@ -114,9 +117,9 @@ const ShoeFinder = () => {
           </div>
           <div className="flex-1">
             <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl rounded-tl-none p-4 max-w-2xl">
-              <div className="font-semibold text-amber-900 mb-2 text-sm">
+              {/* <div className="font-semibold text-amber-900 mb-2 text-sm">
                 💡 Một vài gợi ý để bạn tìm kiếm chính xác hơn:
-              </div>
+              </div> */}
               <div className="flex flex-wrap gap-2">
                 {clarifyingHints.map((hint, idx) => (
                   <button
@@ -144,7 +147,7 @@ const ShoeFinder = () => {
           <div className="flex items-start gap-2">
             <span className="text-lg">💡</span>
             <div>
-              <p className="font-semibold text-sm text-amber-900 mb-1">Tinh chỉnh tìm kiếm:</p>
+              {/* <p className="font-semibold text-sm text-amber-900 mb-1">Tinh chỉnh tìm kiếm:</p> */}
               <div className="flex flex-wrap gap-1">
                 {clarifyingHints.map((hint, idx) => (
                   <button
@@ -221,59 +224,64 @@ const ShoeFinder = () => {
       setLastCategoryName(analyzeData.category);
       setSelectedFilters({}); // Reset filters for new search
       
-      // Step 2: Show skeleton + hints immediately
-      console.log('[ANALYZE] Showing skeleton + hints');
-      setClarifyingHints(analyzeData.clarifying_hints || []);
+      // Step 2: Store filters and show SuggestionsPopup
+      console.log('[ANALYZE] Showing SuggestionsPopup with filters');
+      console.log('[ANALYZE] clarifying_hints:', analyzeData.clarifying_hints);
+      console.log('[ANALYZE] filters:', analyzeData.filters);
       
-      // Show loading skeleton
+      // Store category
+      setLastCategoryName(analyzeData.category);
+      setSelectedFilters({}); // Reset filters for new search
+      
+      // Step 2: Store hints and filters for popup
+      setClarifyingHints(analyzeData.clarifying_hints || []);
+      setSuggestionsPopupFilters(analyzeData.filters || []);
+      
+      // Step 3: Display initial products (with loading skeleton)
+      // Show loading skeleton first
       setMessages(prev => [...prev, {
         type: 'loading',
         timestamp: new Date()
       }]);
       
-      // Step 3: Call /api/query to get products (SLOW - T=0.5s)
-      console.log('[SEARCH] Crawling products...');
-      const searchResponse = await axios.post(`${API_BASE_URL}/api/query`, {
-        user_input: userInput,
-        conversation_id: analyzeData.conversation_id
-      });
-      
-      const searchData = searchResponse.data;
-      console.log('[SEARCH] Products response:', searchData);
-      
-      // Remove loading skeleton
-      setMessages(prev => prev.filter(msg => msg.type !== 'loading'));
-      
-      // Display results (products + filters)
-      if (searchData.status === 'results' && searchData.products) {
-        // Display products count
-        const resultMessage = `🎯 **Tìm thấy ${searchData.total_found || searchData.products.length} sản phẩm!**`;
+      // Add initial products if found
+      if (analyzeData.products && analyzeData.products.length > 0) {
+        console.log('[ANALYZE] Found initial products:', analyzeData.products.length);
+        // Remove loading skeleton
+        setMessages(prev => prev.filter(msg => msg.type !== 'loading'));
+        
+        // Add results message
         setMessages(prev => [...prev, {
           type: 'results',
-          text: resultMessage,
-          products: searchData.products,
+          text: `🎯 Tìm thấy ${analyzeData.total || analyzeData.products.length} sản phẩm!`,
+          products: analyzeData.products,
           timestamp: new Date()
         }]);
         
-        // Display filters
+        // Add filter options
         if (analyzeData.filters && analyzeData.filters.length > 0) {
-          const filterMessage = `Bạn có thể lọc sản phẩm theo các tiêu chí dưới đây:`;
           setMessages(prev => [...prev, {
             type: 'filters',
-            text: filterMessage,
-            filters: analyzeData.filters,  // Use filters from analyze (same ones)
+            text: 'Bạn có thể lọc sản phẩm theo các tiêu chí dưới đây:',
+            filters: analyzeData.filters,
             timestamp: new Date()
           }]);
         }
+      } else {
+        // No products found in DB
+        console.log('[ANALYZE] No products in DB');
+        // Remove loading skeleton
+        setMessages(prev => prev.filter(msg => msg.type !== 'loading'));
         
-        // Keep hints visible below filters
-        // (hints are in state, will render when user scrolls or hovers)
-        console.log('[SEARCH] ✅ Complete - hints still visible');
-        
-      } else if (searchData.question) {
-        // If still need more info
-        addBotMessage(searchData.question);
+        addBotMessage(
+          `ℹ️ Hiện tại chưa có sản phẩm "${analyzeData.category}" trong kho.\n\nVui lòng chọn các tiêu chí tìm kiếm để giúp tôi tìm kiếm chính xác hơn.`
+        );
       }
+      
+      // Step 4: Show popup for filter refinement
+      setShowSuggestionsPopup(true);
+      
+      setIsThinking(false);
       
     } catch (error) {
       console.error('[ANALYZE/SEARCH] Error:', error);
@@ -334,17 +342,22 @@ const ShoeFinder = () => {
         timestamp: new Date()
       }]);
 
-      // Convert selectedFilters from "attr:value" format to {attr: [values]}
-      const filterObj = {};
-      Object.keys(selectedFilters).forEach(key => {
-        const [attrName, attrValue] = key.split(':');
-        if (!filterObj[attrName]) {
-          filterObj[attrName] = [];
-        }
-        filterObj[attrName].push(attrValue);
-      });
+      // Check if filters need conversion (from old "attr:value" format to new {attr: [values]} format)
+      let filterObj = selectedFilters;
+      
+      // If it's in "attr:value" format (old format from filter sidebar), convert it
+      if (Object.keys(selectedFilters).some(key => key.includes(':'))) {
+        filterObj = {};
+        Object.keys(selectedFilters).forEach(key => {
+          const [attrName, attrValue] = key.split(':');
+          if (!filterObj[attrName]) {
+            filterObj[attrName] = [];
+          }
+          filterObj[attrName].push(attrValue);
+        });
+      }
 
-      console.log('Converted filters:', filterObj);
+      console.log('Final filters for API:', filterObj);
       
       const response = await fetch(`${API_BASE_URL}/api/v1/crawl-products`, {
         method: 'POST',
@@ -394,26 +407,34 @@ const ShoeFinder = () => {
       return;
     }
 
-    // Display products
-    const resultMessage = `🎯 **Tìm thấy ${data.total || data.products.length} sản phẩm!**`;
-    setMessages(prev => [...prev, {
+    // REPLACE existing results + filters instead of appending
+    // This prevents the UI from looking cluttered with multiple product lists
+    const resultMessage = `🎯 Tìm thấy ${data.total || data.products.length} sản phẩm!`;
+    const resultsMsg = {
       type: 'results',
       text: resultMessage,
       products: data.products,
       timestamp: new Date()
-    }]);
+    };
 
-    // Display filters if available
-    if (data.filters && data.filters.length > 0) {
-      console.log('Displaying filters:', data.filters);
-      const filterMessage = `Bạn có thể lọc sản phẩm theo các tiêu chí dưới đây:`;
-      setMessages(prev => [...prev, {
-        type: 'filters',
-        text: filterMessage,
-        filters: data.filters,
-        timestamp: new Date()
-      }]);
-    }
+    const filtersMsg = data.filters && data.filters.length > 0 ? {
+      type: 'filters',
+      text: 'Bạn có thể lọc sản phẩm theo các tiêu chí dưới đây:',
+      filters: data.filters,
+      timestamp: new Date()
+    } : null;
+
+    // Replace old results and filters with new ones
+    setMessages(prev => {
+      // Remove old results and filters messages
+      const filtered = prev.filter(msg => msg.type !== 'results' && msg.type !== 'filters');
+      // Add new results and filters
+      const updated = [...filtered, resultsMsg];
+      if (filtersMsg) {
+        updated.push(filtersMsg);
+      }
+      return updated;
+    });
   };
 
   const displayBackendResponse = (data) => {
@@ -467,6 +488,19 @@ const ShoeFinder = () => {
     addUserMessage(currentInput);
     analyzeAndSearch(currentInput);  // NEW: Use analyze-first flow
     setCurrentInput('');
+  };
+
+  /**
+   * Handle filter confirmation from SuggestionsPopup
+   * Called when user selects filter values and clicks "Tìm kiếm" button
+   */
+  const handleSuggestionsConfirm = (selectedFilters) => {
+    console.log('[POPUP] Selected filters:', selectedFilters);
+    // Close the popup
+    setShowSuggestionsPopup(false);
+    // Call searchProductsWithFilters with the selected filters
+    // selectedFilters is already in the format {attribute_name: [values]}
+    searchProductsWithFilters(lastCategoryName, selectedFilters);
   };
 
   const handleQuickReply = (reply) => {
@@ -530,6 +564,34 @@ const ShoeFinder = () => {
               <div className="flex justify-end">
                 <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl rounded-tr-none p-4 max-w-2xl">
                   {msg.text}
+                </div>
+              </div>
+            )}
+
+            {msg.type === 'hints' && msg.hints && Array.isArray(msg.hints) && msg.hints.length > 0 && (
+              <div className="flex gap-3 mt-3">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center flex-shrink-0">
+                  <Sparkles className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex-1">
+                  <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl rounded-tl-none p-4 max-w-2xl">
+                    <div className="font-semibold text-amber-900 mb-2 text-sm">
+                      💡 Đây là những tiêu chí tìm kiếm có sẵn:
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {msg.hints.map((hint, idx) => (
+                        <span
+                          key={idx}
+                          className="px-3 py-2 bg-white border-2 border-amber-300 text-amber-700 text-sm rounded-full font-medium"
+                        >
+                          {hint}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="text-xs text-amber-600 mt-2">
+                      (Vui lòng chọn các tiêu chí từ popup bên dưới)
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -600,7 +662,7 @@ const ShoeFinder = () => {
                       </button>
                     )}
                     {/* Render clarifying hints nếu có */}
-                    {renderClarifyingHints()}
+                    {/* {renderClarifyingHints()} */}
                   </div>
                 </div>
               </div>
@@ -617,6 +679,9 @@ const ShoeFinder = () => {
                   </div>
                 </div>
 
+                {/* Render clarifying hints right after results */}
+                {/* {clarifyingHints && clarifyingHints.length > 0 && renderClarifyingHints()} */}
+
                 <div className="ml-13 w-full">
                   <div className="grid grid-cols-3 gap-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                     {msg.products.map((product, i) => (
@@ -624,17 +689,17 @@ const ShoeFinder = () => {
                         key={product.id || i} 
                         className="bg-white border border-gray-200 rounded-lg overflow-hidden hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group"
                         onClick={() => {
-                          if (product.link) {
-                            window.open(product.link, '_blank');
+                          if (product.product_url) {
+                            window.open(product.product_url, '_blank');
                           }
                         }}
                       >
                         {/* Product Image */}
-                        {product.image && (
+                        {product.thumbnail && (
                           <div className="relative overflow-hidden bg-gray-100 h-32 flex items-center justify-center">
                             <img
-                              src={product.image}
-                              alt={product.name}
+                              src={product.thumbnail}
+                              alt={product.title}
                               className="max-w-full max-h-full object-contain group-hover:scale-110 transition-transform"
                             />
                             {i === 0 && (
@@ -647,17 +712,17 @@ const ShoeFinder = () => {
 
                         {/* Product Info */}
                         <div className="p-2">
-                          <h3 className="font-semibold text-gray-800 text-xs line-clamp-2 mb-1">{product.name}</h3>
+                          <h3 className="font-semibold text-gray-800 text-xs line-clamp-2 mb-1">{product.title}</h3>
                           
-                          {product.price && (
+                          {product.min_price && (
                             <div className="text-sm font-bold text-red-600 mb-1">
-                              {(product.price/1000000).toFixed(1)}tr
+                              {(product.min_price/1000000).toFixed(1)}tr
                             </div>
                           )}
 
-                          {product.description && (
+                          {product.brand && (
                             <div className="text-xs text-gray-600 line-clamp-1">
-                              {product.description}
+                              {product.brand}
                             </div>
                           )}
                         </div>
@@ -742,6 +807,17 @@ const ShoeFinder = () => {
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* SuggestionsPopup - Appears when /api/analyze returns filters */}
+      <SuggestionsPopup
+        isOpen={showSuggestionsPopup}
+        onClose={() => setShowSuggestionsPopup(false)}
+        category={lastCategoryName}
+        filters={suggestionsPopupFilters}
+        hints={clarifyingHints}
+        onConfirm={handleSuggestionsConfirm}
+        conversationId={conversationState.conversationId}
+      />
 
       {/* Input */}
       <div className="border-t bg-gray-50 px-6 py-4 shadow-lg">

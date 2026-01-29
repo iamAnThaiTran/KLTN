@@ -266,32 +266,52 @@ export default function ProductSearchWithFilters() {
                       <div className="filter-options">
                         {filter.options && filter.options.length > 0 ? (
                           filter.options.map((option, idx) => (
-                            <label 
+                            <div 
                               key={`${filter.attribute_name}-${option.attribute_value}-${idx}`}
-                              className="filter-option"
+                              className="filter-option-wrapper"
                             >
-                              <input
-                                type="checkbox"
-                                checked={
-                                  selectedFilters[filter.attribute_name]?.includes(
-                                    option.attribute_value
-                                  ) || false
-                                }
-                                onChange={() => 
-                                  handleFilterChange(
-                                    filter.attribute_name,
-                                    option.attribute_value
-                                  )
-                                }
-                                className="filter-checkbox"
-                              />
-                              <span className="filter-label">
-                                {option.attribute_value}
-                              </span>
-                              <span className="filter-count">
-                                ({option.product_count})
-                              </span>
-                            </label>
+                              <label 
+                                className="filter-option"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    selectedFilters[filter.attribute_name]?.includes(
+                                      option.attribute_value
+                                    ) || false
+                                  }
+                                  onChange={() => 
+                                    handleFilterChange(
+                                      filter.attribute_name,
+                                      option.attribute_value
+                                    )
+                                  }
+                                  className="filter-checkbox"
+                                />
+                                <span className="filter-label">
+                                  {option.attribute_value}
+                                </span>
+                                <span className="filter-count">
+                                  ({option.product_count})
+                                </span>
+                              </label>
+                              {/* Quick filter button - tìm ngay khi click */}
+                              <button
+                                onClick={() => {
+                                  const newFilters = {
+                                    [filter.attribute_name]: [option.attribute_value]
+                                  };
+                                  setCurrentPage(1);
+                                  setSelectedFilters(newFilters);
+                                  searchProducts(categoryName, newFilters, 1);
+                                }}
+                                className="quick-filter-btn"
+                                title={`Tìm kiếm ngay với ${option.attribute_value}`}
+                                disabled={isLoading}
+                              >
+                                ⚡
+                              </button>
+                            </div>
                           ))
                         ) : (
                           <p className="no-options">Không có tùy chọn</p>

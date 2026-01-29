@@ -13,13 +13,24 @@ import './SuggestionsPopup.css';
  * - Hiển thị filter options dạng checkbox
  * - Lưu selected suggestions vào state
  * - Gọi callback khi confirm
+ * 
+ * Props:
+ * - isOpen: boolean - whether popup is open
+ * - onClose: function - callback when user closes popup
+ * - category: string - category/search term
+ * - onConfirm: function - callback when user confirms selection
+ * - conversationId: string - conversation ID
+ * - filters?: array - pre-fetched filters (optional, if not provided, will call /api/analyze)
+ * - hints?: array - pre-fetched hints (optional, if not provided, will be fetched with filters)
  */
 export default function SuggestionsPopup({ 
   isOpen, 
   onClose, 
   category, 
   onConfirm,
-  conversationId 
+  conversationId,
+  filters: prefetchedFilters = [], // Pre-fetched filters from parent
+  hints: prefetchedHints = [] // Pre-fetched hints from parent
 }) {
   const [filters, setFilters] = useState([]);
   const [hints, setHints] = useState([]);
@@ -30,12 +41,28 @@ export default function SuggestionsPopup({
 
   const API_BASE_URL = 'http://localhost:8000';
 
-  // Load suggestions từ /api/analyze
+  // Load suggestions from prop or fetch from /api/analyze
   useEffect(() => {
     if (isOpen && category) {
-      fetchAnalysis();
+      // If filters are provided as prop, use them directly
+      if (prefetchedFilters && prefetchedFilters.length > 0) {
+        console.log('[SuggestionsPopup] Using prefetched filters:', prefetchedFilters);
+        setFilters(prefetchedFilters);
+        if (prefetchedHints && prefetchedHints.length > 0) {
+          console.log('[SuggestionsPopup] Using prefetched hints:', prefetchedHints);
+          setHints(prefetchedHints);
+        }
+        if (prefetchedFilters.length > 0) {
+          setExpandedFilter(prefetchedFilters[0].attribute_name);
+        }
+      } else {
+        // Otherwise, fetch from /api/analyze
+        console.log('[SuggestionsPopup] Fetching filters from /api/analyze');
+        fetchAnalysis();
+      }
     }
-  }, [isOpen, category]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, category, prefetchedFilters, prefetchedHints]);
 
   const fetchAnalysis = async () => {
     setIsLoading(true);
@@ -60,12 +87,15 @@ export default function SuggestionsPopup({
       if (data.success) {
         setFilters(data.filters || []);
         setHints(data.clarifying_hints || []);
+        console.log('✅ Hints loaded:', data.clarifying_hints);
+        console.log('✅ Filters loaded:', data.filters);
         
         // Auto-expand first filter
         if (data.filters && data.filters.length > 0) {
           setExpandedFilter(data.filters[0].attribute_name);
         }
       } else {
+        console.error('❌ Analysis failed:', data.error);
         setError(data.error || 'Không thể lấy gợi ý');
       }
     } catch (err) {
@@ -98,8 +128,25 @@ export default function SuggestionsPopup({
     });
   };
 
+  /**
+   * Handle quick filter click - tự động tìm kiếm khi user click vào attribute suggestion
+   * @param {string} attributeName - Tên attribute (e.g., "size")
+   * @param {string} attributeValue - Giá trị attribute (e.g., "42")
+   */
+  const handleQuickFilter = (attributeName, attributeValue) => {
+    // Tạo filters mới chỉ với attribute được click
+    const newFilters = {
+      [attributeName]: [attributeValue]
+    };
+    
+    // Gọi callback và đóng popup
+    onConfirm(newFilters);
+    onClose();
+  };
+
   const handleConfirm = () => {
     // Gọi callback với selected filters
+    // Callback sẽ gọi searchProducts() để query database
     onConfirm(selectedFilters);
     onClose();
   };
@@ -133,6 +180,7 @@ export default function SuggestionsPopup({
             <div className="suggestions-loading">
               <Loader2 className="spinner" size={32} />
               <p>Đang tải gợi ý...</p>
+              <p style={{ fontSize: '12px', color: '#999', marginTop: '8px' }}>Vui lòng chờ trong giây lát</p>
             </div>
           ) : error ? (
             <div className="suggestions-error">
@@ -147,7 +195,7 @@ export default function SuggestionsPopup({
           ) : (
             <>
               {/* Clarifying Hints */}
-              {hints && hints.length > 0 && (
+              {hints && hints.length > 0 ? (
                 <div className="suggestions-hints">
                   <p className="hints-label">💡 Hãy cho tôi biết:</p>
                   <div className="hints-list">
@@ -157,6 +205,11 @@ export default function SuggestionsPopup({
                       </div>
                     ))}
                   </div>
+                </div>
+              ) : (
+                <div className="suggestions-hints">
+                  <p className="hints-label">💡 Gợi ý</p>
+                  <p style={{ color: '#999', fontSize: '14px', margin: '0' }}>Không có gợi ý nào</p>
                 </div>
               )}
 
@@ -193,33 +246,50 @@ export default function SuggestionsPopup({
                           <div className="filter-options">
                             {filter.options && filter.options.length > 0 ? (
                               filter.options.map((option) => (
-                                <label 
+                                <div 
                                   key={option.attribute_value}
-                                  className="filter-option"
+                                  className="filter-option-wrapper"
                                 >
-                                  <input
-                                    type="checkbox"
-                                    checked={
-                                      selectedFilters[filter.attribute_name]?.includes(
-                                        option.attribute_value
-                                      ) || false
-                                    }
-                                    onChange={() =>
-                                      handleFilterChange(
+                                  <label 
+                                    className="filter-option"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={
+                                        selectedFilters[filter.attribute_name]?.includes(
+                                          option.attribute_value
+                                        ) || false
+                                      }
+                                      onChange={() =>
+                                        handleFilterChange(
+                                          filter.attribute_name,
+                                          option.attribute_value
+                                        )
+                                      }
+                                    />
+                                    <span className="option-text">
+                                      {option.attribute_value}
+                                      {option.product_count && (
+                                        <span className="option-count">
+                                          ({option.product_count})
+                                        </span>
+                                      )}
+                                    </span>
+                                  </label>
+                                  {/* Quick filter button */}
+                                  <button
+                                    className="quick-filter-btn"
+                                    onClick={() => 
+                                      handleQuickFilter(
                                         filter.attribute_name,
                                         option.attribute_value
                                       )
                                     }
-                                  />
-                                  <span className="option-text">
-                                    {option.attribute_value}
-                                    {option.product_count && (
-                                      <span className="option-count">
-                                        ({option.product_count})
-                                      </span>
-                                    )}
-                                  </span>
-                                </label>
+                                    title={`Tìm kiếm ngay với ${option.attribute_value}`}
+                                  >
+                                    ⚡ Tìm
+                                  </button>
+                                </div>
                               ))
                             ) : (
                               <p className="no-options">Không có lựa chọn</p>
