@@ -42,8 +42,9 @@ export default function ProductSearchWithFilters() {
    * @param {string} category - Category name (e.g., "giày")
    * @param {object} filters - Selected filters {attribute_name: [values]}
    * @param {number} page - Page number
+   * @param {string} userInput - Original user input for attribute extraction
    */
-  const searchProducts = useCallback(async (category, filters = {}, page = 1) => {
+  const searchProducts = useCallback(async (category, filters = {}, page = 1, userInput = '') => {
     if (!category.trim()) {
       setError('Vui lòng nhập tên loại sản phẩm');
       return;
@@ -58,6 +59,7 @@ export default function ProductSearchWithFilters() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           category_name: category,
+          user_input: userInput || category,  // ✅ NEW: Pass original user input for attribute extraction
           selected_filters: filters,
           page: page,
           page_size: pageSize
@@ -77,6 +79,33 @@ export default function ProductSearchWithFilters() {
       setTotalPages(data.total_pages || 0);
       setCurrentPage(page);
       setHasSearched(true);
+
+      // 🎯 Auto pre-tick filters dựa trên selected_attributes từ backend
+      if (data.selected_attributes && Object.keys(data.selected_attributes).length > 0) {
+        console.log('Auto-selecting attributes:', data.selected_attributes);
+        
+        // Chuyển selected_attributes thành selectedFilters format
+        // selected_attributes: { brand: 'Nike', size: '40' }
+        // selectedFilters: { brand: ['Nike'], size: ['40'] }
+        const autoSelectedFilters = {};
+        Object.entries(data.selected_attributes).forEach(([attr, value]) => {
+          if (value === null || value === undefined) return; // Skip null/undefined
+          
+          // Xử lý các loại value khác nhau
+          if (Array.isArray(value)) {
+            autoSelectedFilters[attr] = value.map(v => String(v));
+          } else if (typeof value === 'object') {
+            // Nếu là object (ví dụ: gia: { min: 100, max: 1000 }), skip
+            console.log(`Skipping object value for ${attr}:`, value);
+            return;
+          } else {
+            autoSelectedFilters[attr] = [String(value)];
+          }
+        });
+        
+        console.log('Auto-selected filters:', autoSelectedFilters);
+        setSelectedFilters(autoSelectedFilters);
+      }
 
       // Reset expanded filters khi có data mới
       const newExpandedState = {};
@@ -118,8 +147,8 @@ export default function ProductSearchWithFilters() {
   const handleSuggestionsConfirm = (suggestedFilters) => {
     setCurrentPage(1);
     setSelectedFilters(suggestedFilters);
-    // Tìm kiếm với các filters đã chọn từ gợi ý
-    searchProducts(categoryName, suggestedFilters, 1);
+    // Tìm kiếm với các filters đã chọn từ gợi ý + pass user input
+    searchProducts(categoryName, suggestedFilters, 1, categoryName);
   };
 
   /**
@@ -156,7 +185,7 @@ export default function ProductSearchWithFilters() {
    */
   const handleApplyFilters = () => {
     setCurrentPage(1);
-    searchProducts(categoryName, selectedFilters, 1);
+    searchProducts(categoryName, selectedFilters, 1, categoryName);
   };
 
   /**
@@ -164,7 +193,7 @@ export default function ProductSearchWithFilters() {
    */
   const handleClearFilters = () => {
     setSelectedFilters({});
-    searchProducts(categoryName, {}, 1);
+    searchProducts(categoryName, {}, 1, categoryName);
   };
 
   /**
@@ -181,7 +210,7 @@ export default function ProductSearchWithFilters() {
    * Handle pagination
    */
   const handlePageChange = (newPage) => {
-    searchProducts(categoryName, selectedFilters, newPage);
+    searchProducts(categoryName, selectedFilters, newPage, categoryName);
   };
 
   return (
@@ -303,7 +332,7 @@ export default function ProductSearchWithFilters() {
                                   };
                                   setCurrentPage(1);
                                   setSelectedFilters(newFilters);
-                                  searchProducts(categoryName, newFilters, 1);
+                                  searchProducts(categoryName, newFilters, 1, categoryName);
                                 }}
                                 className="quick-filter-btn"
                                 title={`Tìm kiếm ngay với ${option.attribute_value}`}

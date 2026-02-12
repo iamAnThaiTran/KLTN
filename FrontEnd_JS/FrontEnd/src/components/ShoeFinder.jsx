@@ -250,15 +250,7 @@ const ShoeFinder = () => {
         // Remove loading skeleton
         setMessages(prev => prev.filter(msg => msg.type !== 'loading'));
         
-        // Add results message
-        setMessages(prev => [...prev, {
-          type: 'results',
-          text: `🎯 Tìm thấy ${analyzeData.total || analyzeData.products.length} sản phẩm!`,
-          products: analyzeData.products,
-          timestamp: new Date()
-        }]);
-        
-        // Add filter options
+        // Add filter options FIRST
         if (analyzeData.filters && analyzeData.filters.length > 0) {
           setMessages(prev => [...prev, {
             type: 'filters',
@@ -267,6 +259,14 @@ const ShoeFinder = () => {
             timestamp: new Date()
           }]);
         }
+        
+        // Add results message AFTER filters
+        setMessages(prev => [...prev, {
+          type: 'results',
+          text: `🎯 Tìm thấy ${analyzeData.total || analyzeData.products.length} sản phẩm!`,
+          products: analyzeData.products,
+          timestamp: new Date()
+        }]);
       } else {
         // No products found in DB
         console.log('[ANALYZE] No products in DB');
@@ -425,15 +425,17 @@ const ShoeFinder = () => {
     } : null;
 
     // Replace old results and filters with new ones
+    // Add filters FIRST, then results
     setMessages(prev => {
       // Remove old results and filters messages
       const filtered = prev.filter(msg => msg.type !== 'results' && msg.type !== 'filters');
-      // Add new results and filters
-      const updated = [...filtered, resultsMsg];
+      // Add filters FIRST (if available), then results
+      const updated = [];
       if (filtersMsg) {
         updated.push(filtersMsg);
       }
-      return updated;
+      updated.push(resultsMsg);
+      return [...filtered, ...updated];
     });
   };
 
@@ -597,21 +599,21 @@ const ShoeFinder = () => {
             )}
 
             {msg.type === 'filters' && msg.filters && (
-              <div className="flex gap-3">
+              <div className="flex gap-3 mb-4">
                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0">
                   <Sparkles className="w-5 h-5 text-white" />
                 </div>
                 <div className="flex-1">
-                  <div className="bg-purple-50 rounded-2xl rounded-tl-none p-4">
+                  <div className="bg-purple-50 rounded-2xl rounded-tl-none p-4 border border-purple-200">
                     <div className="font-semibold text-purple-900 mb-3">{msg.text}</div>
-                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                    <div className="space-y-3 max-h-96 overflow-y-auto">
                       {msg.filters.map((filter, filterIdx) => (
-                        <div key={filterIdx} className="border border-purple-200 rounded-lg p-2 bg-white">
-                          <p className="font-semibold text-sm text-purple-900 mb-1">
+                        <div key={filterIdx} className="border border-purple-200 rounded-lg p-3 bg-white">
+                          <p className="font-semibold text-sm text-purple-900 mb-2">
                             {filter.display_name || filter.attribute_name}
                           </p>
-                          <div className="flex flex-wrap gap-1">
-                            {filter.options && filter.options.slice(0, 5).map((option, optIdx) => {
+                          <div className="flex flex-wrap gap-2">
+                            {filter.options && filter.options.map((option, optIdx) => {
                               const filterKey = `${filter.attribute_name}:${option.attribute_value}`;
                               const isSelected = selectedFilters[filterKey];
                               return (
@@ -630,39 +632,54 @@ const ShoeFinder = () => {
                                       return newFilters;
                                     });
                                   }}
-                                  className={`px-2 py-1 text-xs rounded transition-all border ${
+                                  className={`px-3 py-2 text-xs rounded-full transition-all border font-medium ${
                                     isSelected
-                                      ? 'bg-purple-500 text-white border-purple-600'
-                                      : 'bg-purple-100 hover:bg-purple-200 text-purple-700 border-purple-200'
+                                      ? 'bg-purple-500 text-white border-purple-600 shadow-md'
+                                      : 'bg-white hover:bg-purple-100 text-purple-700 border-purple-300 hover:border-purple-400'
                                   }`}
                                 >
                                   {option.attribute_value} ({option.product_count})
                                 </button>
                               );
                             })}
-                            {filter.options && filter.options.length > 5 && (
-                              <span className="text-xs text-gray-500 px-2 py-1">
-                                +{filter.options.length - 5} more
-                              </span>
-                            )}
                           </div>
                         </div>
                       ))}
                     </div>
-                    {Object.keys(selectedFilters).length > 0 && (
-                      <button
-                        onClick={() => {
-                          if (lastCategoryName) {
-                            searchProductsWithFilters(lastCategoryName, selectedFilters);
-                          }
-                        }}
-                        className="mt-4 w-full px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white text-sm font-semibold rounded-lg transition-all"
-                      >
-                        🔍 Lọc sản phẩm ({Object.keys(selectedFilters).length} filters)
-                      </button>
-                    )}
-                    {/* Render clarifying hints nếu có */}
-                    {/* {renderClarifyingHints()} */}
+                    <div className="mt-4 flex gap-2">
+                      {Object.keys(selectedFilters).length > 0 && (
+                        <>
+                          <button
+                            onClick={() => {
+                              if (lastCategoryName) {
+                                searchProductsWithFilters(lastCategoryName, selectedFilters);
+                              }
+                            }}
+                            className="flex-1 px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white text-sm font-semibold rounded-lg transition-all"
+                          >
+                            🔍 Lọc sản phẩm ({Object.keys(selectedFilters).length})
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSelectedFilters({});
+                              console.log('Cleared all filters, reloading products');
+                              // Reload products without any filters to show initial results
+                              if (lastCategoryName) {
+                                searchProductsWithFilters(lastCategoryName, {});
+                              }
+                            }}
+                            className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 text-sm font-semibold rounded-lg transition-all"
+                          >
+                            ✕ Xóa
+                          </button>
+                        </>
+                      )}
+                      {Object.keys(selectedFilters).length === 0 && (
+                        <div className="text-xs text-purple-600 italic">
+                          Chọn các tiêu chí trên để lọc sản phẩm
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -690,7 +707,29 @@ const ShoeFinder = () => {
                         className="bg-white border border-gray-200 rounded-lg overflow-hidden hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group"
                         onClick={() => {
                           if (product.product_url) {
-                            window.open(product.product_url, '_blank');
+                            // ✅ Call Backend Python endpoint to run Playwright automation
+                            console.log('🎬 Opening product with Playwright:', product.product_url);
+                            fetch('http://localhost:8000/api/open-product', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ product_url: product.product_url })
+                            })
+                              .then(res => res.json())
+                              .then(data => {
+                                if (data.success) {
+                                  console.log('✅ Playwright automation started');
+                                  addBotMessage('🎬 Đã bắt đầu tự động mở sản phẩm trong Chrome...');
+                                } else {
+                                  console.error('❌ Failed to start Playwright:', data.detail);
+                                  // Fallback: open in new tab
+                                  window.open(product.product_url, '_blank');
+                                }
+                              })
+                              .catch(err => {
+                                console.error('❌ Error calling Playwright endpoint:', err);
+                                // Fallback: open in new tab
+                                window.open(product.product_url, '_blank');
+                              });
                           }
                         }}
                       >
