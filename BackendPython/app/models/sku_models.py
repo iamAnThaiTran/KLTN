@@ -110,3 +110,4 @@ class ProductSearchResponse(BaseModel):
     page_size: int
     total_pages: int
     filters: List[FilterGroup]  # Available filters for UI
+    selected_attributes: Optional[Dict[str, Any]] = None  # ✅ NEW: Attributes selected by backend for pre-ticking filters

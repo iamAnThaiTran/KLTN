@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any, List
 from app.core.orchestrator import RecommendationOrchestrator
 from app.api.sku_routes import router as sku_router
 from app.api.progressive_search_routes import router as progressive_search_router
+from app.api.product_automation_routes import router as product_automation_router
 from app.crawler.crawler import TikiCrawler
 from app.db.sku_repository import SKURepository
 # from app.core.crawler import YourCrawler  # Import your crawler
@@ -33,6 +34,7 @@ app = FastAPI(title="Smart Product Recommendation API")
 # Register routers
 app.include_router(sku_router)
 app.include_router(progressive_search_router)
+app.include_router(product_automation_router)  # ✅ NEW: Product automation routes
 
 # Enable CORS for frontend communication
 app.add_middleware(
@@ -66,32 +68,6 @@ sessions = {}
 # crawler = YourCrawler()
 # orchestrator = RecommendationOrchestrator(crawler)
 
-# Mock crawler cho demo
-class MockCrawler:
-    def crawl(self, category, attributes):
-        # Mock data
-        return [
-            {
-                "name": "Nike Air Max 90",
-                "price": 1800000,
-                "description": "Giày thể thao cao cấp",
-                "attributes": {
-                    "loai": "thể thao",
-                    "size": "42",
-                    "mau": "trắng"
-                }
-            },
-            {
-                "name": "Adidas Ultraboost",
-                "price": 2100000,
-                "description": "Giày chạy bộ",
-                "attributes": {
-                    "loai": "chạy bộ",
-                    "size": "42"
-                }
-            }
-        ]
-
 orchestrator = RecommendationOrchestrator()
 sku_repo = SKURepository()  # Initialize SKU repository for filters
 
@@ -107,6 +83,7 @@ async def process_query(request: QueryRequest):
     2. searching: Đang crawl
     3. results: Có kết quả + filters
     """
+    print('vao api query')
     
     # Get or create session
     conversation_id = request.conversation_id
@@ -461,6 +438,9 @@ async def analyze_query(request: QueryRequest):
             page_size = 20
             total_pages = (total_products + page_size - 1) // page_size  # Ceiling division
             
+            # Track if we had to fallback (DB has no products at all)
+            had_to_fallback = False
+            
             # If no products found with extracted filters, fallback to category-only search
             if total_products == 0 and (search_filters or min_price or max_price):
                 print(f"[/api/analyze] ⚠️ No products found with extracted filters!")
@@ -474,7 +454,49 @@ async def analyze_query(request: QueryRequest):
                     page_size=20
                 )
                 print(f"[/api/analyze] ✅ Fallback result: {total_products} products found (category-only)")
+                
+                # If category-only also = 0, then DB has NO products for this category
+                if total_products == 0:
+                    had_to_fallback = True
+                    print(f"[/api/analyze] ⚠️ Category '{validated_category}' has 0 products in DB!")
+                
                 total_pages = (total_products + page_size - 1) // page_size
+            
+            # ✅ Only trigger crawl if DB has NO products at all
+            if had_to_fallback:  # This means both (with filters) and (category-only) = 0
+                print(f"[/api/analyze] ⚠️⚠️ DB EMPTY - Triggering background CRAWL...")
+                print(f"[/api/analyze] Query: '{request.query}' → Category: '{validated_category}'")
+                if search_filters:
+                    print(f"[/api/analyze] Wanted attributes: {search_filters}")
+                print(f"[/api/analyze] Starting crawl from Tiki/Lazada...")
+                try:
+                    # Trigger background crawl
+                    from app.crawler.multi_crawler import MultiCrawler
+                    from fastapi import BackgroundTasks
+                    
+                    # Create a background task to crawl
+                    crawler = MultiCrawler()
+                    # Build search query with extracted attributes
+                    search_query = request.query  # Use original user query
+                    
+                    # Run crawl in background (non-blocking)
+                    import asyncio
+                    asyncio.create_task(
+                        _trigger_crawl(
+                            search_query, 
+                            validated_category, 
+                            category_slug,
+                            extracted_attrs
+                        )
+                    )
+                    print(f"[/api/analyze] ✅ Crawl task started in background")
+                    print(f"[/api/analyze] ℹ️ Note: Crawl results will be available in DB soon")
+                except Exception as crawl_error:
+                    print(f"[/api/analyze] ⚠️ Could not start crawl: {crawl_error}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print(f"[/api/analyze] ✅ DB has {total_products} products - No crawl needed")
             
         except Exception as e:
             print(f"[/api/analyze] ❌ Error searching products: {e}")
@@ -522,7 +544,8 @@ async def analyze_query(request: QueryRequest):
             "products": initial_products,  # ✅ NEW: Initial products from DB
             "total": total_products,  # ✅ NEW
             "total_pages": total_pages,  # ✅ NEW
-            "conversation_id": conversation_id
+            "conversation_id": conversation_id,
+            "selected_attributes": extracted_attrs  # ✅ NEW: Extracted attributes to pre-tick filters in frontend
         }
         
     except Exception as e:
@@ -777,3 +800,78 @@ def _generate_hints_from_filters(category: str, filters: list) -> list:
     
     # Return top 3
     return hints[:3]
+
+
+# ===== HELPER: Background Crawl =====
+
+async def _trigger_crawl(
+    search_query: str,
+    category: str,
+    category_slug: str,
+    extracted_attrs: Dict[str, Any]
+):
+    """
+    Background crawl task - triggered when DB has 0 products
+    
+    Args:
+        search_query: Original user query (e.g., "giày nike")
+        category: Detected category (e.g., "Giày")
+        category_slug: Category slug (e.g., "giay")
+        extracted_attrs: Extracted attributes from query (e.g., {brand: "Nike"})
+    """
+    try:
+        print(f"\n{'='*80}")
+        print(f"[_trigger_crawl] 🌐 STARTING BACKGROUND CRAWL")
+        print(f"{'='*80}")
+        print(f"[_trigger_crawl] Query: '{search_query}'")
+        print(f"[_trigger_crawl] Category: '{category}'")
+        print(f"[_trigger_crawl] Attributes: {extracted_attrs}")
+        
+        # Import crawler
+        from app.crawler.crawler import TikiCrawler
+        
+        # Create crawler and crawl
+        crawler = TikiCrawler()
+        
+        print(f"[_trigger_crawl] Crawling from Tiki...")
+        crawled_products = await crawler.crawl(
+            category=category,
+            attributes=extracted_attrs,
+            get_details=True
+        )
+        
+        print(f"[_trigger_crawl] ✅ Crawled {len(crawled_products)} products from Tiki")
+        
+        # Save to DB
+        if crawled_products:
+            try:
+                # Extract schema from crawled data
+                from app.services.schema_reconciler import SchemaReconciler
+                reconciler = SchemaReconciler()
+                
+                actual_schema = reconciler.extract_actual_schema(crawled_products)
+                print(f"[_trigger_crawl] ✅ Extracted schema: {len(actual_schema)} attributes")
+                
+                # Save products
+                saved_count = reconciler.save_products_to_db(
+                    category,
+                    category_id=None,  # Will be looked up
+                    products=crawled_products,
+                    schema=actual_schema
+                )
+                
+                print(f"[_trigger_crawl] ✅ Saved {saved_count} products to DB")
+                print(f"[_trigger_crawl] ℹ️ Products now available in /api/analyze")
+                
+            except Exception as save_error:
+                print(f"[_trigger_crawl] ⚠️ Could not save to DB: {save_error}")
+                import traceback
+                traceback.print_exc()
+        
+        print(f"[_trigger_crawl] ✅ Background crawl completed")
+        print(f"{'='*80}\n")
+        
+    except Exception as e:
+        print(f"[_trigger_crawl] ❌ Crawl error: {e}")
+        import traceback
+        traceback.print_exc()

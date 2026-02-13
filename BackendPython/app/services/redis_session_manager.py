@@ -9,7 +9,7 @@ import json
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 
-from app.services.search_progress_service import SearchSession
+from app.services.search_models import SearchSession
 
 
 class RedisSessionManager:
@@ -118,7 +118,7 @@ class RedisSessionManager:
                 session.total_products = progress["total_products"]
             
             if "state" in progress:
-                from app.services.search_progress_service import SearchState
+                from app.services.search_models import SearchState
                 session.state = SearchState(progress["state"])
             
             session.last_updated_at = datetime.utcnow()
@@ -209,7 +209,7 @@ class InMemorySessionManager:
             session.total_products = progress["total_products"]
         
         if "state" in progress:
-            from app.services.search_progress_service import SearchState
+            from app.services.search_models import SearchState
             session.state = SearchState(progress["state"])
         
         session.last_updated_at = datetime.utcnow()

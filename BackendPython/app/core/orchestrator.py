@@ -277,7 +277,7 @@ class RecommendationOrchestrator:
     # CASE HANDLERS
     # ====================================================================================
     
-    async def handle_case_1_clear_request(
+    async def  handle_case_1_clear_request(
         self,
         user_input: str,
         case_data: Dict[str, Any],

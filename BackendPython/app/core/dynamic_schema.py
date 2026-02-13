@@ -147,7 +147,7 @@ UNIVERSAL_KEYWORDS = {
     "laptop": ["laptop", "máy tính xách tay", "macbook", "notebook", "máy tính"],
     "bao cao su": ["bao cao su", "condom", "bcs", "tránh thai"],
     "đồng hồ": ["đồng hồ", "watch", "smartwatch", "đồng hồ thông minh"],
-    "nước ngọt": ["nước ngọt", "nước", "cola", "cocacola", "sprite", "fanta", "pepsi", "cà phê", "cafe"],
+    "nước ngọt": ["nước ngọt", "nước", "cola", "cocacola", "sprite", "fanta", "pepsi", "cà phê", "cafe", "nước mắm", "nước tương"],
     "trà": ["trà", "trà xanh", "trà đen", "tea", "trà oolong"],
 }
 
@@ -158,12 +158,19 @@ AVAILABLE_CATEGORIES = list(UNIVERSAL_KEYWORDS.keys())
 class DynamicSchemaManager:
     """
     Quản lý dynamic schemas - tự động cấp attributes cho ANY category
+    
+    universal_keywords property được DynamicCategoryDetector sử dụng
     """
     
     def __init__(self):
         self.universal_attrs = UNIVERSAL_ATTRIBUTES.copy()
         self.category_specific = CATEGORY_SPECIFIC_ATTRS.copy()
-        self.universal_keywords = UNIVERSAL_KEYWORDS.copy()
+        self._universal_keywords = UNIVERSAL_KEYWORDS.copy()
+    
+    @property
+    def universal_keywords(self):
+        """Return UNIVERSAL_KEYWORDS for category detection"""
+        return self._universal_keywords
     
     def get_attributes_for_category(self, category: str) -> Dict[str, AttributeConstraint]:
         """

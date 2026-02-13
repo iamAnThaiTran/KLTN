@@ -22,12 +22,13 @@ from app.models.progressive_search_models import (
     SearchStateEnum,
     FilterSuggestion,
 )
-from app.services.search_progress_service import SearchProgressService, SearchState
-from app.services.redis_session_manager import InMemorySessionManager
+from app.services.search_progress_service import SearchProgressService
+from app.services.search_models import SearchState
+from app.services.session_manager_factory import get_session_manager
 
 # Initialize service and session manager
 search_service = SearchProgressService()
-session_manager = InMemorySessionManager()
+session_manager = get_session_manager()
 
 router = APIRouter(prefix="/api/v1/search", tags=["progressive-search"])
 

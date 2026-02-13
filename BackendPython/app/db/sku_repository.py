@@ -151,15 +151,43 @@ class SKURepository:
                 continue
             
             param_key = f'filter_{attr_idx}'
-            filter_conditions.append(f"""
-                EXISTS (
-                    SELECT 1 FROM sku_attributes sa{attr_idx}
-                    WHERE sa{attr_idx}.sku_id = s.id
-                      AND sa{attr_idx}.attribute_name = '{attr_name}'
-                      AND sa{attr_idx}.attribute_value = ANY(%({param_key})s)
-                )
-            """)
-            params[param_key] = values
+            # ✅ NORMALIZE: Convert values to lowercase for case-insensitive search
+            normalized_values = [str(v).lower() for v in values]
+            
+            # ✅ NEW: Fallback logic for brand attribute
+            # If attribute is 'brand', also check products.brand (for data coverage)
+            if attr_name.lower() == 'brand':
+                brand_param = f'brand_{attr_idx}'
+                params[brand_param] = normalized_values
+                filter_conditions.append(f"""
+                    (
+                        -- Try sku_attributes first
+                        EXISTS (
+                            SELECT 1 FROM sku_attributes sa{attr_idx}
+                            WHERE sa{attr_idx}.sku_id = s.id
+                              AND sa{attr_idx}.attribute_name = 'brand'
+                              AND LOWER(sa{attr_idx}.attribute_value) = ANY(%({param_key})s)
+                        )
+                        OR
+                        -- Fallback to products.brand if sku_attributes is empty
+                        (
+                            SELECT COUNT(*) FROM sku_attributes WHERE attribute_name = 'brand'
+                        ) = 0
+                        AND LOWER(p.brand) = ANY(%({brand_param})s)
+                    )
+                """)
+                params[param_key] = normalized_values
+            else:
+                # Normal attribute search
+                filter_conditions.append(f"""
+                    EXISTS (
+                        SELECT 1 FROM sku_attributes sa{attr_idx}
+                        WHERE sa{attr_idx}.sku_id = s.id
+                          AND sa{attr_idx}.attribute_name = '{attr_name}'
+                          AND LOWER(sa{attr_idx}.attribute_value) = ANY(%({param_key})s)
+                    )
+                """)
+                params[param_key] = normalized_values
         
         # Add price filters
         if min_price is not None:
@@ -171,6 +199,57 @@ class SKURepository:
             params['max_price'] = max_price
         
         where_clause = " AND ".join(filter_conditions) if filter_conditions else "TRUE"
+        
+        # Log for debugging
+        print(f"[SKURepository.search_products] DEBUG:")
+        print(f"  category_slug: '{category_slug}'")
+        print(f"  filters: {filters}")
+        print(f"  where_clause: {where_clause}")
+        
+        # DEBUG: Check data in DB for this category
+        if filters:  # Only debug when filters exist
+            debug_cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            # Check 1: Total products in category
+            debug_cursor.execute("""
+                SELECT COUNT(DISTINCT p.id) as count
+                FROM products p
+                JOIN categories c ON c.id = p.category_id
+                WHERE c.slug = %s AND p.is_active = true
+            """, (category_slug,))
+            total_in_cat = debug_cursor.fetchone()['count']
+            print(f"  [DEBUG] Total products in '{category_slug}': {total_in_cat}")
+            
+            # Check 2: SKUs with attributes
+            debug_cursor.execute("""
+                SELECT COUNT(DISTINCT sku_id) as count
+                FROM sku_attributes
+                WHERE attribute_name = %s
+            """, (list(filters.keys())[0],))
+            skus_with_attr = debug_cursor.fetchone()['count']
+            print(f"  [DEBUG] SKUs with attribute '{list(filters.keys())[0]}': {skus_with_attr}")
+            
+            # Check 3: Actual values for this attribute
+            debug_cursor.execute("""
+                SELECT DISTINCT attribute_value
+                FROM sku_attributes
+                WHERE attribute_name = %s
+                LIMIT 10
+            """, (list(filters.keys())[0],))
+            values = debug_cursor.fetchall()
+            print(f"  [DEBUG] Sample values for '{list(filters.keys())[0]}': {[v['attribute_value'] for v in values]}")
+            
+            # Check 4: Check if filter value exists
+            for filter_name, filter_values in filters.items():
+                debug_cursor.execute("""
+                    SELECT COUNT(*) as count
+                    FROM sku_attributes
+                    WHERE attribute_name = %s AND attribute_value = ANY(%s)
+                """, (filter_name, filter_values))
+                match_count = debug_cursor.fetchone()['count']
+                print(f"  [DEBUG] Matches for {filter_name}={filter_values}: {match_count}")
+            
+            debug_cursor.close()
         
         # Count total
         count_query = f"""

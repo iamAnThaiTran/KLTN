@@ -26,6 +26,7 @@ sku_repo = SKURepository()
 class CrawlRequest(BaseModel):
     """Request to crawl and filter products by category"""
     category_name: str  # e.g., "giày", "đồng hồ"
+    user_input: Optional[str] = None  # ✅ NEW: Original user input for attribute extraction
     min_price: Optional[float] = None
     max_price: Optional[float] = None
     selected_filters: Dict[str, List[str]] = Field(default_factory=dict)
@@ -137,6 +138,19 @@ async def crawl_and_get_filters(request: CrawlRequest):
         
         print(f"✅ Category slug: {category_slug}")
         
+        # ✅ NEW: Extract attributes from user input if provided
+        extracted_attributes = {}
+        if request.user_input:
+            from app.core.extractor import AttributeExtractor
+            extractor = AttributeExtractor()
+            extraction_result = extractor.extract(
+                request.user_input,
+                validation["category"],
+                use_llm=False
+            )
+            extracted_attributes = extraction_result.get("extracted", {})
+            print(f"✅ Extracted attributes from '{request.user_input}': {extracted_attributes}")
+        
         # Search products from DB
         products, total = sku_repo.search_products(
             category_slug=category_slug,
@@ -177,7 +191,8 @@ async def crawl_and_get_filters(request: CrawlRequest):
             page=request.page,
             page_size=request.page_size,
             total_pages=total_pages,
-            filters=filter_groups
+            filters=filter_groups,
+            selected_attributes=extracted_attributes  # ✅ NEW: Return extracted attributes
         )
     
     except HTTPException:
