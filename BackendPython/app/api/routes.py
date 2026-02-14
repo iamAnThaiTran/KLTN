@@ -3,6 +3,8 @@
 import asyncio
 import logging
 import sys
+import uuid
+import traceback
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -13,15 +15,24 @@ from app.api.progressive_search_routes import router as progressive_search_route
 from app.api.product_automation_routes import router as product_automation_router
 from app.crawler.crawler import TikiCrawler
 from app.db.sku_repository import SKURepository
+from app.services.session_manager import get_session_manager
 # from app.core.crawler import YourCrawler  # Import your crawler
 
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='[%(name)s] %(levelname)s: %(message)s',
-    stream=sys.stdout,
-    force=True
-)
+# Configure logging with immediate flush
+class FlushingStreamHandler(logging.StreamHandler):
+    """Custom handler that flushes after each log"""
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            self.stream.write(msg + self.terminator)
+            self.stream.flush()  # 👈 Force flush immediately
+        except Exception:
+            self.handleError(record)
+
+handler = FlushingStreamHandler(sys.stdout)
+handler.setFormatter(logging.Formatter('[%(name)s] %(levelname)s: %(message)s'))
+logging.root.addHandler(handler)
+logging.root.setLevel(logging.DEBUG)
 logger = logging.getLogger("routes")
 
 def log_analyze(msg):
@@ -59,9 +70,10 @@ class ResponseUpdate(BaseModel):
     value: str
     attribute_name: Optional[str] = None
 
-# ===== IN-MEMORY SESSION STORAGE =====
-# Trong production, dùng Redis
-sessions = {}
+# ===== SESSION MANAGEMENT =====
+# Using Redis with in-memory fallback
+session_manager = get_session_manager()
+print(f"[Routes] Session storage type: {session_manager.get_storage_type()}", flush=True)
 
 # ===== INITIALIZE ORCHESTRATOR =====
 # Giả sử bạn có YourCrawler class
@@ -83,16 +95,15 @@ async def process_query(request: QueryRequest):
     2. searching: Đang crawl
     3. results: Có kết quả + filters
     """
-    print('vao api query')
+    print('vao api query', flush=True)
     
     # Get or create session
     conversation_id = request.conversation_id
     if not conversation_id:
-        import uuid
-        conversation_id = str(uuid.uuid4())
-        sessions[conversation_id] = None
+        # Auto-generate conversation_id
+        conversation_id = session_manager.create_session()
     
-    conversation_state = sessions.get(conversation_id)
+    conversation_state = session_manager.get_session(conversation_id)
     
     # Process
     result = await orchestrator.process_query(
@@ -101,7 +112,7 @@ async def process_query(request: QueryRequest):
     )
     
     # Save state
-    sessions[conversation_id] = result.get("state")
+    session_manager.set_session(conversation_id, result.get("state"))
     
     # Add conversation_id to response
     result["conversation_id"] = conversation_id
@@ -138,10 +149,10 @@ async def process_query(request: QueryRequest):
                     
                     # Add filters to response
                     result["filters"] = filter_groups
-                    print(f"✅ Added {len(filter_groups)} filter groups to query response")
+                    print(f"✅ Added {len(filter_groups)} filter groups to query response", flush=True)
                     
         except Exception as e:
-            print(f"⚠️ Error fetching filters: {e}")
+            print(f"⚠️ Error fetching filters: {e}", flush=True)
             import traceback
             traceback.print_exc()
             # Don't fail the request if filters fail
@@ -188,11 +199,10 @@ async def analyze_query(request: QueryRequest):
         # Get or create session
         conversation_id = request.conversation_id
         if not conversation_id:
-            import uuid
-            conversation_id = str(uuid.uuid4())
-            sessions[conversation_id] = None
+            # Auto-generate conversation_id
+            conversation_id = session_manager.create_session()
         
-        conversation_state = sessions.get(conversation_id)
+        conversation_state = session_manager.get_session(conversation_id)
         
         # Step 1: Detect category only (FAST - no crawl)
         # Use the intent mapper + quick detection
@@ -210,7 +220,7 @@ async def analyze_query(request: QueryRequest):
         if intent_result.get("intent") and intent_result.get("categories"):
             # Pick first category
             category = intent_result["categories"][0]
-            print(f"[/api/analyze] Detected category: {category}")
+            print(f"[/api/analyze] Detected category: {category}", flush=True)
         else:
             # Try rule-based detection as fallback
             from app.core.orchestrator import RecommendationOrchestrator
@@ -218,7 +228,7 @@ async def analyze_query(request: QueryRequest):
             detected = orch._quick_category_detection(request.user_input)
             if detected.get("category"):
                 category = detected["category"]
-                print(f"[/api/analyze] Rule-based category: {category}")
+                print(f"[/api/analyze] Rule-based category: {category}", flush=True)
             else:
                 return {
                     "success": False,
@@ -238,22 +248,22 @@ async def analyze_query(request: QueryRequest):
         validated_category = validation["category"]
         
         # NEW: Step 1.5 - Extract attributes from user input
-        print(f"\n{'='*80}")
-        print(f"[/api/analyze] 🔍 EXTRACTION PHASE")
-        print(f"{'='*80}")
-        print(f"[/api/analyze] Input: '{request.user_input}'")
-        print(f"[/api/analyze] Category: '{validated_category}'")
+        print(f"\n{'='*80}", flush=True)
+        print(f"[/api/analyze] 🔍 EXTRACTION PHASE", flush=True)
+        print(f"{'='*80}", flush=True)
+        print(f"[/api/analyze] Input: '{request.user_input}'", flush=True)
+        print(f"[/api/analyze] Category: '{validated_category}'", flush=True)
         
         extraction_result = attr_extractor.extract(request.user_input, validated_category, use_llm=False)
         extracted_attrs = extraction_result.get("extracted", {})
         
-        print(f"[/api/analyze] Extraction method: {extraction_result.get('method', 'unknown')}")
-        print(f"[/api/analyze] Extraction confidence: {extraction_result.get('confidence', 0):.2f}")
-        print(f"[/api/analyze] ✅ Extracted attributes:")
+        print(f"[/api/analyze] Extraction method: {extraction_result.get('method', 'unknown')}", flush=True)
+        print(f"[/api/analyze] Extraction confidence: {extraction_result.get('confidence', 0):.2f}", flush=True)
+        print(f"[/api/analyze] ✅ Extracted attributes:", flush=True)
         for attr, value in extracted_attrs.items():
-            print(f"   - {attr}: {value} (type: {type(value).__name__})")
+            print(f"   - {attr}: {value} (type: {type(value).__name__})", flush=True)
         if not extracted_attrs:
-            print(f"   (none)")
+            print(f"   (none)", flush=True)
         
         # Step 2: Fetch filters from DB (FAST)
         try:
@@ -362,17 +372,17 @@ async def analyze_query(request: QueryRequest):
                     ]
                 })
             
-            print(f"[/api/analyze] Fetched {len(filter_groups)} filters from DB")
+            print(f"[/api/analyze] Fetched {len(filter_groups)} filters from DB", flush=True)
             
         except Exception as e:
-            print(f"[/api/analyze] ⚠️ Error fetching filters: {e}")
+            print(f"[/api/analyze] ⚠️ Error fetching filters: {e}", flush=True)
             filter_groups = []
         
         # Step 3: Search DB with extracted attributes (build query from extracted data)
-        print(f"\n{'='*80}")
-        print(f"[/api/analyze] 🔎 SEARCH PHASE")
-        print(f"{'='*80}")
-        print(f"[/api/analyze] Category slug: '{category_slug}'")
+        print(f"\n{'='*80}", flush=True)
+        print(f"[/api/analyze] 🔎 SEARCH PHASE", flush=True)
+        print(f"{'='*80}", flush=True)
+        print(f"[/api/analyze] Category slug: '{category_slug}'", flush=True)
         
         try:
             # Convert extracted attributes to filter format {attr: [value]}
@@ -388,7 +398,7 @@ async def analyze_query(request: QueryRequest):
                 if attr_name == "gia" and isinstance(attr_value, dict):
                     min_price = attr_value.get("min")
                     max_price = attr_value.get("max")
-                    print(f"[/api/analyze] 💰 Price range extracted: {min_price} - {max_price}")
+                    print(f"[/api/analyze] 💰 Price range extracted: {min_price} - {max_price}", flush=True)
                 # Handle list values
                 elif isinstance(attr_value, list):
                     search_filters[attr_name] = attr_value
@@ -399,20 +409,20 @@ async def analyze_query(request: QueryRequest):
                     # Skip dict or other complex types
                     continue
             
-            print(f"[/api/analyze] 📊 Search filters (converted from extracted attributes):")
+            print(f"[/api/analyze] 📊 Search filters (converted from extracted attributes):", flush=True)
             for filter_name, filter_value in search_filters.items():
-                print(f"   - {filter_name}: {filter_value}")
+                print(f"   - {filter_name}: {filter_value}", flush=True)
             if not search_filters and not min_price and not max_price:
-                print(f"   (no filters - using category only)")
+                print(f"   (no filters - using category only)", flush=True)
             
-            print(f"[/api/analyze] 🔗 Calling: sku_repo.search_products(")
-            print(f"   category_slug='{category_slug}',")
-            print(f"   filters={search_filters},")
-            print(f"   min_price={min_price},")
-            print(f"   max_price={max_price},")
-            print(f"   page=1,")
-            print(f"   page_size=20")
-            print(f")")
+            print(f"[/api/analyze] 🔗 Calling: sku_repo.search_products(", flush=True)
+            print(f"   category_slug='{category_slug}',", flush=True)
+            print(f"   filters={search_filters},", flush=True)
+            print(f"   min_price={min_price},", flush=True)
+            print(f"   max_price={max_price},", flush=True)
+            print(f"   page=1,", flush=True)
+            print(f"   page_size=20", flush=True)
+            print(f")", flush=True)
             
             # search_products returns (products_list, total_count) tuple
             initial_products, total_products = sku_repo.search_products(
@@ -424,15 +434,15 @@ async def analyze_query(request: QueryRequest):
                 page_size=20
             )
             
-            print(f"[/api/analyze] ✅ Search result: {total_products} products found")
+            print(f"[/api/analyze] ✅ Search result: {total_products} products found", flush=True)
             if initial_products:
-                print(f"[/api/analyze] First 3 products:")
+                print(f"[/api/analyze] First 3 products:", flush=True)
                 for i, prod in enumerate(initial_products[:3]):
-                    print(f"   {i+1}. {prod.get('title', 'N/A')}")
+                    print(f"   {i+1}. {prod.get('title', 'N/A')}", flush=True)
                     attrs = prod.get('attributes', {})
                     if attrs:
                         for k, v in list(attrs.items())[:3]:
-                            print(f"      - {k}: {v}")
+                            print(f"      - {k}: {v}", flush=True)
             
             # Calculate total pages
             page_size = 20
@@ -443,8 +453,8 @@ async def analyze_query(request: QueryRequest):
             
             # If no products found with extracted filters, fallback to category-only search
             if total_products == 0 and (search_filters or min_price or max_price):
-                print(f"[/api/analyze] ⚠️ No products found with extracted filters!")
-                print(f"[/api/analyze] 🔄 Fallback: Trying category-only search (no filters)...")
+                print(f"[/api/analyze] ⚠️ No products found with extracted filters!", flush=True)
+                print(f"[/api/analyze] 🔄 Fallback: Trying category-only search (no filters)...", flush=True)
                 initial_products, total_products = sku_repo.search_products(
                     category_slug, 
                     filters={},  # Fallback to empty filters
@@ -453,22 +463,22 @@ async def analyze_query(request: QueryRequest):
                     page=1, 
                     page_size=20
                 )
-                print(f"[/api/analyze] ✅ Fallback result: {total_products} products found (category-only)")
+                print(f"[/api/analyze] ✅ Fallback result: {total_products} products found (category-only)", flush=True)
                 
                 # If category-only also = 0, then DB has NO products for this category
                 if total_products == 0:
                     had_to_fallback = True
-                    print(f"[/api/analyze] ⚠️ Category '{validated_category}' has 0 products in DB!")
+                    print(f"[/api/analyze] ⚠️ Category '{validated_category}' has 0 products in DB!", flush=True)
                 
                 total_pages = (total_products + page_size - 1) // page_size
             
             # ✅ Only trigger crawl if DB has NO products at all
             if had_to_fallback:  # This means both (with filters) and (category-only) = 0
-                print(f"[/api/analyze] ⚠️⚠️ DB EMPTY - Triggering background CRAWL...")
-                print(f"[/api/analyze] Query: '{request.query}' → Category: '{validated_category}'")
+                print(f"[/api/analyze] ⚠️⚠️ DB EMPTY - Triggering background CRAWL...", flush=True)
+                print(f"[/api/analyze] Query: '{request.query}' → Category: '{validated_category}'", flush=True)
                 if search_filters:
-                    print(f"[/api/analyze] Wanted attributes: {search_filters}")
-                print(f"[/api/analyze] Starting crawl from Tiki/Lazada...")
+                    print(f"[/api/analyze] Wanted attributes: {search_filters}", flush=True)
+                print(f"[/api/analyze] Starting crawl from Tiki/Lazada...", flush=True)
                 try:
                     # Trigger background crawl
                     from app.crawler.multi_crawler import MultiCrawler
@@ -489,17 +499,17 @@ async def analyze_query(request: QueryRequest):
                             extracted_attrs
                         )
                     )
-                    print(f"[/api/analyze] ✅ Crawl task started in background")
-                    print(f"[/api/analyze] ℹ️ Note: Crawl results will be available in DB soon")
+                    print(f"[/api/analyze] ✅ Crawl task started in background", flush=True)
+                    print(f"[/api/analyze] ℹ️ Note: Crawl results will be available in DB soon", flush=True)
                 except Exception as crawl_error:
-                    print(f"[/api/analyze] ⚠️ Could not start crawl: {crawl_error}")
+                    print(f"[/api/analyze] ⚠️ Could not start crawl: {crawl_error}", flush=True)
                     import traceback
                     traceback.print_exc()
             else:
-                print(f"[/api/analyze] ✅ DB has {total_products} products - No crawl needed")
+                print(f"[/api/analyze] ✅ DB has {total_products} products - No crawl needed", flush=True)
             
         except Exception as e:
-            print(f"[/api/analyze] ❌ Error searching products: {e}")
+            print(f"[/api/analyze] ❌ Error searching products: {e}", flush=True)
             import traceback
             traceback.print_exc()
             initial_products = []
@@ -513,19 +523,19 @@ async def analyze_query(request: QueryRequest):
         # Map filter attribute_names to user-friendly hints
         hints = _generate_hints_from_filters(validated_category, filter_groups)
         
-        print(f"\n{'='*80}")
-        print(f"[/api/analyze] 💡 RESPONSE PHASE")
-        print(f"{'='*80}")
-        print(f"[/api/analyze] Generated {len(hints)} hints from filters")
+        print(f"\n{'='*80}", flush=True)
+        print(f"[/api/analyze] 💡 RESPONSE PHASE", flush=True)
+        print(f"{'='*80}", flush=True)
+        print(f"[/api/analyze] Generated {len(hints)} hints from filters", flush=True)
         for i, hint in enumerate(hints[:3]):
-            print(f"   {i+1}. {hint}")
-        print(f"[/api/analyze] Available filters: {len(filter_groups)} groups")
-        print(f"[/api/analyze] Final response:")
-        print(f"   - success: True")
-        print(f"   - category: {validated_category}")
-        print(f"   - products: {len(initial_products)}")
-        print(f"   - total: {total_products}")
-        print(f"[/api/analyze] {'='*80}\n")
+            print(f"   {i+1}. {hint}", flush=True)
+        print(f"[/api/analyze] Available filters: {len(filter_groups)} groups", flush=True)
+        print(f"[/api/analyze] Final response:", flush=True)
+        print(f"   - success: True", flush=True)
+        print(f"   - category: {validated_category}", flush=True)
+        print(f"   - products: {len(initial_products)}", flush=True)
+        print(f"   - total: {total_products}", flush=True)
+        print(f"[/api/analyze] {'='*80}\n", flush=True)
         
         # Save partial state for later search
         if conversation_state is None:
@@ -534,7 +544,7 @@ async def analyze_query(request: QueryRequest):
         conversation_state["category"] = validated_category
         conversation_state["category_id"] = validation.get("category_id")
         conversation_state["extracted_attributes"] = extracted_attrs  # ✅ NEW: Save extracted attributes
-        sessions[conversation_id] = conversation_state
+        session_manager.set_session(conversation_id, conversation_state)
         
         return {
             "success": True,
@@ -549,7 +559,7 @@ async def analyze_query(request: QueryRequest):
         }
         
     except Exception as e:
-        print(f"[/api/analyze] ❌ Error: {e}")
+        print(f"[/api/analyze] ❌ Error: {e}", flush=True)
         import traceback
         traceback.print_exc()
         return {
@@ -566,10 +576,10 @@ async def respond_to_question(request: ResponseUpdate):
     
     conversation_id = request.conversation_id
     
-    if conversation_id not in sessions:
+    if not session_manager.session_exists(conversation_id):
         raise HTTPException(status_code=404, detail="Session not found")
     
-    conversation_state = sessions[conversation_id]
+    conversation_state = session_manager.get_session(conversation_id)
     
     # Update state với response của user
     updated_state = orchestrator.update_state(
@@ -581,7 +591,7 @@ async def respond_to_question(request: ResponseUpdate):
         }
     )
     
-    sessions[conversation_id] = updated_state
+    session_manager.set_session(conversation_id, updated_state)
     
     # Continue processing với state mới
     # Gửi empty string vì user đã trả lời rồi
@@ -597,25 +607,28 @@ async def respond_to_question(request: ResponseUpdate):
 @app.get("/api/session/{conversation_id}")
 async def get_session(conversation_id: str):
     """Debug endpoint: xem session state"""
-    if conversation_id not in sessions:
+    if not session_manager.session_exists(conversation_id):
         raise HTTPException(status_code=404, detail="Session not found")
     
     return {
         "conversation_id": conversation_id,
-        "state": sessions[conversation_id]
+        "state": session_manager.get_session(conversation_id)
     }
 
 @app.delete("/api/session/{conversation_id}")
 async def clear_session(conversation_id: str):
     """Clear session"""
-    if conversation_id in sessions:
-        del sessions[conversation_id]
-    
+    session_manager.delete_session(conversation_id)
     return {"message": "Session cleared"}
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}
+    """Health check endpoint with session stats"""
+    return {
+        "status": "ok",
+        "session_storage": session_manager.get_storage_type(),
+        "active_sessions": session_manager.get_session_count()
+    }
 
 @app.post("/api/v1/crawl/tiki")
 async def crawl_tiki(request: Dict[str, Any]):
@@ -820,12 +833,12 @@ async def _trigger_crawl(
         extracted_attrs: Extracted attributes from query (e.g., {brand: "Nike"})
     """
     try:
-        print(f"\n{'='*80}")
-        print(f"[_trigger_crawl] 🌐 STARTING BACKGROUND CRAWL")
-        print(f"{'='*80}")
-        print(f"[_trigger_crawl] Query: '{search_query}'")
-        print(f"[_trigger_crawl] Category: '{category}'")
-        print(f"[_trigger_crawl] Attributes: {extracted_attrs}")
+        print(f"\n{'='*80}", flush=True)
+        print(f"[_trigger_crawl] 🌐 STARTING BACKGROUND CRAWL", flush=True)
+        print(f"{'='*80}", flush=True)
+        print(f"[_trigger_crawl] Query: '{search_query}'", flush=True)
+        print(f"[_trigger_crawl] Category: '{category}'", flush=True)
+        print(f"[_trigger_crawl] Attributes: {extracted_attrs}", flush=True)
         
         # Import crawler
         from app.crawler.crawler import TikiCrawler
@@ -833,14 +846,14 @@ async def _trigger_crawl(
         # Create crawler and crawl
         crawler = TikiCrawler()
         
-        print(f"[_trigger_crawl] Crawling from Tiki...")
+        print(f"[_trigger_crawl] Crawling from Tiki...", flush=True)
         crawled_products = await crawler.crawl(
             category=category,
             attributes=extracted_attrs,
             get_details=True
         )
         
-        print(f"[_trigger_crawl] ✅ Crawled {len(crawled_products)} products from Tiki")
+        print(f"[_trigger_crawl] ✅ Crawled {len(crawled_products)} products from Tiki", flush=True)
         
         # Save to DB
         if crawled_products:
@@ -850,7 +863,7 @@ async def _trigger_crawl(
                 reconciler = SchemaReconciler()
                 
                 actual_schema = reconciler.extract_actual_schema(crawled_products)
-                print(f"[_trigger_crawl] ✅ Extracted schema: {len(actual_schema)} attributes")
+                print(f"[_trigger_crawl] ✅ Extracted schema: {len(actual_schema)} attributes", flush=True)
                 
                 # Save products
                 saved_count = reconciler.save_products_to_db(
@@ -860,18 +873,18 @@ async def _trigger_crawl(
                     schema=actual_schema
                 )
                 
-                print(f"[_trigger_crawl] ✅ Saved {saved_count} products to DB")
-                print(f"[_trigger_crawl] ℹ️ Products now available in /api/analyze")
+                print(f"[_trigger_crawl] ✅ Saved {saved_count} products to DB", flush=True)
+                print(f"[_trigger_crawl] ℹ️ Products now available in /api/analyze", flush=True)
                 
             except Exception as save_error:
-                print(f"[_trigger_crawl] ⚠️ Could not save to DB: {save_error}")
+                print(f"[_trigger_crawl] ⚠️ Could not save to DB: {save_error}", flush=True)
                 import traceback
                 traceback.print_exc()
         
-        print(f"[_trigger_crawl] ✅ Background crawl completed")
-        print(f"{'='*80}\n")
+        print(f"[_trigger_crawl] ✅ Background crawl completed", flush=True)
+        print(f"{'='*80}\n", flush=True)
         
     except Exception as e:
-        print(f"[_trigger_crawl] ❌ Crawl error: {e}")
+        print(f"[_trigger_crawl] ❌ Crawl error: {e}", flush=True)
         import traceback
         traceback.print_exc()
