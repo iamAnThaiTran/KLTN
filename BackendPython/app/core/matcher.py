@@ -47,8 +47,8 @@ class ProductMatcher:
         for idx, product in enumerate(products):
             result = self._validate_product(product, schema, user_attributes)
             
-            print(f"DEBUG Match [{idx}]: {product.get('name', 'N/A')[:50]}")
-            print(f"  Valid: {result['is_valid']}, Score: {result['score']}, Reasons: {result['reasons']}")
+            # print(f"DEBUG Match [{idx}]: {product.get('name', 'N/A')[:50]}")
+            # print(f"  Valid: {result['is_valid']}, Score: {result['score']}, Reasons: {result['reasons']}")
             
             if result["is_valid"]:
                 product["match_score"] = result["score"]

@@ -286,7 +286,7 @@ class CrawlerToSKUAdapter:
                         if extracted.get('materials'):
                             attributes['material'] = extracted['materials'][0]
                         
-                        logger.info(f"    Using extracted attributes: {attributes}")
+                        # logger.info(f"    Using extracted attributes: {attributes}")
                     else:
                         # Fallback: Extract từ title
                         attributes = self.extract_attributes_from_title(
@@ -355,7 +355,7 @@ class CrawlerToSKUAdapter:
                                 attr_values
                             )
                     
-                    logger.info(f"✅ Saved: {product_data.get('title')} → SKU: {sku_code}")
+                    # logger.info(f"✅ Saved: {product_data.get('title')} → SKU: {sku_code}")
                     
                 except Exception as e:
                     logger.error(f"Error saving product: {e}")

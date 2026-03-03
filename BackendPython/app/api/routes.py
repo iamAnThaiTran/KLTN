@@ -165,14 +165,9 @@ async def analyze_query(request: QueryRequest):
     """
     FAST endpoint: Analyze user input + get initial products
     
-    Flow:
-    1. Detect category from user input
-    2. Get attributes/filters from DB
-    3. **Search DB with category + empty filters to get initial products**
-    4. If no products, crawl the web
-    5. Return: category, hints, filters, initial_products
+    ✅ NOW using orchestrator.process_query() with 7-case routing
     
-    Returns:
+    Returns (same format as before):
     {
         "success": True,
         "category": "giày",
@@ -184,7 +179,9 @@ async def analyze_query(request: QueryRequest):
         }],
         "products": [initial products from DB],
         "total": 25,
-        "total_pages": 2
+        "total_pages": 2,
+        "conversation_id": "abc123",
+        "selected_attributes": {"brand": "Nike", ...}
     }
     """
     
@@ -192,370 +189,110 @@ async def analyze_query(request: QueryRequest):
         logger.info(f"\n{'='*100}")
         logger.info(f"[/api/analyze] ✅ ENDPOINT HIT!")
         logger.info(f"[/api/analyze] Request: {request.user_input}")
-        logger.info(f"{'='*100}")
         
-        log_analyze(f"[/api/analyze] Starting analysis...")
+        print(f"[/api/analyze] Starting analysis with orchestrator...", flush=True)
         
-        # Get or create session
+        # Step 1: Get or create session
         conversation_id = request.conversation_id
         if not conversation_id:
-            # Auto-generate conversation_id
             conversation_id = session_manager.create_session()
+        logger.info(f"[/api/analyze] Conversation ID: {conversation_id}")
         
         conversation_state = session_manager.get_session(conversation_id)
-        
-        # Step 1: Detect category only (FAST - no crawl)
-        # Use the intent mapper + quick detection
-        from app.core.intent_mapper import IntentMapper
-        from app.services.category_validator import CategoryValidator
-        from app.core.extractor import AttributeExtractor
-        
-        intent_mapper = IntentMapper()
-        validator = CategoryValidator()
-        attr_extractor = AttributeExtractor()
-        
-        # Detect intent + category
-        intent_result = intent_mapper.map_intent(request.user_input)
-        
-        if intent_result.get("intent") and intent_result.get("categories"):
-            # Pick first category
-            category = intent_result["categories"][0]
-            print(f"[/api/analyze] Detected category: {category}", flush=True)
-        else:
-            # Try rule-based detection as fallback
-            from app.core.orchestrator import RecommendationOrchestrator
-            orch = RecommendationOrchestrator()
-            detected = orch._quick_category_detection(request.user_input)
-            if detected.get("category"):
-                category = detected["category"]
-                print(f"[/api/analyze] Rule-based category: {category}", flush=True)
-            else:
-                return {
-                    "success": False,
-                    "error": "Không detect được loại sản phẩm",
-                    "conversation_id": conversation_id
-                }
-        
-        # Validate category
-        validation = validator.validate_category(category)
-        if not validation["success"]:
-            return {
-                "success": False,
-                "error": f"Danh mục không hợp lệ: {category}",
-                "conversation_id": conversation_id
+        logger.info(f"[/api/analyze] Initial conversation state: {conversation_state}")
+        if conversation_state is None:
+            conversation_state = {
+                "has_category": False,
+                "category": None,
+                "extracted": {},
+                "missing_required": [],
+                "search_history": [],
+                "attributes_asked": [],
+                "cached_products": None,
+                "cached_filters": None,
+                "last_crawl_params": None,
+                "cache_hits": 0,
+                "cache_misses": 0
             }
         
-        validated_category = validation["category"]
+        # Step 2: ✅ USE ORCHESTRATOR - Let it handle all 7 cases!
+        logger.info(f"[/api/analyze] Calling orchestrator.process_query()...", flush=True)
+        orch_result = await orchestrator.process_query(
+            user_input=request.user_input,
+            conversation_state=conversation_state
+        )
         
-        # NEW: Step 1.5 - Extract attributes from user input
-        print(f"\n{'='*80}", flush=True)
-        print(f"[/api/analyze] 🔍 EXTRACTION PHASE", flush=True)
-        print(f"{'='*80}", flush=True)
-        print(f"[/api/analyze] Input: '{request.user_input}'", flush=True)
-        print(f"[/api/analyze] Category: '{validated_category}'", flush=True)
+        logger.info(f"[/api/analyze] ✅ Orchestrator returned: status={orch_result.get('status')}", flush=True)
         
-        extraction_result = attr_extractor.extract(request.user_input, validated_category, use_llm=False)
-        extracted_attrs = extraction_result.get("extracted", {})
+        # Step 3: Save state
+        if "state" in orch_result:
+            session_manager.set_session(conversation_id, orch_result["state"])
+            conversation_state = orch_result["state"]
         
-        print(f"[/api/analyze] Extraction method: {extraction_result.get('method', 'unknown')}", flush=True)
-        print(f"[/api/analyze] Extraction confidence: {extraction_result.get('confidence', 0):.2f}", flush=True)
-        print(f"[/api/analyze] ✅ Extracted attributes:", flush=True)
-        for attr, value in extracted_attrs.items():
-            print(f"   - {attr}: {value} (type: {type(value).__name__})", flush=True)
-        if not extracted_attrs:
-            print(f"   (none)", flush=True)
+        # Step 4: Transform orchestrator response to /api/analyze format
+        # Get products and category from result
+        products = orch_result.get("products", [])
+        total_products = orch_result.get("total_found", len(products))
+        total_pages = (total_products + 19) // 20 if total_products > 0 else 0
         
-        # Step 2: Fetch filters from DB (FAST)
-        try:
-            category_slug = sku_repo.get_category_slug_from_name(validated_category)
-            
-            # NEW: If category not in DB, crawl web + save to DB
-            if not category_slug:
-                log_analyze(f"\n{'='*80}")
-                log_analyze(f"[/api/analyze] 🌐 CRAWL PHASE (Category not in DB)")
-                log_analyze(f"[/api/analyze] Category '{validated_category}' not in DB, crawling web...")
-                log_analyze(f"{'='*80}")
-                
-                try:
-                    # Step 1: Crawl with extracted attributes
-                    crawler = TikiCrawler()
-                    crawled_products = await crawler.crawl(
-                        category=validated_category,
-                        attributes=extracted_attrs,
-                        get_details=True
-                    )
-                    
-                    log_analyze(f"[/api/analyze] ✅ Crawled {len(crawled_products)} products from web")
-                    
-                    if not crawled_products:
-                        return {
-                            "success": False,
-                            "error": f"Không tìm được sản phẩm '{validated_category}' trên web",
-                            "conversation_id": conversation_id
-                        }
-                    
-                    # Step 2: Extract actual schema from crawled data
-                    from app.services.schema_reconciler import SchemaReconciler
-                    reconciler = SchemaReconciler()
-                    
-                    actual_schema = reconciler.extract_actual_schema(crawled_products)
-                    log_analyze(f"[/api/analyze] ✅ Extracted actual schema: {len(actual_schema)} attributes")
-                    
-                    # Step 3: Reconcile LLM predicted schema vs actual schema
-                    llm_schema = {
-                        attr: {"type": "text", "values": []}
-                        for attr in extracted_attrs.keys()
-                    }
-                    final_schema = reconciler.reconcile_schemas(llm_schema, actual_schema)
-                    
-                    # Step 4: Get category ID (just created)
-                    new_category_id = validation.get("category_id")
-                    
-                    # Step 5: Save products to DB
-                    saved_count = reconciler.save_products_to_db(
-                        validated_category,
-                        new_category_id,
-                        crawled_products,
-                        final_schema
-                    )
-                    
-                    # Step 6: Save schema to DB
-                    reconciler.save_schema_to_db(
-                        new_category_id,
-                        validated_category,
-                        final_schema
-                    )
-                    
-                    log_analyze(f"[/api/analyze] ✅ Saved {saved_count} products + schema to DB")
-                    
-                    # Return results
-                    initial_products = crawled_products[:20]
-                    total_products = len(crawled_products)
-                    total_pages = (total_products + 19) // 20
-                    
-                    return {
-                        "success": True,
-                        "category": validated_category,
-                        "clarifying_hints": [],
-                        "filters": [],
-                        "products": initial_products,
-                        "total": total_products,
-                        "total_pages": total_pages,
-                        "conversation_id": conversation_id,
-                        "source": "crawled"  # Mark as crawled data
-                    }
-                        
-                except Exception as crawl_error:
-                    log_analyze(f"[/api/analyze] ❌ Crawl error: {crawl_error}")
-                    return {
-                        "success": False,
-                        "error": f"Lỗi crawl web: {str(crawl_error)}",
-                        "conversation_id": conversation_id
-                    }
-            
-            # Category exists in DB, continue normal flow
-            
-            # Get filters
-            available_filters = sku_repo.get_available_filters(category_slug)
-            
-            # Build filter groups
-            filter_groups = []
-            for f in available_filters:
-                filter_groups.append({
-                    "attribute_name": f['attribute_name'],
-                    "display_name": f['display_name'] or f['attribute_name'],
-                    "data_type": f['data_type'],
-                    "options": [
-                        {"attribute_value": opt.get('attribute_value'), "product_count": opt.get('product_count')}
-                        for opt in f['options']
-                        if opt.get('attribute_value') is not None
-                    ]
-                })
-            
-            print(f"[/api/analyze] Fetched {len(filter_groups)} filters from DB", flush=True)
-            
-        except Exception as e:
-            print(f"[/api/analyze] ⚠️ Error fetching filters: {e}", flush=True)
-            filter_groups = []
+        category = conversation_state.get("category", "")
+        extracted_attrs = conversation_state.get("extracted", {})
         
-        # Step 3: Search DB with extracted attributes (build query from extracted data)
-        print(f"\n{'='*80}", flush=True)
-        print(f"[/api/analyze] 🔎 SEARCH PHASE", flush=True)
-        print(f"{'='*80}", flush=True)
-        print(f"[/api/analyze] Category slug: '{category_slug}'", flush=True)
+        # Step 5: Fetch filters from DB (if category exists)
+        filter_groups = []
+        hints = []
         
-        try:
-            # Convert extracted attributes to filter format {attr: [value]}
-            search_filters = {}
-            min_price = None
-            max_price = None
-            
-            for attr_name, attr_value in extracted_attrs.items():
-                if attr_value is None:
-                    continue
-                
-                # Special handling for price (range)
-                if attr_name == "gia" and isinstance(attr_value, dict):
-                    min_price = attr_value.get("min")
-                    max_price = attr_value.get("max")
-                    print(f"[/api/analyze] 💰 Price range extracted: {min_price} - {max_price}", flush=True)
-                # Handle list values
-                elif isinstance(attr_value, list):
-                    search_filters[attr_name] = attr_value
-                # Handle single values - wrap in list
-                elif isinstance(attr_value, (str, int, float)):
-                    search_filters[attr_name] = [str(attr_value)]
+        if category:
+            try:
+                category_slug = sku_repo.get_category_slug_from_name(category)
+                if category_slug:
+                    available_filters = sku_repo.get_available_filters(category_slug)
+                    
+                    # Build filter groups
+                    for f in available_filters:
+                        filter_groups.append({
+                            "attribute_name": f['attribute_name'],
+                            "display_name": f['display_name'] or f['attribute_name'],
+                            "data_type": f['data_type'],
+                            "options": [
+                                {"attribute_value": opt.get('attribute_value'), "product_count": opt.get('product_count')}
+                                for opt in f['options']
+                                if opt.get('attribute_value') is not None
+                            ]
+                        })
+                    
+                    # Generate hints from filters
+                    hints = _generate_hints_from_filters(category, filter_groups)
+                    
+                    print(f"[/api/analyze] ✅ Fetched {len(filter_groups)} filters from DB", flush=True)
                 else:
-                    # Skip dict or other complex types
-                    continue
-            
-            print(f"[/api/analyze] 📊 Search filters (converted from extracted attributes):", flush=True)
-            for filter_name, filter_value in search_filters.items():
-                print(f"   - {filter_name}: {filter_value}", flush=True)
-            if not search_filters and not min_price and not max_price:
-                print(f"   (no filters - using category only)", flush=True)
-            
-            print(f"[/api/analyze] 🔗 Calling: sku_repo.search_products(", flush=True)
-            print(f"   category_slug='{category_slug}',", flush=True)
-            print(f"   filters={search_filters},", flush=True)
-            print(f"   min_price={min_price},", flush=True)
-            print(f"   max_price={max_price},", flush=True)
-            print(f"   page=1,", flush=True)
-            print(f"   page_size=20", flush=True)
-            print(f")", flush=True)
-            
-            # search_products returns (products_list, total_count) tuple
-            initial_products, total_products = sku_repo.search_products(
-                category_slug, 
-                filters=search_filters,  # ✅ NOW using extracted attributes
-                min_price=min_price,
-                max_price=max_price,
-                page=1, 
-                page_size=20
-            )
-            
-            print(f"[/api/analyze] ✅ Search result: {total_products} products found", flush=True)
-            if initial_products:
-                print(f"[/api/analyze] First 3 products:", flush=True)
-                for i, prod in enumerate(initial_products[:3]):
-                    print(f"   {i+1}. {prod.get('title', 'N/A')}", flush=True)
-                    attrs = prod.get('attributes', {})
-                    if attrs:
-                        for k, v in list(attrs.items())[:3]:
-                            print(f"      - {k}: {v}", flush=True)
-            
-            # Calculate total pages
-            page_size = 20
-            total_pages = (total_products + page_size - 1) // page_size  # Ceiling division
-            
-            # Track if we had to fallback (DB has no products at all)
-            had_to_fallback = False
-            
-            # If no products found with extracted filters, fallback to category-only search
-            if total_products == 0 and (search_filters or min_price or max_price):
-                print(f"[/api/analyze] ⚠️ No products found with extracted filters!", flush=True)
-                print(f"[/api/analyze] 🔄 Fallback: Trying category-only search (no filters)...", flush=True)
-                initial_products, total_products = sku_repo.search_products(
-                    category_slug, 
-                    filters={},  # Fallback to empty filters
-                    min_price=None,
-                    max_price=None,
-                    page=1, 
-                    page_size=20
-                )
-                print(f"[/api/analyze] ✅ Fallback result: {total_products} products found (category-only)", flush=True)
-                
-                # If category-only also = 0, then DB has NO products for this category
-                if total_products == 0:
-                    had_to_fallback = True
-                    print(f"[/api/analyze] ⚠️ Category '{validated_category}' has 0 products in DB!", flush=True)
-                
-                total_pages = (total_products + page_size - 1) // page_size
-            
-            # ✅ Only trigger crawl if DB has NO products at all
-            if had_to_fallback:  # This means both (with filters) and (category-only) = 0
-                print(f"[/api/analyze] ⚠️⚠️ DB EMPTY - Triggering background CRAWL...", flush=True)
-                print(f"[/api/analyze] Query: '{request.query}' → Category: '{validated_category}'", flush=True)
-                if search_filters:
-                    print(f"[/api/analyze] Wanted attributes: {search_filters}", flush=True)
-                print(f"[/api/analyze] Starting crawl from Tiki/Lazada...", flush=True)
-                try:
-                    # Trigger background crawl
-                    from app.crawler.multi_crawler import MultiCrawler
-                    from fastapi import BackgroundTasks
-                    
-                    # Create a background task to crawl
-                    crawler = MultiCrawler()
-                    # Build search query with extracted attributes
-                    search_query = request.query  # Use original user query
-                    
-                    # Run crawl in background (non-blocking)
-                    import asyncio
-                    asyncio.create_task(
-                        _trigger_crawl(
-                            search_query, 
-                            validated_category, 
-                            category_slug,
-                            extracted_attrs
-                        )
-                    )
-                    print(f"[/api/analyze] ✅ Crawl task started in background", flush=True)
-                    print(f"[/api/analyze] ℹ️ Note: Crawl results will be available in DB soon", flush=True)
-                except Exception as crawl_error:
-                    print(f"[/api/analyze] ⚠️ Could not start crawl: {crawl_error}", flush=True)
-                    import traceback
-                    traceback.print_exc()
-            else:
-                print(f"[/api/analyze] ✅ DB has {total_products} products - No crawl needed", flush=True)
-            
-        except Exception as e:
-            print(f"[/api/analyze] ❌ Error searching products: {e}", flush=True)
-            import traceback
-            traceback.print_exc()
-            initial_products = []
-            total_products = 0
-            total_pages = 0
-        
-        # Step 4: Generate clarifying hints from filter names
-        from app.core.dialogue import DialogueManager
-        dialogue_mgr = DialogueManager()
-        
-        # Map filter attribute_names to user-friendly hints
-        hints = _generate_hints_from_filters(validated_category, filter_groups)
+                    print(f"[/api/analyze] ⚠️ Category '{category}' not found in DB", flush=True)
+            except Exception as e:
+                print(f"[/api/analyze] ⚠️ Error fetching filters: {e}", flush=True)
         
         print(f"\n{'='*80}", flush=True)
-        print(f"[/api/analyze] 💡 RESPONSE PHASE", flush=True)
+        print(f"[/api/analyze] 💡 FINAL RESPONSE", flush=True)
         print(f"{'='*80}", flush=True)
-        print(f"[/api/analyze] Generated {len(hints)} hints from filters", flush=True)
-        for i, hint in enumerate(hints[:3]):
-            print(f"   {i+1}. {hint}", flush=True)
-        print(f"[/api/analyze] Available filters: {len(filter_groups)} groups", flush=True)
-        print(f"[/api/analyze] Final response:", flush=True)
-        print(f"   - success: True", flush=True)
-        print(f"   - category: {validated_category}", flush=True)
-        print(f"   - products: {len(initial_products)}", flush=True)
-        print(f"   - total: {total_products}", flush=True)
+        print(f"[/api/analyze] Success: True", flush=True)
+        print(f"[/api/analyze] Category: {category}", flush=True)
+        print(f"[/api/analyze] Products: {len(products)}", flush=True)
+        print(f"[/api/analyze] Total: {total_products}", flush=True)
+        print(f"[/api/analyze] Filters: {len(filter_groups)}", flush=True)
+        print(f"[/api/analyze] Hints: {len(hints)}", flush=True)
         print(f"[/api/analyze] {'='*80}\n", flush=True)
         
-        # Save partial state for later search
-        if conversation_state is None:
-            conversation_state = {}
-        conversation_state["has_category"] = True
-        conversation_state["category"] = validated_category
-        conversation_state["category_id"] = validation.get("category_id")
-        conversation_state["extracted_attributes"] = extracted_attrs  # ✅ NEW: Save extracted attributes
-        session_manager.set_session(conversation_id, conversation_state)
-        
+        # Step 6: Return in /api/analyze format
         return {
             "success": True,
-            "category": validated_category,
+            "category": category,
             "clarifying_hints": hints,
             "filters": filter_groups,
-            "products": initial_products,  # ✅ NEW: Initial products from DB
-            "total": total_products,  # ✅ NEW
-            "total_pages": total_pages,  # ✅ NEW
+            "products": products,
+            "total": total_products,
+            "total_pages": total_pages,
             "conversation_id": conversation_id,
-            "selected_attributes": extracted_attrs  # ✅ NEW: Extracted attributes to pre-tick filters in frontend
+            "selected_attributes": extracted_attrs,
+            "routing_info": orch_result.get("routing_info", {})  # NEW: Include routing info for debugging
         }
         
     except Exception as e:

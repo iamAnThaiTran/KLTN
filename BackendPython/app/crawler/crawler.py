@@ -365,18 +365,18 @@ class TikiCrawler:
                 logger.info(f"✅ Đã extract {len(products)} sản phẩm")
                 
                 # Log chi tiết từng sản phẩm
-                logger.info("\n" + "="*70)
-                logger.info("📦 CHI TIẾT SẢN PHẨM CRAWL ĐƯỢC:")
-                logger.info("="*70)
-                for i, p in enumerate(products[:5], 1):  # Show first 5
-                    logger.info(f"\n[{i}] {p.get('title', 'N/A')[:60]}...")
-                    logger.info(f"    💰 Price: {p.get('price', 0):,} VNĐ")
-                    logger.info(f"    🏷️  Brand: {p.get('brand', 'N/A')}")
-                    logger.info(f"    🔗 Link: {p.get('link', '')[:50]}...")
-                    logger.info(f"    📸 Image: {p.get('image', '')[:50]}...")
-                    logger.info(f"    💸 Discount: {p.get('discount', 0)}%")
-                    logger.info(f"    📊 Sold: {p.get('sold', 0)}")
-                logger.info("="*70 + "\n")
+                # logger.info("\n" + "="*70)
+                # logger.info("📦 CHI TIẾT SẢN PHẨM CRAWL ĐƯỢC:")
+                # logger.info("="*70)
+                # for i, p in enumerate(products[:5], 1):  # Show first 5
+                #     logger.info(f"\n[{i}] {p.get('title', 'N/A')[:60]}...")
+                #     logger.info(f"    💰 Price: {p.get('price', 0):,} VNĐ")
+                #     logger.info(f"    🏷️  Brand: {p.get('brand', 'N/A')}")
+                #     logger.info(f"    🔗 Link: {p.get('link', '')[:50]}...")
+                #     logger.info(f"    📸 Image: {p.get('image', '')[:50]}...")
+                #     logger.info(f"    💸 Discount: {p.get('discount', 0)}%")
+                #     logger.info(f"    📊 Sold: {p.get('sold', 0)}")
+                # logger.info("="*70 + "\n")
                 
             except Exception as e:
                 logger.error(f"❌ Lỗi khi evaluate: {str(e)}")
@@ -445,13 +445,13 @@ class TikiCrawler:
         attributes: Dict
     ) -> Dict:
         """Extract chi tiết 1 sản phẩm"""
-        logger.info(f"  [{product_num}/{total}] Crawling: {product['title'][:50]}...")
+        # logger.info(f"  [{product_num}/{total}] Crawling: {product['title'][:50]}...")
         
         detail = await self._extract_product_detail(browser, product)
         
         if detail:
             match_info = self._check_attribute_match(detail, attributes)
-            logger.info(f"    ✓ {match_info['emoji']} {match_info['summary']}")
+            # logger.info(f"    ✓ {match_info['emoji']} {match_info['summary']}")
             
             return {
                 **product,
@@ -459,7 +459,7 @@ class TikiCrawler:
                 "match_info": match_info
             }
         
-        logger.info(f"    ⚠️  Không lấy được chi tiết")
+        # logger.info(f"    ⚠️  Không lấy được chi tiết")
         return {
             **product,
             "attributes": None,
@@ -549,8 +549,8 @@ class TikiCrawler:
         
         # DEBUG: In ra configurable_options
         config_opts = data.get("configurable_options", [])
-        if config_opts:
-            logger.info(f"    DEBUG configurable_options: {[opt.get('name') for opt in config_opts]}")
+        # if config_opts:
+        #     # logger.info(f"    DEBUG configurable_options: {[opt.get('name') for opt in config_opts]}")
         
         # Lấy từ configurable_options (Size, Color)
         for opt in config_opts:
@@ -559,18 +559,18 @@ class TikiCrawler:
             
             if re.search(r"size|kich co|kich thuoc|chon size|kich thuoc\s*\(", label):
                 result["sizes"] = values
-                logger.info(f"      📏 Sizes extracted: {values[:3]}{'...' if len(values) > 3 else ''}")
+                # logger.info(f"      📏 Sizes extracted: {values[:3]}{'...' if len(values) > 3 else ''}")
             if re.search(r"mau|mau sac|color|colour", label):
                 result["colors"] = values
-                logger.info(f"      🎨 Colors extracted: {values[:3]}{'...' if len(values) > 3 else ''}")
+                # logger.info(f"      🎨 Colors extracted: {values[:3]}{'...' if len(values) > 3 else ''}")
         
         # DEBUG: In ra specifications
         specs = data.get("specifications", [])
         if specs:
-            logger.info(f"    DEBUG specifications count: {len(specs)}")
+            # logger.info(f"    DEBUG specifications count: {len(specs)}")
             for group in specs[:1]:  # In chi group đầu tiên
                 attrs = group.get("attributes", [])
-                logger.info(f"      Group: {group.get('name')} - attrs: {[(a.get('name'), a.get('value')) for a in attrs[:3]]}")
+                # logger.info(f"      Group: {group.get('name')} - attrs: {[(a.get('name'), a.get('value')) for a in attrs[:3]]}")
         
         # Lấy từ specifications (Material, Brand details)
         for group in specs:
@@ -720,7 +720,7 @@ class TikiCrawler:
             logger.info(f"\n📦 Converting {len(products)} products to database format...")
             
             for idx, p in enumerate(products, 1):
-                logger.info(f"\n  [{idx}/{len(products)}] Processing: {p.get('title', 'N/A')[:60]}")
+                # logger.info(f"\n  [{idx}/{len(products)}] Processing: {p.get('title', 'N/A')[:60]}")
                 
                 # Base product info
                 product_dict = {
@@ -734,7 +734,7 @@ class TikiCrawler:
                     "sold": p.get("sold", 0)
                 }
                 
-                logger.debug(f"     Base info: title={product_dict['title'][:30]}, price={product_dict['price']}, brand={product_dict['brand']}")
+                # logger.debug(f"     Base info: title={product_dict['title'][:30]}, price={product_dict['price']}, brand={product_dict['brand']}")
                 
                 # Add extracted attributes if available
                 if "attributes" in p:
@@ -762,7 +762,7 @@ class TikiCrawler:
                     }
                 
                 products_to_save.append(product_dict)
-                logger.info(f"     ✅ Added to save list")
+                # logger.info(f"     ✅ Added to save list")
             
             logger.info(f"\n💾 Calling save_crawled_products with {len(products_to_save)} products to category '{normalized_category}'")
             
@@ -778,9 +778,9 @@ class TikiCrawler:
                 elif result and result.get('success'):
                     products_saved = result.get('products_saved', 0)
                     skus_saved = result.get('skus_saved', 0)
-                    logger.info(f"   ✅ Saved {products_saved} products to SKU database")
-                    logger.info(f"      SKUs created: {skus_saved}")
-                    logger.info(f"      Category ID: {result.get('category_id', 'N/A')}")
+                    # logger.info(f"   ✅ Saved {products_saved} products to SKU database")
+                    # logger.info(f"      SKUs created: {skus_saved}")
+                    # logger.info(f"      Category ID: {result.get('category_id', 'N/A')}")
                 else:
                     error_msg = result.get('error', 'Unknown error') if result else "Result is None"
                     logger.error(f"   ❌ Failed to save: {error_msg}")
