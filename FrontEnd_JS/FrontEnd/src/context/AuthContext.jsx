@@ -7,6 +7,7 @@ export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
     const [token, setToken] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [showLoginModal, setShowLoginModal] = useState(false);
 
     // Initialize auth state from localStorage
     useEffect(() => {
@@ -92,6 +93,8 @@ export const AuthProvider = ({ children }) => {
             user,
             token,
             loading,
+            showLoginModal,
+            setShowLoginModal,
             isAuthenticated: !!user && !!token,
             login,
             register,

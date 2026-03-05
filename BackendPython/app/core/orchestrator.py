@@ -277,7 +277,7 @@ class RecommendationOrchestrator:
     # CASE HANDLERS
     # ====================================================================================
     
-    async def  handle_case_1_clear_request(
+    async def handle_case_1_clear_request(
         self,
         user_input: str,
         case_data: Dict[str, Any],
@@ -292,6 +292,9 @@ class RecommendationOrchestrator:
         3. Extract attributes
         4. Crawl with validated category
         """
+        # Ensure state structure
+        conversation_state = self._ensure_state_structure(conversation_state)
+        
         print(f"[CASE 1] Processing clear request with rule-based extraction")
         
         category = case_data["category"]
@@ -351,6 +354,26 @@ class RecommendationOrchestrator:
         # Process and return results
         return await self._process_crawl_results(products, conversation_state, case=1)
     
+    def _ensure_state_structure(self, conversation_state: Dict[str, Any]):
+        """Ensure conversation_state has all required keys for safety"""
+        defaults = {
+            "has_category": False,
+            "category": None,
+            "extracted": {},
+            "missing_required": [],
+            "search_history": [],
+            "attributes_asked": [],
+            "cached_products": None,
+            "cached_filters": None,
+            "last_crawl_params": None,
+            "cache_hits": 0,
+            "cache_misses": 0
+        }
+        for key, value in defaults.items():
+            if key not in conversation_state:
+                conversation_state[key] = value if not isinstance(value, list) and not isinstance(value, dict) else (value.copy() if isinstance(value, (list, dict)) else value)
+        return conversation_state
+    
     async def handle_case_2_unclear_with_schema(
         self,
         user_input: str,
@@ -365,6 +388,9 @@ class RecommendationOrchestrator:
         2. Ask for missing mandatory attributes
         3. When ready → Crawl with validated category
         """
+        # Ensure state structure
+        conversation_state = self._ensure_state_structure(conversation_state)
+        
         print(f"[CASE 2] Request unclear but category '{case_data['category']}' detected")
         
         category = case_data["category"]
@@ -466,6 +492,9 @@ class RecommendationOrchestrator:
         CASE 3: Unclear request with no schema or low confidence
         Call LLM to infer category and generate attributes
         """
+        # Ensure state structure
+        conversation_state = self._ensure_state_structure(conversation_state)
+        
         print(f"[CASE 3] Unclear request, using LLM for category inference")
         
         # Call LLM to detect category and suggest attributes
@@ -518,6 +547,9 @@ class RecommendationOrchestrator:
         CASE 4: Very vague/abstract intent
         LLM suggests possible product categories based on purpose
         """
+        # Ensure state structure
+        conversation_state = self._ensure_state_structure(conversation_state)
+        
         print(f"[CASE 4] Abstract intent detected, using LLM for category suggestions")
         
         # Call LLM with purpose-oriented prompt
@@ -584,6 +616,9 @@ Be practical and culturally relevant for Vietnamese shopping."""
         CASE 5: Intent shift
         Detect conflict with previous intent, reset context, restart detection
         """
+        # Ensure state structure
+        conversation_state = self._ensure_state_structure(conversation_state)
+        
         print(f"[CASE 5] Intent shift from '{case_data['old_category']}' to '{case_data['new_category']}'")
         
         # Save history
@@ -649,6 +684,9 @@ Be practical and culturally relevant for Vietnamese shopping."""
         CASE 6: Incremental refinement
         Merge new attributes into existing context, avoid redundant questions
         """
+        # Ensure state structure
+        conversation_state = self._ensure_state_structure(conversation_state)
+        
         print(f"[CASE 6] Incremental refinement in category '{conversation_state['category']}'")
         
         category = conversation_state["category"]
@@ -684,6 +722,9 @@ Be practical and culturally relevant for Vietnamese shopping."""
         CASE 7: Comparison/advisory request
         No immediate crawl, answer with LLM, then ask for purchase confirmation
         """
+        # Ensure state structure
+        conversation_state = self._ensure_state_structure(conversation_state)
+        
         print(f"[CASE 7] Comparison/advisory request detected")
         
         # Use LLM to provide comparison or advice

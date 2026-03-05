@@ -1,913 +1,414 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Sparkles, CheckCircle2, AlertCircle, ShoppingBag, Mic, MicOff, Volume2 } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Send, Sparkles, CheckCircle2, AlertCircle, ShoppingBag, Mic, MicOff, Volume2, User, Lock, Eye, EyeOff, LogOut, Heart, Clock, Tag, Gift, ChevronDown, ChevronRight, X, Search, SlidersHorizontal, Brain, Flame } from 'lucide-react';
 import axios from 'axios';
 import SuggestionsPopup from './SuggestionsPopup';
+import { SharedHeader, LoginModal } from './SharedHeader';
+import { useAuth } from '../context/AuthContext';
 
 const API_BASE_URL = 'http://localhost:8000';
 
+// ─── DATA ───────────────────────────────────────────────────────────────────
+const CATEGORIES = [
+  { icon: '👟', label: 'Giày đẹp' },
+  { icon: '⌚', label: 'Đồng hồ thông minh' },
+  { icon: '🎧', label: 'Tai nghe' },
+  { icon: '📱', label: 'Điện thoại' },
+  { icon: '🎒', label: 'Phụ kiện' },
+  { icon: '🛍️', label: 'Accessories' },
+];
+
+const QUICK_SEARCHES = [
+  { icon: '👟', label: 'Giày chạy bộ' },
+  { icon: '🎧', label: 'Tai nghe bluetooth' },
+  { icon: '🎁', label: 'Quà sinh nhật cho bạn gái' },
+  { icon: '⌚', label: 'Đồng hồ thông minh' },
+];
+
+const POPULAR_PRODUCTS = [
+  { name: 'Nike Air Force 1', price: '2.400.000đ', sales: null },
+  { name: 'AirPods Pro 2', price: '5.300.000đ', sales: '630 ches' },
+  { name: 'Xiaomi Redmi Watch 3', price: '1.890.000đ', sales: '410 ches' },
+  { name: 'Song GaN 65W', price: '359.000đ', sales: '1670 ches' },
+];
+
+const EXAMPLE_QUERIES = [
+  'Giày Nike chạy bộ dưới 2 triệu',
+  'Sneaker trắng size 42',
+  'Tai nghe chống ồn tốt',
+  'Quà sinh nhật cho bạn gái dưới 500K',
+];
+
+// ─── USER QUICK ACTIONS (chat view) ──────────────────────────────────────────
+const UserQuickActions = ({ onAction }) => (
+  <div style={{ display:'flex', gap:8, paddingBottom:10, flexWrap:'wrap' }}>
+    {[{icon:<Heart size={14}/>,label:'Sản phẩm yêu thích',color:'#e11d48',bg:'#fff1f2',border:'#fecdd3'},{icon:<Clock size={14}/>,label:'Tìm kiếm gần đây',color:'#6366f1',bg:'#eef2ff',border:'#c7d2fe'},{icon:<Tag size={14}/>,label:'Ưu đãi hôm nay',color:'#d97706',bg:'#fffbeb',border:'#fde68a'},{icon:<Gift size={14}/>,label:'Gợi ý cho bạn',color:'#059669',bg:'#ecfdf5',border:'#a7f3d0'}].map((a,i)=>(
+      <button key={i} onClick={()=>onAction(a.label)} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 14px', borderRadius:20, border:`1.5px solid ${a.border}`, background:a.bg, color:a.color, fontSize:13, fontWeight:600, cursor:'pointer', transition:'all 0.15s', fontFamily:'inherit' }}
+        onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-1px)';e.currentTarget.style.boxShadow=`0 3px 10px ${a.border}`;}}
+        onMouseLeave={e=>{e.currentTarget.style.transform='none';e.currentTarget.style.boxShadow='none';}}
+      >{a.icon}{a.label}</button>
+    ))}
+  </div>
+);
+
+// ─── MAIN APP ─────────────────────────────────────────────────────────────────
 const ShoeFinder = () => {
+  const [searchParams] = useSearchParams();
+  const { user, showLoginModal, setShowLoginModal } = useAuth();
+  const [view, setView] = useState('landing'); // 'landing' | 'chat'
   const [messages, setMessages] = useState([]);
   const [currentInput, setCurrentInput] = useState('');
-  const [conversationState, setConversationState] = useState({
-    conversationId: null,
-    isLoading: false,
-    error: null
-  });
+  const [conversationState, setConversationState] = useState({ conversationId: null, isLoading: false });
   const [isThinking, setIsThinking] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [isBrowserSupported, setIsBrowserSupported] = useState(true);
-  const [lastCategoryName, setLastCategoryName] = useState(''); // Track category for filter search
-  const [selectedFilters, setSelectedFilters] = useState({}); // Track selected filters
-  const [clarifyingHints, setClarifyingHints] = useState([]); // Suggestions to refine search
-  const [hintStyle] = useState('chat-bubble'); // 'chat-bubble', 'banner', or 'tooltip'
-  const [showSuggestionsPopup, setShowSuggestionsPopup] = useState(false); // Show/hide SuggestionsPopup
-  const [suggestionsPopupFilters, setSuggestionsPopupFilters] = useState([]); // Filter options for popup
+  const [lastCategoryName, setLastCategoryName] = useState('');
+  const [selectedFilters, setSelectedFilters] = useState({});
+  const [clarifyingHints, setClarifyingHints] = useState([]);
+  const [showSuggestionsPopup, setShowSuggestionsPopup] = useState(false);
+  const [suggestionsPopupFilters, setSuggestionsPopupFilters] = useState([]);
   const messagesEndRef = useRef(null);
   const recognitionRef = useRef(null);
 
   useEffect(() => {
-    // Initial greeting
-    addBotMessage(
-      "Xin chào! 👋 Tôi sẽ giúp bạn tìm đôi giày phù hợp nhất.\n\nBạn đang tìm loại giày gì? (Ví dụ: giày chạy bộ, sneaker, giày da, sandal...)"
-    );
-
-    // Khởi tạo Web Speech API
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    
-    if (!SpeechRecognition) {
-      setIsBrowserSupported(false);
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'vi-VN';
-
-    recognition.onstart = () => {
-      setIsListening(true);
-      setTranscript('');
-    };
-
-    recognition.onresult = (event) => {
-      let interimTranscript = '';
-      let finalTranscript = '';
-
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          finalTranscript += transcript + ' ';
-        } else {
-          interimTranscript += transcript;
-        }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { setIsBrowserSupported(false); return; }
+    const r = new SR();
+    r.continuous = true; r.interimResults = true; r.lang = 'vi-VN';
+    r.onstart = () => { setIsListening(true); setTranscript(''); };
+    r.onresult = (e) => {
+      let interim='', final='';
+      for (let i=e.resultIndex;i<e.results.length;i++) {
+        const t=e.results[i][0].transcript;
+        if(e.results[i].isFinal) final+=t+' '; else interim+=t;
       }
-
-      setTranscript(interimTranscript);
-      
-      // Nếu có kết quả cuối cùng, thêm vào input
-      if (finalTranscript) {
-        setCurrentInput(prev => (prev + ' ' + finalTranscript).trim());
-      }
+      setTranscript(interim);
+      if(final) setCurrentInput(p=>(p+' '+final).trim());
     };
-
-    recognition.onerror = (event) => {
-      console.error('Speech recognition error:', event.error);
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-      setTranscript('');
-    };
-
-    recognitionRef.current = recognition;
-
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.abort();
-      }
-    };
+    r.onerror = () => setIsListening(false);
+    r.onend = () => { setIsListening(false); setTranscript(''); };
+    recognitionRef.current = r;
+    return () => recognitionRef.current?.abort();
   }, []);
 
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [messages]);
+
+  const addBot = (text, quickReplies=null) => setMessages(p=>[...p,{type:'bot',text,quickReplies,timestamp:new Date()}]);
+  const addUser = (text) => setMessages(p=>[...p,{type:'user',text,timestamp:new Date()}]);
+
+  const startSearch = (query) => {
+    setView('chat');
+    setMessages([]);
+    setTimeout(() => {
+      addUser(query);
+      analyzeAndSearch(query);
+    }, 50);
+  };
+
+  // Auto-start search when URL has query parameter
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  const addBotMessage = (text, options = null, quickReplies = null) => {
-    setMessages(prev => [...prev, {
-      type: 'bot',
-      text,
-      options,
-      quickReplies,
-      timestamp: new Date()
-    }]);
-  };
-
-  // Hàm render clarifying hints (gợi ý hỏi nhẹ)
-  const renderClarifyingHints = () => {
-    if (!clarifyingHints || clarifyingHints.length === 0) return null;
-
-    if (hintStyle === 'chat-bubble') {
-      // 👟 Chat bubble nhỏ - tương tác cao
-      return (
-        <div className="flex gap-3 mt-3">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center flex-shrink-0">
-            <Sparkles className="w-5 h-5 text-white" />
-          </div>
-          <div className="flex-1">
-            <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl rounded-tl-none p-4 max-w-2xl">
-              {/* <div className="font-semibold text-amber-900 mb-2 text-sm">
-                💡 Một vài gợi ý để bạn tìm kiếm chính xác hơn:
-              </div> */}
-              <div className="flex flex-wrap gap-2">
-                {clarifyingHints.map((hint, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handleQuickReply(hint)}
-                    className="px-3 py-2 bg-white border-2 border-amber-300 text-amber-700 text-sm rounded-full hover:bg-amber-100 hover:border-amber-400 transition-all font-medium"
-                  >
-                    {hint}
-                  </button>
-                ))}
-              </div>
-              <div className="text-xs text-amber-600 mt-2">
-                (Bạn có thể bỏ qua và lựa chọn filter bên dưới)
-              </div>
-            </div>
-          </div>
-        </div>
-      );
+    const query = searchParams.get('q');
+    if (query) {
+      startSearch(query);
     }
+  }, [searchParams]);
 
-    if (hintStyle === 'banner') {
-      // Banner nhỏ ở trên filter
-      return (
-        <div className="bg-gradient-to-r from-amber-100 to-orange-100 border-l-4 border-amber-500 p-3 rounded-r-lg my-3">
-          <div className="flex items-start gap-2">
-            <span className="text-lg">💡</span>
-            <div>
-              {/* <p className="font-semibold text-sm text-amber-900 mb-1">Tinh chỉnh tìm kiếm:</p> */}
-              <div className="flex flex-wrap gap-1">
-                {clarifyingHints.map((hint, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handleQuickReply(hint)}
-                    className="px-2 py-1 bg-white text-xs text-amber-700 rounded hover:bg-amber-50 transition-all"
-                  >
-                    {hint}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    // Default: tooltip dạng text
-    return null;
-  };
-
-  const addUserMessage = (text) => {
-    setMessages(prev => [...prev, {
-      type: 'user',
-      text,
-      timestamp: new Date()
-    }]);
-  };
-
-  const handleMicClick = () => {
-    if (!recognitionRef.current) return;
-
-    if (isListening) {
-      recognitionRef.current.stop();
-      setIsListening(false);
-    } else {
-      try {
-        recognitionRef.current.start();
-      } catch (error) {
-        console.error('Error starting speech recognition:', error);
-      }
-    }
-  };
-
-  // NEW: Analyze-first flow (T=0.1s hints, then T=0.5s products)
   const analyzeAndSearch = async (userInput) => {
     setIsThinking(true);
-    const convId = conversationState.conversationId;
-    
     try {
-      // Step 1: Call /api/analyze (FAST - T=0.1s)
-      console.log('[ANALYZE] Analyzing input:', userInput);
-      const analyzeResponse = await axios.post(`${API_BASE_URL}/api/analyze`, {
-        user_input: userInput,
-        conversation_id: convId
-      });
-      
-      const analyzeData = analyzeResponse.data;
-      console.log('[ANALYZE] Response:', analyzeData);
-      
-      if (!analyzeData.success) {
-        addBotMessage(`❌ ${analyzeData.error}`);
-        setIsThinking(false);
-        return;
-      }
-      
-      // Update conversation state
-      setConversationState(prev => ({
-        ...prev,
-        conversationId: analyzeData.conversation_id
-      }));
-      
-      // Update selected filters state & last category
-      setLastCategoryName(analyzeData.category);
-      setSelectedFilters({}); // Reset filters for new search
-      
-      // Step 2: Store filters and show SuggestionsPopup
-      console.log('[ANALYZE] Showing SuggestionsPopup with filters');
-      console.log('[ANALYZE] clarifying_hints:', analyzeData.clarifying_hints);
-      console.log('[ANALYZE] filters:', analyzeData.filters);
-      
-      // Store category
-      setLastCategoryName(analyzeData.category);
-      setSelectedFilters({}); // Reset filters for new search
-      
-      // Step 2: Store hints and filters for popup
-      setClarifyingHints(analyzeData.clarifying_hints || []);
-      setSuggestionsPopupFilters(analyzeData.filters || []);
-      
-      // Step 3: Display initial products (with loading skeleton)
-      // Show loading skeleton first
-      setMessages(prev => [...prev, {
-        type: 'loading',
-        timestamp: new Date()
-      }]);
-      
-      // Add initial products if found
-      if (analyzeData.products && analyzeData.products.length > 0) {
-        console.log('[ANALYZE] Found initial products:', analyzeData.products.length);
-        // Remove loading skeleton
-        setMessages(prev => prev.filter(msg => msg.type !== 'loading'));
-        
-        // Add filter options FIRST
-        if (analyzeData.filters && analyzeData.filters.length > 0) {
-          setMessages(prev => [...prev, {
-            type: 'filters',
-            text: 'Bạn có thể lọc sản phẩm theo các tiêu chí dưới đây:',
-            filters: analyzeData.filters,
-            timestamp: new Date()
-          }]);
-        }
-        
-        // Add results message AFTER filters
-        setMessages(prev => [...prev, {
-          type: 'results',
-          text: `🎯 Tìm thấy ${analyzeData.total || analyzeData.products.length} sản phẩm!`,
-          products: analyzeData.products,
-          timestamp: new Date()
-        }]);
+      const res = await axios.post(`${API_BASE_URL}/api/analyze`, { user_input: userInput, conversation_id: conversationState.conversationId });
+      const d = res.data;
+      if (!d.success) { addBot(`❌ ${d.error}`); setIsThinking(false); return; }
+      setConversationState(p=>({...p, conversationId: d.conversation_id}));
+      setLastCategoryName(d.category);
+      setSelectedFilters({});
+      setClarifyingHints(d.clarifying_hints||[]);
+      setSuggestionsPopupFilters(d.filters||[]);
+      setMessages(p=>[...p,{type:'loading',timestamp:new Date()}]);
+      if (d.products?.length) {
+        setMessages(p=>p.filter(m=>m.type!=='loading'));
+        if (d.filters?.length) setMessages(p=>[...p,{type:'filters',text:'Bạn có thể lọc sản phẩm theo các tiêu chí dưới đây:',filters:d.filters,timestamp:new Date()}]);
+        setMessages(p=>[...p,{type:'results',text:`🎯 Tìm thấy ${d.total||d.products.length} sản phẩm!`,products:d.products,timestamp:new Date()}]);
       } else {
-        // No products found in DB
-        console.log('[ANALYZE] No products in DB');
-        // Remove loading skeleton
-        setMessages(prev => prev.filter(msg => msg.type !== 'loading'));
-        
-        addBotMessage(
-          `ℹ️ Hiện tại chưa có sản phẩm "${analyzeData.category}" trong kho.\n\nVui lòng chọn các tiêu chí tìm kiếm để giúp tôi tìm kiếm chính xác hơn.`
-        );
+        setMessages(p=>p.filter(m=>m.type!=='loading'));
+        addBot(`ℹ️ Hiện tại chưa có sản phẩm "${d.category}" trong kho.\n\nVui lòng chọn các tiêu chí tìm kiếm để giúp tôi tìm kiếm chính xác hơn.`);
       }
-      
-      // Step 4: Show popup for filter refinement
       setShowSuggestionsPopup(true);
-      
-      setIsThinking(false);
-      
-    } catch (error) {
-      console.error('[ANALYZE/SEARCH] Error:', error);
-      const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || 'Có lỗi xảy ra';
-      setMessages(prev => prev.filter(msg => msg.type !== 'loading'));
-      addBotMessage(`❌ Lỗi: ${errorMsg}`);
-      addBotMessage("Lưu ý: Vui lòng chắc chắn backend Python đang chạy trên http://localhost:8000");
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message || 'Có lỗi xảy ra';
+      setMessages(p=>p.filter(m=>m.type!=='loading'));
+      addBot(`❌ Lỗi: ${msg}`);
+      addBot('Lưu ý: Vui lòng chắc chắn backend Python đang chạy trên http://localhost:8000');
     } finally {
       setIsThinking(false);
     }
   };
 
-  // Connect to backend API (legacy - keep for backward compatibility)
   const sendToBackend = async (userInput) => {
     setIsThinking(true);
     try {
-      console.log('Sending to backend:', { user_input: userInput, conversation_id: conversationState.conversationId });
-      
-      const response = await axios.post(`${API_BASE_URL}/api/query`, {
-        user_input: userInput,
-        conversation_id: conversationState.conversationId
-      });
-
-      console.log('Backend response:', response.data);
-      const data = response.data;
-      
-      // Update conversation ID
-      if (data.conversation_id) {
-        setConversationState(prev => ({
-          ...prev,
-          conversationId: data.conversation_id
-        }));
+      const res = await axios.post(`${API_BASE_URL}/api/query`, { user_input: userInput, conversation_id: conversationState.conversationId });
+      const d = res.data;
+      if (d.conversation_id) setConversationState(p=>({...p,conversationId:d.conversation_id}));
+      if (d.clarifying_hints) setClarifyingHints(d.clarifying_hints);
+      if (d.status==='results'&&d.products?.length) {
+        if (d.filters?.length) setMessages(p=>[...p,{type:'filters',text:'Bạn có thể lọc sản phẩm theo các tiêu chí dưới đây:',filters:d.filters,timestamp:new Date()}]);
+        setMessages(p=>[...p,{type:'results',text:`🎯 Tìm thấy ${d.total_found||d.products.length} sản phẩm!`,products:d.products,timestamp:new Date()}]);
+      } else if (d.question) {
+        addBot(d.question, d.options?d.options.map(o=>o.label||o.value||o):null);
       }
-
-      // Display response from backend
-      displayBackendResponse(data);
-
-    } catch (error) {
-      console.error('Backend API Error:', error);
-      const errorMsg = error.response?.data?.detail || error.message || 'Có lỗi xảy ra. Vui lòng thử lại.';
-      addBotMessage(`❌ Lỗi: ${errorMsg}`);
-      addBotMessage("Lưu ý: Vui lòng chắc chắn backend Python đang chạy trên http://localhost:8000");
+    } catch (err) {
+      addBot(`❌ Lỗi: ${err.response?.data?.detail||err.message}`);
     } finally {
       setIsThinking(false);
     }
   };
 
-  // Gọi endpoint /api/v1/crawl-products để lấy products + filters
-  const searchProductsWithFilters = async (categoryName, selectedFilters = {}) => {
-    setConversationState(prev => ({ ...prev, isLoading: true }));
-    setClarifyingHints([]); // Clear hints khi search mới
+  const searchProductsWithFilters = async (categoryName, filters={}) => {
+    setConversationState(p=>({...p,isLoading:true}));
+    setClarifyingHints([]);
     try {
-      console.log('Searching products:', { category_name: categoryName, selected_filters: selectedFilters });
-      
-      // Show loading skeleton ngay lập tức
-      setMessages(prev => [...prev, {
-        type: 'loading',
-        timestamp: new Date()
-      }]);
-
-      // Check if filters need conversion (from old "attr:value" format to new {attr: [values]} format)
-      let filterObj = selectedFilters;
-      
-      // If it's in "attr:value" format (old format from filter sidebar), convert it
-      if (Object.keys(selectedFilters).some(key => key.includes(':'))) {
-        filterObj = {};
-        Object.keys(selectedFilters).forEach(key => {
-          const [attrName, attrValue] = key.split(':');
-          if (!filterObj[attrName]) {
-            filterObj[attrName] = [];
-          }
-          filterObj[attrName].push(attrValue);
-        });
+      setMessages(p=>[...p,{type:'loading',timestamp:new Date()}]);
+      let fo = filters;
+      if (Object.keys(filters).some(k=>k.includes(':'))) {
+        fo = {};
+        Object.keys(filters).forEach(k=>{const[a,v]=k.split(':');if(!fo[a])fo[a]=[];fo[a].push(v);});
       }
-
-      console.log('Final filters for API:', filterObj);
-      
-      const response = await fetch(`${API_BASE_URL}/api/v1/crawl-products`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          category_name: categoryName,
-          selected_filters: filterObj,
-          page: 1,
-          page_size: 20
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || `HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log('Crawl products response:', data);
-
-      // Remove loading skeleton
-      setMessages(prev => prev.filter(msg => msg.type !== 'loading'));
-
-      // Display products + filters
-      displayCrawlProductsResponse(data);
-
-    } catch (error) {
-      console.error('Crawl products error:', error);
-      const errorMsg = error.message || 'Có lỗi xảy ra khi tìm kiếm sản phẩm';
-      setMessages(prev => prev.filter(msg => msg.type !== 'loading'));
-      addBotMessage(`❌ Lỗi: ${errorMsg}`);
+      const res = await fetch(`${API_BASE_URL}/api/v1/crawl-products`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({category_name:categoryName,selected_filters:fo,page:1,page_size:20})});
+      if (!res.ok) { const e=await res.json(); throw new Error(e.detail||`HTTP ${res.status}`); }
+      const data = await res.json();
+      setMessages(p=>p.filter(m=>m.type!=='loading'));
+      if (!data.products?.length) { addBot('🔍 Không tìm thấy sản phẩm nào phù hợp'); return; }
+      const rm={type:'results',text:`🎯 Tìm thấy ${data.total||data.products.length} sản phẩm!`,products:data.products,timestamp:new Date()};
+      const fm=data.filters?.length?{type:'filters',text:'Bạn có thể lọc sản phẩm theo các tiêu chí dưới đây:',filters:data.filters,timestamp:new Date()}:null;
+      setMessages(p=>{const cl=p.filter(m=>m.type!=='results'&&m.type!=='filters');return[...cl,...(fm?[fm]:[]),rm];});
+    } catch (err) {
+      setMessages(p=>p.filter(m=>m.type!=='loading'));
+      addBot(`❌ Lỗi: ${err.message}`);
     } finally {
-      setConversationState(prev => ({ ...prev, isLoading: false }));
-    }
-  };
-
-  // Hiển thị sản phẩm + filters từ endpoint crawl-products
-  const displayCrawlProductsResponse = (data) => {
-    if (!data) {
-      console.error('No data received from crawl-products');
-      addBotMessage('❌ Không nhận được dữ liệu từ server');
-      return;
-    }
-
-    if (!data.products || data.products.length === 0) {
-      addBotMessage('🔍 Không tìm thấy sản phẩm nào phù hợp');
-      return;
-    }
-
-    // REPLACE existing results + filters instead of appending
-    // This prevents the UI from looking cluttered with multiple product lists
-    const resultMessage = `🎯 Tìm thấy ${data.total || data.products.length} sản phẩm!`;
-    const resultsMsg = {
-      type: 'results',
-      text: resultMessage,
-      products: data.products,
-      timestamp: new Date()
-    };
-
-    const filtersMsg = data.filters && data.filters.length > 0 ? {
-      type: 'filters',
-      text: 'Bạn có thể lọc sản phẩm theo các tiêu chí dưới đây:',
-      filters: data.filters,
-      timestamp: new Date()
-    } : null;
-
-    // Replace old results and filters with new ones
-    // Add filters FIRST, then results
-    setMessages(prev => {
-      // Remove old results and filters messages
-      const filtered = prev.filter(msg => msg.type !== 'results' && msg.type !== 'filters');
-      // Add filters FIRST (if available), then results
-      const updated = [];
-      if (filtersMsg) {
-        updated.push(filtersMsg);
-      }
-      updated.push(resultsMsg);
-      return [...filtered, ...updated];
-    });
-  };
-
-  const displayBackendResponse = (data) => {
-    console.log('displayBackendResponse:', data);
-    
-    // Nếu có clarifying_hints từ backend, set vào state
-    if (data.clarifying_hints && Array.isArray(data.clarifying_hints)) {
-      console.log('Setting clarifying hints:', data.clarifying_hints);
-      setClarifyingHints(data.clarifying_hints);
-    }
-
-    // If we have results with category, display filters FIRST, then products from /api/query
-    if (data.status === 'results' && data.products && data.products.length > 0) {
-      // Display filters FIRST if available from /api/query response
-      if (data.filters && data.filters.length > 0) {
-        console.log('Displaying filters from /api/query:', data.filters);
-        const filterMessage = `Bạn có thể lọc sản phẩm theo các tiêu chí dưới đây:`;
-        setMessages(prev => [...prev, {
-          type: 'filters',
-          text: filterMessage,
-          filters: data.filters,
-          timestamp: new Date()
-        }]);
-      }
-
-      // Display products AFTER filters
-      const resultMessage = `🎯 **Tìm thấy ${data.total_found || data.products.length} sản phẩm!**`;
-      setMessages(prev => [...prev, {
-        type: 'results',
-        text: resultMessage,
-        products: data.products,
-        timestamp: new Date()
-      }]);
-      return;
-    }
-    
-    // Display question if no results yet
-    if (data.question) {
-      let quickReplies = null;
-      if (data.options && Array.isArray(data.options)) {
-        quickReplies = data.options.map(opt => opt.label || opt.value || opt);
-      }
-      console.log('Quick replies:', quickReplies);
-      addBotMessage(data.question, null, quickReplies);
+      setConversationState(p=>({...p,isLoading:false}));
     }
   };
 
   const handleSend = () => {
-    if (!currentInput.trim() || isThinking) return;
-
-    addUserMessage(currentInput);
-    analyzeAndSearch(currentInput);  // NEW: Use analyze-first flow
+    if (!currentInput.trim()||isThinking) return;
+    addUser(currentInput);
+    analyzeAndSearch(currentInput);
     setCurrentInput('');
   };
 
-  /**
-   * Handle filter confirmation from SuggestionsPopup
-   * Called when user selects filter values and clicks "Tìm kiếm" button
-   */
-  const handleSuggestionsConfirm = (selectedFilters) => {
-    console.log('[POPUP] Selected filters:', selectedFilters);
-    // Close the popup
-    setShowSuggestionsPopup(false);
-    // Call searchProductsWithFilters with the selected filters
-    // selectedFilters is already in the format {attribute_name: [values]}
-    searchProductsWithFilters(lastCategoryName, selectedFilters);
-  };
-
-  const handleQuickReply = (reply) => {
-    addUserMessage(reply);
-    
-    // Check if user clicked "Search with filters" button
-    if (reply.includes('🔍 Tìm sản phẩm') && lastCategoryName) {
-      searchProductsWithFilters(lastCategoryName);
-    } else {
-      // Determine question type based on context
-      // This is a simplified approach - you might need to track the current step
-      sendToBackend(reply);
-    }
-  };
-
   return (
-    <div className="h-screen w-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-4 shadow-lg">
-        <div className="flex items-center gap-3">
-          <ShoppingBag className="w-8 h-8" />
-          <div>
-            <h1 className="text-2xl font-bold">RCM</h1>
-            <p className="text-blue-100 text-sm">RCM</p>
-          </div>
-        </div>
-      </div>
+    <div style={{ height:'100vh', width:'100vw', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+      <SharedHeader onLogoClick={()=>setView('landing')} />
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        {messages.map((msg, idx) => (
-          <div key={idx}>
-            {msg.type === 'bot' && (
-              <div className="flex gap-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center flex-shrink-0">
-                  <Sparkles className="w-5 h-5 text-white" />
-                </div>
-                <div className="flex-1">
-                  <div className="bg-gray-100 rounded-2xl rounded-tl-none p-4 max-w-2xl">
-                    <div className="whitespace-pre-wrap text-gray-800">{msg.text}</div>
-                  </div>
+      {/* {view === 'landing' ? (
+        <LandingPage onSearch={startSearch} user={user} onLoginClick={()=>setShowLoginModal(true)} />
+      ) : ( */}
+        <>
+          {/* Chat messages */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-4" style={{ background:'linear-gradient(160deg,#f5f7ff,#f0f4ff)', flex:1, overflowY:'auto', padding:'24px' }}>
+            {/* Back to home */}
+            <div style={{ marginBottom:8 }}>
+              <button onClick={()=>setView('landing')} style={{ display:'flex', alignItems:'center', gap:6, color:'#6366f1', fontSize:13, fontWeight:600, background:'none', border:'none', cursor:'pointer', padding:0, fontFamily:'inherit' }}>
+                ← Về trang chủ
+              </button>
+            </div>
 
-                  {msg.quickReplies && (
-                    <div className="flex flex-wrap gap-2 mt-3">
-                      {msg.quickReplies.map((reply, i) => (
-                        <button
-                          key={i}
-                          onClick={() => handleQuickReply(reply)}
-                          className="px-4 py-2 bg-white border-2 border-blue-300 text-blue-700 rounded-full hover:bg-blue-50 hover:border-blue-400 transition-all text-sm font-medium"
-                        >
-                          {reply}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {msg.type === 'user' && (
-              <div className="flex justify-end">
-                <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl rounded-tr-none p-4 max-w-2xl">
-                  {msg.text}
-                </div>
-              </div>
-            )}
-
-            {msg.type === 'hints' && msg.hints && Array.isArray(msg.hints) && msg.hints.length > 0 && (
-              <div className="flex gap-3 mt-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center flex-shrink-0">
-                  <Sparkles className="w-5 h-5 text-white" />
-                </div>
-                <div className="flex-1">
-                  <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl rounded-tl-none p-4 max-w-2xl">
-                    <div className="font-semibold text-amber-900 mb-2 text-sm">
-                      💡 Đây là những tiêu chí tìm kiếm có sẵn:
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {msg.hints.map((hint, idx) => (
-                        <span
-                          key={idx}
-                          className="px-3 py-2 bg-white border-2 border-amber-300 text-amber-700 text-sm rounded-full font-medium"
-                        >
-                          {hint}
-                        </span>
-                      ))}
-                    </div>
-                    <div className="text-xs text-amber-600 mt-2">
-                      (Vui lòng chọn các tiêu chí từ popup bên dưới)
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {msg.type === 'filters' && msg.filters && (
-              <div className="flex gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0">
-                  <Sparkles className="w-5 h-5 text-white" />
-                </div>
-                <div className="flex-1">
-                  <div className="bg-purple-50 rounded-2xl rounded-tl-none p-4 border border-purple-200">
-                    <div className="font-semibold text-purple-900 mb-3">{msg.text}</div>
-                    <div className="space-y-3 max-h-96 overflow-y-auto">
-                      {msg.filters.map((filter, filterIdx) => (
-                        <div key={filterIdx} className="border border-purple-200 rounded-lg p-3 bg-white">
-                          <p className="font-semibold text-sm text-purple-900 mb-2">
-                            {filter.display_name || filter.attribute_name}
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            {filter.options && filter.options.map((option, optIdx) => {
-                              const filterKey = `${filter.attribute_name}:${option.attribute_value}`;
-                              const isSelected = selectedFilters[filterKey];
-                              return (
-                                <button
-                                  key={optIdx}
-                                  onClick={() => {
-                                    console.log('Filter toggled:', filter.attribute_name, option.attribute_value);
-                                    setSelectedFilters(prev => {
-                                      const newFilters = { ...prev };
-                                      if (newFilters[filterKey]) {
-                                        delete newFilters[filterKey];
-                                      } else {
-                                        newFilters[filterKey] = true;
-                                      }
-                                      console.log('Selected filters:', newFilters);
-                                      return newFilters;
-                                    });
-                                  }}
-                                  className={`px-3 py-2 text-xs rounded-full transition-all border font-medium ${
-                                    isSelected
-                                      ? 'bg-purple-500 text-white border-purple-600 shadow-md'
-                                      : 'bg-white hover:bg-purple-100 text-purple-700 border-purple-300 hover:border-purple-400'
-                                  }`}
-                                >
-                                  {option.attribute_value} ({option.product_count})
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-4 flex gap-2">
-                      {Object.keys(selectedFilters).length > 0 && (
-                        <>
-                          <button
-                            onClick={() => {
-                              if (lastCategoryName) {
-                                searchProductsWithFilters(lastCategoryName, selectedFilters);
-                              }
-                            }}
-                            className="flex-1 px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white text-sm font-semibold rounded-lg transition-all"
-                          >
-                            🔍 Lọc sản phẩm ({Object.keys(selectedFilters).length})
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSelectedFilters({});
-                              console.log('Cleared all filters, reloading products');
-                              // Reload products without any filters to show initial results
-                              if (lastCategoryName) {
-                                searchProductsWithFilters(lastCategoryName, {});
-                              }
-                            }}
-                            className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 text-sm font-semibold rounded-lg transition-all"
-                          >
-                            ✕ Xóa
-                          </button>
-                        </>
-                      )}
-                      {Object.keys(selectedFilters).length === 0 && (
-                        <div className="text-xs text-purple-600 italic">
-                          Chọn các tiêu chí trên để lọc sản phẩm
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {msg.type === 'results' && (
-              <div className="space-y-4">
-                <div className="flex gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center flex-shrink-0">
-                    <CheckCircle2 className="w-5 h-5 text-white" />
-                  </div>
-                  <div className="bg-green-50 rounded-2xl rounded-tl-none p-4 max-w-2xl">
-                    <div className="font-semibold text-green-900">{msg.text}</div>
-                  </div>
-                </div>
-
-                {/* Render clarifying hints right after results */}
-                {/* {clarifyingHints && clarifyingHints.length > 0 && renderClarifyingHints()} */}
-
-                <div className="ml-13 w-full">
-                  <div className="grid grid-cols-3 gap-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                    {msg.products.map((product, i) => (
-                      <div 
-                        key={product.id || i} 
-                        className="bg-white border border-gray-200 rounded-lg overflow-hidden hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group"
-                        onClick={() => {
-                          if (product.product_url) {
-                            // ✅ Call Backend Python endpoint to run Playwright automation
-                            console.log('🎬 Opening product with Playwright:', product.product_url);
-                            fetch('http://localhost:8000/api/open-product', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ product_url: product.product_url })
-                            })
-                              .then(res => res.json())
-                              .then(data => {
-                                if (data.success) {
-                                  console.log('✅ Playwright automation started');
-                                  addBotMessage('🎬 Đã bắt đầu tự động mở sản phẩm trong Chrome...');
-                                } else {
-                                  console.error('❌ Failed to start Playwright:', data.detail);
-                                  // Fallback: open in new tab
-                                  window.open(product.product_url, '_blank');
-                                }
-                              })
-                              .catch(err => {
-                                console.error('❌ Error calling Playwright endpoint:', err);
-                                // Fallback: open in new tab
-                                window.open(product.product_url, '_blank');
-                              });
-                          }
-                        }}
-                      >
-                        {/* Product Image */}
-                        {product.thumbnail && (
-                          <div className="relative overflow-hidden bg-gray-100 h-32 flex items-center justify-center">
-                            <img
-                              src={product.thumbnail}
-                              alt={product.title}
-                              className="max-w-full max-h-full object-contain group-hover:scale-110 transition-transform"
-                            />
-                            {i === 0 && (
-                              <div className="absolute top-1 right-1 bg-yellow-100 text-yellow-800 text-xs px-1.5 py-0.5 rounded font-semibold">
-                                TOP
-                              </div>
-                            )}
+            <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+              {messages.map((msg, idx) => (
+                <div key={idx}>
+                  {msg.type==='bot' && (
+                    <div style={{ display:'flex', gap:12 }}>
+                      <div style={{ width:38, height:38, borderRadius:'50%', background:'linear-gradient(135deg,#6366f1,#8b5cf6)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                        <Sparkles size={17} color="#fff" />
+                      </div>
+                      <div>
+                        <div style={{ background:'#fff', borderRadius:'18px 18px 18px 4px', padding:'13px 17px', maxWidth:560, boxShadow:'0 2px 10px rgba(0,0,0,0.06)', border:'1px solid #f0f0f8', whiteSpace:'pre-wrap', color:'#1e1b4b', fontSize:14.5, lineHeight:1.6 }}>{msg.text}</div>
+                        {msg.quickReplies && (
+                          <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginTop:10 }}>
+                            {msg.quickReplies.map((r,i)=>(
+                              <button key={i} onClick={()=>{addUser(r);sendToBackend(r);}} style={{ padding:'8px 16px', background:'#fff', border:'2px solid #c7d2fe', color:'#4f46e5', borderRadius:20, fontSize:13, fontWeight:600, cursor:'pointer', transition:'all 0.15s', fontFamily:'inherit' }}
+                                onMouseEnter={e=>e.currentTarget.style.background='#eef2ff'}
+                                onMouseLeave={e=>e.currentTarget.style.background='#fff'}
+                              >{r}</button>
+                            ))}
                           </div>
                         )}
+                      </div>
+                    </div>
+                  )}
 
-                        {/* Product Info */}
-                        <div className="p-2">
-                          <h3 className="font-semibold text-gray-800 text-xs line-clamp-2 mb-1">{product.title}</h3>
-                          
-                          {product.min_price && (
-                            <div className="text-sm font-bold text-red-600 mb-1">
-                              {(product.min_price/1000000).toFixed(1)}tr
-                            </div>
-                          )}
+                  {msg.type==='user' && (
+                    <div style={{ display:'flex', justifyContent:'flex-end' }}>
+                      <div style={{ background:'linear-gradient(135deg,#6366f1,#8b5cf6)', color:'#fff', borderRadius:'18px 18px 4px 18px', padding:'13px 17px', maxWidth:480, boxShadow:'0 3px 14px rgba(99,102,241,0.3)', fontSize:14.5, lineHeight:1.5 }}>{msg.text}</div>
+                    </div>
+                  )}
 
-                          {product.brand && (
-                            <div className="text-xs text-gray-600 line-clamp-1">
-                              {product.brand}
-                            </div>
-                          )}
+                  {msg.type==='filters' && msg.filters && (
+                    <div style={{ display:'flex', gap:12 }}>
+                      <div style={{ width:38, height:38, borderRadius:'50%', background:'linear-gradient(135deg,#8b5cf6,#ec4899)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                        <Sparkles size={17} color="#fff" />
+                      </div>
+                      <div style={{ flex:1 }}>
+                        <div style={{ background:'#faf5ff', borderRadius:'18px 18px 18px 4px', padding:'16px', border:'1px solid #e9d5ff', maxWidth:640 }}>
+                          <div style={{ fontWeight:700, color:'#6b21a8', marginBottom:12, fontSize:14 }}>{msg.text}</div>
+                          <div style={{ display:'flex', flexDirection:'column', gap:10, maxHeight:320, overflowY:'auto' }}>
+                            {msg.filters.map((filter,fi)=>(
+                              <div key={fi} style={{ border:'1px solid #e9d5ff', borderRadius:10, padding:'10px 12px', background:'#fff' }}>
+                                <p style={{ fontWeight:700, fontSize:13, color:'#6b21a8', margin:'0 0 8px' }}>{filter.display_name||filter.attribute_name}</p>
+                                <div style={{ display:'flex', flexWrap:'wrap', gap:7 }}>
+                                  {filter.options?.map((opt,oi)=>{
+                                    const k=`${filter.attribute_name}:${opt.attribute_value}`;
+                                    const sel=selectedFilters[k];
+                                    return (
+                                      <button key={oi} onClick={()=>setSelectedFilters(p=>{const n={...p};if(n[k])delete n[k];else n[k]=true;return n;})}
+                                        style={{ padding:'6px 12px', fontSize:12, borderRadius:20, fontWeight:600, border:sel?'2px solid #7c3aed':'1.5px solid #ddd6fe', background:sel?'linear-gradient(135deg,#7c3aed,#8b5cf6)':'#fff', color:sel?'#fff':'#6b21a8', cursor:'pointer', transition:'all 0.15s', fontFamily:'inherit', boxShadow:sel?'0 2px 8px rgba(124,58,237,0.3)':'none' }}>
+                                        {opt.attribute_value} ({opt.product_count})
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{ marginTop:12, display:'flex', gap:8 }}>
+                            {Object.keys(selectedFilters).length>0 ? (
+                              <>
+                                <button onClick={()=>lastCategoryName&&searchProductsWithFilters(lastCategoryName,selectedFilters)}
+                                  style={{ flex:1, padding:'10px', background:'linear-gradient(135deg,#7c3aed,#8b5cf6)', color:'#fff', border:'none', borderRadius:10, fontSize:13, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>
+                                  🔍 Lọc sản phẩm ({Object.keys(selectedFilters).length})
+                                </button>
+                                <button onClick={()=>{setSelectedFilters({});lastCategoryName&&searchProductsWithFilters(lastCategoryName,{});}}
+                                  style={{ padding:'10px 16px', background:'#f1f5f9', color:'#64748b', border:'none', borderRadius:10, fontSize:13, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>
+                                  ✕ Xóa
+                                </button>
+                              </>
+                            ) : <div style={{ fontSize:12, color:'#9333ea', fontStyle:'italic' }}>Chọn các tiêu chí trên để lọc sản phẩm</div>}
+                          </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
+                    </div>
+                  )}
 
-            {/* Loading skeleton */}
-            {msg.type === 'loading' && (
-              <div className="space-y-4">
-                {/* Skeleton title */}
-                <div className="flex gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center flex-shrink-0">
-                    <div className="w-5 h-5 bg-green-600 rounded animate-pulse" />
-                  </div>
-                  <div className="bg-green-50 rounded-2xl rounded-tl-none p-4 w-64">
-                    <div className="h-6 bg-green-200 rounded animate-pulse" />
-                  </div>
-                </div>
-
-                {/* Skeleton filters */}
-                <div className="flex gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0">
-                    <div className="w-5 h-5 bg-purple-600 rounded animate-pulse" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="bg-purple-50 rounded-2xl rounded-tl-none p-4">
-                      <div className="h-5 bg-purple-200 rounded mb-3 w-40 animate-pulse" />
-                      <div className="space-y-2">
-                        {[1, 2, 3].map(i => (
-                          <div key={i} className="border border-purple-200 rounded-lg p-2 bg-white">
-                            <div className="h-4 bg-purple-100 rounded w-24 mb-2 animate-pulse" />
-                            <div className="flex gap-1 flex-wrap">
-                              {[1, 2, 3, 4].map(j => (
-                                <div key={j} className="h-6 w-16 bg-purple-100 rounded-full animate-pulse" />
-                              ))}
+                  {msg.type==='results' && (
+                    <div>
+                      <div style={{ display:'flex', gap:12, marginBottom:14 }}>
+                        <div style={{ width:38, height:38, borderRadius:'50%', background:'linear-gradient(135deg,#10b981,#059669)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                          <CheckCircle2 size={17} color="#fff" />
+                        </div>
+                        <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:'18px 18px 18px 4px', padding:'12px 17px', color:'#15803d', fontWeight:700, fontSize:14 }}>{msg.text}</div>
+                      </div>
+                      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(148px,1fr))', gap:12, paddingLeft:50 }}>
+                        {msg.products.map((product,i)=>(
+                          <div key={product.id||i}
+                            style={{ background:'#fff', border:'1.5px solid #f0f0f8', borderRadius:14, overflow:'hidden', cursor:'pointer', transition:'all 0.18s' }}
+                            onMouseEnter={e=>{e.currentTarget.style.borderColor='#6366f1';e.currentTarget.style.transform='translateY(-3px)';e.currentTarget.style.boxShadow='0 8px 24px rgba(99,102,241,0.18)';}}
+                            onMouseLeave={e=>{e.currentTarget.style.borderColor='#f0f0f8';e.currentTarget.style.transform='none';e.currentTarget.style.boxShadow='none';}}
+                            onClick={()=>{
+                              if(product.product_url){
+                                fetch('http://localhost:8000/api/open-product',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({product_url:product.product_url})})
+                                  .then(r=>r.json()).then(d=>{if(d.success)addBot('🎬 Đã bắt đầu tự động mở sản phẩm trong Chrome...');else window.open(product.product_url,'_blank');})
+                                  .catch(()=>window.open(product.product_url,'_blank'));
+                              }
+                            }}>
+                            {product.thumbnail && (
+                              <div style={{ background:'#f8f9ff', height:128, display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', position:'relative' }}>
+                                <img src={product.thumbnail} alt={product.title} style={{ maxWidth:'100%', maxHeight:'100%', objectFit:'contain' }} />
+                                {i===0&&<div style={{ position:'absolute', top:7, right:7, background:'linear-gradient(135deg,#f59e0b,#d97706)', color:'#fff', fontSize:9.5, fontWeight:700, padding:'2px 7px', borderRadius:7 }}>TOP</div>}
+                              </div>
+                            )}
+                            <div style={{ padding:'9px 11px' }}>
+                              <div style={{ fontSize:11.5, fontWeight:600, color:'#1e1b4b', lineHeight:1.4, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden', marginBottom:5 }}>{product.title}</div>
+                              {product.min_price&&<div style={{ fontSize:13, fontWeight:700, color:'#e11d48' }}>{(product.min_price/1000000).toFixed(1)}tr</div>}
+                              {product.brand&&<div style={{ fontSize:11, color:'#94a3b8', marginTop:2 }}>{product.brand}</div>}
                             </div>
                           </div>
                         ))}
                       </div>
                     </div>
-                  </div>
-                </div>
+                  )}
 
-                {/* Skeleton products */}
-                <div className="ml-13 w-full">
-                  <div className="grid grid-cols-3 gap-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                    {[...Array(18)].map((_, i) => (
-                      <div key={i} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                        <div className="bg-gray-200 h-32 animate-pulse" />
-                        <div className="p-2">
-                          <div className="h-4 bg-gray-200 rounded mb-2 animate-pulse" />
-                          <div className="h-4 bg-gray-200 rounded w-2/3 mb-2 animate-pulse" />
-                          <div className="h-4 bg-red-200 rounded w-1/2 animate-pulse" />
-                        </div>
+                  {msg.type==='loading' && (
+                    <div>
+                      <div style={{ display:'flex', gap:12, marginBottom:14 }}>
+                        <div style={{ width:38, height:38, borderRadius:'50%', background:'#e2e8f0' }} />
+                        <div style={{ height:44, width:180, background:'#f1f5f9', borderRadius:12 }} />
                       </div>
-                    ))}
+                      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(148px,1fr))', gap:12, paddingLeft:50 }}>
+                        {[...Array(12)].map((_,i)=>(
+                          <div key={i} style={{ background:'#fff', border:'1.5px solid #f0f0f8', borderRadius:14, overflow:'hidden' }}>
+                            <div style={{ height:128, background:'linear-gradient(90deg,#f1f5f9 25%,#e2e8f0 50%,#f1f5f9 75%)', backgroundSize:'200% 100%', animation:'shimmer 1.5s infinite' }} />
+                            <div style={{ padding:'9px 11px' }}>
+                              <div style={{ height:11, background:'#f1f5f9', borderRadius:6, marginBottom:7 }} />
+                              <div style={{ height:11, background:'#f1f5f9', borderRadius:6, width:'60%' }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <style>{'@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}'}</style>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {isThinking && (
+                <div style={{ display:'flex', gap:12 }}>
+                  <div style={{ width:38, height:38, borderRadius:'50%', background:'linear-gradient(135deg,#6366f1,#8b5cf6)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                    <Sparkles size={17} color="#fff" />
+                  </div>
+                  <div style={{ background:'#fff', borderRadius:'18px 18px 18px 4px', padding:'14px 18px', boxShadow:'0 2px 10px rgba(0,0,0,0.06)', border:'1px solid #f0f0f8', display:'flex', gap:5 }}>
+                    {[0,150,300].map(d=><div key={d} style={{ width:8, height:8, borderRadius:'50%', background:'#a5b4fc', animation:`bounce 1.2s ease-in-out ${d}ms infinite` }} />)}
+                    <style>{'@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}'}</style>
                   </div>
                 </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+          </div>
+
+          {/* Chat input */}
+          <div style={{ borderTop:'1px solid #eff0f8', background:'#fff', padding:'14px 20px', flexShrink:0, boxShadow:'0 -4px 20px rgba(99,102,241,0.07)' }}>
+            {isListening && transcript && (
+              <div style={{ marginBottom:10, padding:'10px 14px', background:'#eef2ff', border:'1px solid #c7d2fe', borderRadius:10, display:'flex', alignItems:'center', gap:8 }}>
+                <Volume2 size={14} color="#6366f1" />
+                <span style={{ fontSize:13, color:'#4f46e5' }}>Đang nghe: <strong>{transcript}</strong></span>
               </div>
             )}
-          </div>
-        ))}
-
-        {isThinking && (
-          <div className="flex gap-3">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-white animate-pulse" />
-            </div>
-            <div className="bg-gray-100 rounded-2xl rounded-tl-none p-4">
-              <div className="flex gap-1">
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* SuggestionsPopup - Appears when /api/analyze returns filters */}
-      <SuggestionsPopup
-        isOpen={showSuggestionsPopup}
-        onClose={() => setShowSuggestionsPopup(false)}
-        category={lastCategoryName}
-        filters={suggestionsPopupFilters}
-        hints={clarifyingHints}
-        onConfirm={handleSuggestionsConfirm}
-        conversationId={conversationState.conversationId}
-      />
-
-      {/* Input */}
-      <div className="border-t bg-gray-50 px-6 py-4 shadow-lg">
-        {isListening && transcript && (
-          <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <div className="flex items-center gap-2 text-sm text-blue-700">
-              <Volume2 className="w-4 h-4 animate-pulse" />
-              <span>Đang nghe: <strong>{transcript}</strong></span>
-            </div>
-          </div>
-        )}
-        <div className="flex gap-3">
-          <input
-            type="text"
-            value={currentInput}
-            onChange={(e) => setCurrentInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Nhập câu trả lời của bạn hoặc nói vào micro..."
-            className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-full focus:border-blue-500 focus:outline-none"
-            disabled={isThinking}
-          />
-          
-          {isBrowserSupported && (
-            <button
-              type="button"
-              onClick={handleMicClick}
-              disabled={isThinking}
-              className={`w-12 h-12 rounded-full flex items-center justify-center transition-all flex-shrink-0 ${
-                isListening
-                  ? 'bg-red-500 text-white hover:bg-red-600'
-                  : 'bg-gray-300 text-gray-700 hover:bg-gray-400'
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-              title={isListening ? 'Dừng ghi âm' : isBrowserSupported ? 'Bắt đầu ghi âm' : 'Trình duyệt không hỗ trợ'}
-            >
-              {isListening ? (
-                <MicOff className="w-5 h-5" />
-              ) : (
-                <Mic className="w-5 h-5" />
+            {user && <UserQuickActions onAction={(a)=>{addUser(`📌 ${a}`);addBot(`Tính năng "${a}" đang được phát triển. Bạn muốn tìm kiếm sản phẩm gì?`);}} />}
+            <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+              <input type="text" value={currentInput} onChange={e=>setCurrentInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSend()}
+                placeholder="Nhập câu trả lời của bạn hoặc nói vào micro..."
+                disabled={isThinking}
+                style={{ flex:1, padding:'13px 20px', border:'2px solid #e8eaf6', borderRadius:28, fontSize:14.5, color:'#1e1b4b', outline:'none', background:'#f8f9ff', transition:'all 0.2s', fontFamily:'inherit' }}
+                onFocus={e=>{e.target.style.borderColor='#6366f1';e.target.style.background='#fff';}}
+                onBlur={e=>{e.target.style.borderColor='#e8eaf6';e.target.style.background='#f8f9ff';}}
+              />
+              {isBrowserSupported && (
+                <button onClick={()=>{if(!recognitionRef.current)return;if(isListening){recognitionRef.current.stop();}else{try{recognitionRef.current.start();}catch(e){console.error(e);}}}}
+                  disabled={isThinking}
+                  style={{ width:46, height:46, borderRadius:'50%', border:'none', cursor:'pointer', background:isListening?'linear-gradient(135deg,#ef4444,#dc2626)':'#f1f5f9', color:isListening?'#fff':'#64748b', display:'flex', alignItems:'center', justifyContent:'center', transition:'all 0.2s', flexShrink:0, boxShadow:isListening?'0 4px 16px rgba(239,68,68,0.4)':'none' }}>
+                  {isListening?<MicOff size={18}/>:<Mic size={18}/>}
+                </button>
               )}
-            </button>
-          )}
-          
-          <button
-            onClick={handleSend}
-            disabled={!currentInput.trim() || isThinking}
-            className="w-12 h-12 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-full flex items-center justify-center hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex-shrink-0"
-          >
-            <Send className="w-5 h-5" />
-          </button>
-        </div>
-      </div>
+              <button onClick={handleSend} disabled={!currentInput.trim()||isThinking}
+                style={{ width:46, height:46, borderRadius:'50%', border:'none', cursor:'pointer', background:'linear-gradient(135deg,#6366f1,#8b5cf6)', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', transition:'all 0.2s', flexShrink:0, opacity:(!currentInput.trim()||isThinking)?0.45:1 }}>
+                <Send size={18}/>
+              </button>
+            </div>
+            {!user && (
+              <p style={{ margin:'8px 0 0', fontSize:12, color:'#94a3b8', textAlign:'center' }}>
+                <button onClick={()=>setShowLoginModal(true)} style={{ color:'#6366f1', fontWeight:600, background:'none', border:'none', cursor:'pointer', fontSize:12, padding:0, fontFamily:'inherit' }}>Đăng nhập</button>
+                {' '}để lưu yêu thích & nhận gợi ý cá nhân hoá
+              </p>
+            )}
+          </div>
+
+          <SuggestionsPopup isOpen={showSuggestionsPopup} onClose={()=>setShowSuggestionsPopup(false)} category={lastCategoryName} filters={suggestionsPopupFilters} hints={clarifyingHints} onConfirm={(f)=>{setShowSuggestionsPopup(false);searchProductsWithFilters(lastCategoryName,f);}} conversationId={conversationState.conversationId} />
+        </>
+      
+
+      <LoginModal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} />
     </div>
   );
 };

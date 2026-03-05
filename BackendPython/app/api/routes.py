@@ -37,7 +37,7 @@ logger = logging.getLogger("routes")
 
 def log_analyze(msg):
     """Helper để log messages từ /api/analyze"""
-    print(msg, flush=True)  # Also print for console
+    print(msg,  )  # Also print for console
     logger.info(msg)  # And log it
 
 app = FastAPI(title="Smart Product Recommendation API")
@@ -73,7 +73,7 @@ class ResponseUpdate(BaseModel):
 # ===== SESSION MANAGEMENT =====
 # Using Redis with in-memory fallback
 session_manager = get_session_manager()
-print(f"[Routes] Session storage type: {session_manager.get_storage_type()}", flush=True)
+print(f"[Routes] Session storage type: {session_manager.get_storage_type()}",  )
 
 # ===== INITIALIZE ORCHESTRATOR =====
 # Giả sử bạn có YourCrawler class
@@ -95,7 +95,7 @@ async def process_query(request: QueryRequest):
     2. searching: Đang crawl
     3. results: Có kết quả + filters
     """
-    print('vao api query', flush=True)
+    print('vao api query',  )
     
     # Get or create session
     conversation_id = request.conversation_id
@@ -149,10 +149,10 @@ async def process_query(request: QueryRequest):
                     
                     # Add filters to response
                     result["filters"] = filter_groups
-                    print(f"✅ Added {len(filter_groups)} filter groups to query response", flush=True)
+                    print(f"✅ Added {len(filter_groups)} filter groups to query response",  )
                     
         except Exception as e:
-            print(f"⚠️ Error fetching filters: {e}", flush=True)
+            print(f"⚠️ Error fetching filters: {e}",  )
             import traceback
             traceback.print_exc()
             # Don't fail the request if filters fail
@@ -190,7 +190,7 @@ async def analyze_query(request: QueryRequest):
         logger.info(f"[/api/analyze] ✅ ENDPOINT HIT!")
         logger.info(f"[/api/analyze] Request: {request.user_input}")
         
-        print(f"[/api/analyze] Starting analysis with orchestrator...", flush=True)
+        print(f"[/api/analyze] Starting analysis with orchestrator...",  )
         
         # Step 1: Get or create session
         conversation_id = request.conversation_id
@@ -216,13 +216,13 @@ async def analyze_query(request: QueryRequest):
             }
         
         # Step 2: ✅ USE ORCHESTRATOR - Let it handle all 7 cases!
-        logger.info(f"[/api/analyze] Calling orchestrator.process_query()...", flush=True)
+        logger.info(f"[/api/analyze] Calling orchestrator.process_query()...",  )
         orch_result = await orchestrator.process_query(
             user_input=request.user_input,
             conversation_state=conversation_state
         )
         
-        logger.info(f"[/api/analyze] ✅ Orchestrator returned: status={orch_result.get('status')}", flush=True)
+        logger.info(f"[/api/analyze] ✅ Orchestrator returned: status={orch_result.get('status')}",  )
         
         # Step 3: Save state
         if "state" in orch_result:
@@ -264,22 +264,22 @@ async def analyze_query(request: QueryRequest):
                     # Generate hints from filters
                     hints = _generate_hints_from_filters(category, filter_groups)
                     
-                    print(f"[/api/analyze] ✅ Fetched {len(filter_groups)} filters from DB", flush=True)
+                    print(f"[/api/analyze] ✅ Fetched {len(filter_groups)} filters from DB",  )
                 else:
-                    print(f"[/api/analyze] ⚠️ Category '{category}' not found in DB", flush=True)
+                    print(f"[/api/analyze] ⚠️ Category '{category}' not found in DB",  )
             except Exception as e:
-                print(f"[/api/analyze] ⚠️ Error fetching filters: {e}", flush=True)
+                print(f"[/api/analyze] ⚠️ Error fetching filters: {e}",  )
         
-        print(f"\n{'='*80}", flush=True)
-        print(f"[/api/analyze] 💡 FINAL RESPONSE", flush=True)
-        print(f"{'='*80}", flush=True)
-        print(f"[/api/analyze] Success: True", flush=True)
-        print(f"[/api/analyze] Category: {category}", flush=True)
-        print(f"[/api/analyze] Products: {len(products)}", flush=True)
-        print(f"[/api/analyze] Total: {total_products}", flush=True)
-        print(f"[/api/analyze] Filters: {len(filter_groups)}", flush=True)
-        print(f"[/api/analyze] Hints: {len(hints)}", flush=True)
-        print(f"[/api/analyze] {'='*80}\n", flush=True)
+        print(f"\n{'='*80}",  )
+        print(f"[/api/analyze] 💡 FINAL RESPONSE",  )
+        print(f"{'='*80}",  )
+        print(f"[/api/analyze] Success: True",  )
+        print(f"[/api/analyze] Category: {category}",  )
+        print(f"[/api/analyze] Products: {len(products)}",  )
+        print(f"[/api/analyze] Total: {total_products}",  )
+        print(f"[/api/analyze] Filters: {len(filter_groups)}",  )
+        print(f"[/api/analyze] Hints: {len(hints)}",  )
+        print(f"[/api/analyze] {'='*80}\n",  )
         
         # Step 6: Return in /api/analyze format
         return {
@@ -296,7 +296,7 @@ async def analyze_query(request: QueryRequest):
         }
         
     except Exception as e:
-        print(f"[/api/analyze] ❌ Error: {e}", flush=True)
+        print(f"[/api/analyze] ❌ Error: {e}",  )
         import traceback
         traceback.print_exc()
         return {
@@ -570,12 +570,12 @@ async def _trigger_crawl(
         extracted_attrs: Extracted attributes from query (e.g., {brand: "Nike"})
     """
     try:
-        print(f"\n{'='*80}", flush=True)
-        print(f"[_trigger_crawl] 🌐 STARTING BACKGROUND CRAWL", flush=True)
-        print(f"{'='*80}", flush=True)
-        print(f"[_trigger_crawl] Query: '{search_query}'", flush=True)
-        print(f"[_trigger_crawl] Category: '{category}'", flush=True)
-        print(f"[_trigger_crawl] Attributes: {extracted_attrs}", flush=True)
+        print(f"\n{'='*80}",  )
+        print(f"[_trigger_crawl] 🌐 STARTING BACKGROUND CRAWL",  )
+        print(f"{'='*80}",  )
+        print(f"[_trigger_crawl] Query: '{search_query}'",  )
+        print(f"[_trigger_crawl] Category: '{category}'",  )
+        print(f"[_trigger_crawl] Attributes: {extracted_attrs}",  )
         
         # Import crawler
         from app.crawler.crawler import TikiCrawler
@@ -583,14 +583,14 @@ async def _trigger_crawl(
         # Create crawler and crawl
         crawler = TikiCrawler()
         
-        print(f"[_trigger_crawl] Crawling from Tiki...", flush=True)
+        print(f"[_trigger_crawl] Crawling from Tiki...",  )
         crawled_products = await crawler.crawl(
             category=category,
             attributes=extracted_attrs,
             get_details=True
         )
         
-        print(f"[_trigger_crawl] ✅ Crawled {len(crawled_products)} products from Tiki", flush=True)
+        print(f"[_trigger_crawl] ✅ Crawled {len(crawled_products)} products from Tiki",  )
         
         # Save to DB
         if crawled_products:
@@ -600,7 +600,7 @@ async def _trigger_crawl(
                 reconciler = SchemaReconciler()
                 
                 actual_schema = reconciler.extract_actual_schema(crawled_products)
-                print(f"[_trigger_crawl] ✅ Extracted schema: {len(actual_schema)} attributes", flush=True)
+                print(f"[_trigger_crawl] ✅ Extracted schema: {len(actual_schema)} attributes",  )
                 
                 # Save products
                 saved_count = reconciler.save_products_to_db(
@@ -610,18 +610,18 @@ async def _trigger_crawl(
                     schema=actual_schema
                 )
                 
-                print(f"[_trigger_crawl] ✅ Saved {saved_count} products to DB", flush=True)
-                print(f"[_trigger_crawl] ℹ️ Products now available in /api/analyze", flush=True)
+                print(f"[_trigger_crawl] ✅ Saved {saved_count} products to DB",  )
+                print(f"[_trigger_crawl] ℹ️ Products now available in /api/analyze",  )
                 
             except Exception as save_error:
-                print(f"[_trigger_crawl] ⚠️ Could not save to DB: {save_error}", flush=True)
+                print(f"[_trigger_crawl] ⚠️ Could not save to DB: {save_error}",  )
                 import traceback
                 traceback.print_exc()
         
-        print(f"[_trigger_crawl] ✅ Background crawl completed", flush=True)
-        print(f"{'='*80}\n", flush=True)
+        print(f"[_trigger_crawl] ✅ Background crawl completed",  )
+        print(f"{'='*80}\n",  )
         
     except Exception as e:
-        print(f"[_trigger_crawl] ❌ Crawl error: {e}", flush=True)
+        print(f"[_trigger_crawl] ❌ Crawl error: {e}",  )
         import traceback
         traceback.print_exc()
