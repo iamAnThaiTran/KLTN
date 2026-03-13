@@ -111,7 +111,7 @@ class ProductMatcher:
                 product, attr_name
             )
             
-            print(f"    Attr {attr_name}: user='{user_value}', product='{product_value}'")
+            # print(f"    Attr {attr_name}: user='{user_value}', product='{product_value}'")
             
             # Check if user_value is a range (dict with min/max)
             is_range = isinstance(user_value, dict) and "min" in user_value and "max" in user_value
@@ -204,7 +204,7 @@ class ProductMatcher:
         prompt = f"""Is this product a "{expected_category}"?
 
 Product name: {product.get('name', 'N/A')}
-Product description: {product.get('description', 'N/A')[:200]}
+Product description: {(product.get('description') or 'N/A')[:200]}
 
 Respond ONLY with "yes" or "no".
 """

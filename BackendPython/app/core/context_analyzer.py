@@ -22,7 +22,7 @@ class ContextAnalyzer:
         
         # Nếu không có lịch sử, trả về input gốc
         if not search_history and not current_category:
-            logger.info(f"[ContextAnalyzer] No history, returning input as-is: '{user_input}'")
+            # logger.info(f"[ContextAnalyzer] No history, returning input as-is: '{user_input}'")
             return {
                 "intent": user_input,
                 "category_changed": False,
@@ -55,16 +55,16 @@ class ContextAnalyzer:
                 raise Exception("OpenAI returned None")
             
             response_text = response.strip()
-            logger.info(f"[ContextAnalyzer] LLM response: {response_text}")
+            # logger.info(f"[ContextAnalyzer] LLM response: {response_text}")
             
             # 🔍 Parse JSON response from LLM
             result = self._parse_llm_response(response_text)
             
-            logger.info(f"[ContextAnalyzer] 🔄 INTENT RECONSTRUCTION:")
-            logger.info(f"  History: {search_history}")
-            logger.info(f"  Current input: '{user_input}'")
-            logger.info(f"  Reconstructed: '{result['intent']}'")
-            logger.info(f"  Category changed: {result['category_changed']} (old={current_category}, new={result['new_category']})")
+            # logger.info(f"[ContextAnalyzer] 🔄 INTENT RECONSTRUCTION:")
+            # logger.info(f"  History: {search_history}")
+            # logger.info(f"  Current input: '{user_input}'")
+            # logger.info(f"  Reconstructed: '{result['intent']}'")
+            # logger.info(f"  Category changed: {result['category_changed']} (old={current_category}, new={result['new_category']})")
             
             return result
         

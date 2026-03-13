@@ -1,5 +1,6 @@
 # app/core/orchestrator.py
 
+from asyncio.log import logger
 import re
 from typing import Dict, Any, List
 from .extractor import AttributeExtractor
@@ -14,6 +15,7 @@ from .dynamic_schema import DynamicSchemaManager, AVAILABLE_CATEGORIES
 from .llm_utils import call_openai
 from .category_cache import CategoryCache
 from app.services.category_validator import CategoryValidator
+from app.services.product_repository import ProductRepository
 
 class RecommendationOrchestrator:
     """
@@ -34,6 +36,7 @@ class RecommendationOrchestrator:
         self.product_ranker = ProductRanker()
         self.crawler = MultiCrawler()
         self.category_validator = CategoryValidator()  # NEW: Category validation before crawl
+        self.product_repository = ProductRepository()  # NEW: Query DB before crawl
         
         # Cache management (Lazada-style)
         self.enable_cache = True  # Set to False to disable caching
@@ -65,17 +68,7 @@ class RecommendationOrchestrator:
         user_input: str, 
         conversation_state: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """
-        Central dispatcher: Classifies user request into one of 7 cases
-        
-        Returns:
-            {
-                "case": int (1-7),
-                "case_name": str,
-                "reason": str,
-                "data": Dict[str, Any]  # Case-specific data
-            }
-        """
+
         user_lower = user_input.lower().strip()
         
         # CASE 7: Comparison / advisory request (NO immediate crawl)
@@ -295,16 +288,16 @@ class RecommendationOrchestrator:
         # Ensure state structure
         conversation_state = self._ensure_state_structure(conversation_state)
         
-        print(f"[CASE 1] Processing clear request with rule-based extraction")
+        logger.info(f"[CASE 1] Processing clear request with rule-based extraction")
         
         category = case_data["category"]
         
         # NEW: Validate category before crawling
-        print(f"[CASE 1] Validating category: '{category}'")
+        logger.info(f"[CASE 1] Validating category: '{category}'")
         validation_result = self.category_validator.validate_category(category)
         
         if not validation_result["success"]:
-            print(f"[CASE 1] ❌ Category validation failed: {validation_result['reason']}")
+            logger.info(f"[CASE 1] ❌ Category validation failed: {validation_result['reason']}")
             return {
                 "status": "error",
                 "message": f"Không thể xác định danh mục sản phẩm '{category}'. {validation_result['reason']}",
@@ -317,7 +310,7 @@ class RecommendationOrchestrator:
         category_id = validation_result["category_id"]
         validation_status = validation_result["status"]
         
-        print(f"[CASE 1] ✅ Category validated: '{category}' → '{validated_category}' (id={category_id}, status={validation_status})")
+        logger.info(f"[CASE 1] ✅ Category validated: '{category}' → '{validated_category}' (id={category_id}, status={validation_status})")
         
         conversation_state["has_category"] = True
         conversation_state["category"] = validated_category
@@ -337,13 +330,26 @@ class RecommendationOrchestrator:
         
         conversation_state["extracted"] = extract_result["extracted"]
         
-        print(f"[CASE 1] Extracted attributes: {extract_result['extracted']}")
-        print(f"[CASE 1] Triggering crawler with validated category...")
+        logger.info(f"[CASE 1] Extracted attributes: {extract_result['extracted']}")
         
-        # Crawl with VALIDATED category (not original)
-        products = await self.crawler.crawl(validated_category, extract_result["extracted"])
+        # NEW: Query DB first before crawling
+        logger.info(f"[CASE 1] 🔍 Querying database for products...")
+        db_products = self.product_repository.query_by_category_and_attributes(
+            category_id=category_id,
+            attributes=extract_result["extracted"],
+            limit=50
+        )
         
-        if not products:
+        if db_products:
+            # DB HIT: Found products in database
+            logger.info(f"[CASE 1] ✅ DB HIT! Found {len(db_products)} products in database")
+            return await self._process_crawl_results(db_products, conversation_state, case=1, source="db")
+        
+        # DB MISS: Products not in DB, crawl from external sources
+        logger.info(f"[CASE 1] ❌ DB MISS! Crawling from external sources (Lazada/Tiki/Shopee)...")
+        crawled_products = await self.crawler.crawl(validated_category, extract_result["extracted"])
+        
+        if not crawled_products:
             return {
                 "status": "no_results",
                 "message": "Không tìm thấy sản phẩm phù hợp.",
@@ -351,8 +357,12 @@ class RecommendationOrchestrator:
                 "state": conversation_state
             }
         
+        # Save crawled products to DB for future queries (cache for next time)
+        logger.info(f"[CASE 1] 💾 Saving {len(crawled_products)} crawled products to database...")
+        self.product_repository.save_products_batch(category_id, crawled_products)
+        
         # Process and return results
-        return await self._process_crawl_results(products, conversation_state, case=1)
+        return await self._process_crawl_results(crawled_products, conversation_state, case=1, source="crawl")
     
     def _ensure_state_structure(self, conversation_state: Dict[str, Any]):
         """Ensure conversation_state has all required keys for safety"""
@@ -381,26 +391,22 @@ class RecommendationOrchestrator:
         conversation_state: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        CASE 2: Unclear request but category detected with schema
-        
-        Flow:
-        1. Validate category
-        2. Ask for missing mandatory attributes
-        3. When ready → Crawl with validated category
+        CASE 2: request chưa rõ ràng nhưng đã detect được category với confidence khá cao, và category đó có schema
         """
         # Ensure state structure
         conversation_state = self._ensure_state_structure(conversation_state)
         
-        print(f"[CASE 2] Request unclear but category '{case_data['category']}' detected")
+        logger.info(f"[CASE 2] Request unclear but category '{case_data['category']}' detected")
         
         category = case_data["category"]
         
         # NEW: Validate category before proceeding
-        print(f"[CASE 2] Validating category: '{category}'")
+        logger.info(f"[CASE 2] Validating category: '{category}'")
         validation_result = self.category_validator.validate_category(category)
+        logger.info(f"[CASE 2] Category validation result: {validation_result}")
         
         if not validation_result["success"]:
-            print(f"[CASE 2] ❌ Category validation failed: {validation_result['reason']}")
+            logger.error(f"[CASE 2] ❌ Category validation failed: {validation_result['reason']}")
             return {
                 "status": "error",
                 "message": f"Không thể xác định danh mục sản phẩm '{category}'. {validation_result['reason']}",
@@ -412,7 +418,7 @@ class RecommendationOrchestrator:
         validated_category = validation_result["category"]
         category_id = validation_result["category_id"]
         
-        print(f"[CASE 2] ✅ Category validated: '{category}' → '{validated_category}'")
+        logger.info(f"[CASE 2] ✅ Category validated: '{category}' → '{validated_category}'")
         
         conversation_state["has_category"] = True
         conversation_state["category"] = validated_category
@@ -432,15 +438,35 @@ class RecommendationOrchestrator:
         
         conversation_state["extracted"].update(extract_result["extracted"])
         
-        # Load schema and identify missing required attributes
+        # lấy schema và required attributes cho category đã được validate
         schema = get_schema(validated_category)
         schema_attrs = self.schema_manager.get_attributes_for_category(validated_category)
         
-        # If no schema, we don't have required attributes list, so proceed to crawl
+        # If no schema, we don't have required attributes list, so proceed to DB query
         if schema is None:
-            print(f"[CASE 2] No schema found for '{validated_category}', proceeding to crawl immediately")
-            products = await self.crawler.crawl(validated_category, conversation_state["extracted"])
-            return await self._process_crawl_results(products, conversation_state, case=2)
+            logger.info(f"[CASE 2] No schema found for '{validated_category}', querying database...")
+            db_products = self.product_repository.query_by_category_and_attributes(
+                category_id=category_id,
+                attributes=conversation_state["extracted"],
+                limit=50
+            )
+            
+            if db_products:
+                logger.info(f"[CASE 2] ✅ Found {len(db_products)} products in DB")
+                return await self._process_crawl_results(db_products, conversation_state, case=2, source="db")
+            
+            # No schema, no products in DB → Crawl
+            logger.info(f"[CASE 2] Crawling from external sources...")
+            crawled_products = await self.crawler.crawl(validated_category, conversation_state["extracted"])
+            if not crawled_products:
+                return {
+                    "status": "no_results",
+                    "message": "Không tìm thấy sản phẩm phù hợp.",
+                    "case": 2,
+                    "state": conversation_state
+                }
+            self.product_repository.save_products_batch(category_id, crawled_products)
+            return await self._process_crawl_results(crawled_products, conversation_state, case=2, source="crawl")
         
         required_attrs = [
             attr for attr, constraint in schema_attrs.items()
@@ -454,10 +480,36 @@ class RecommendationOrchestrator:
         ]
         
         if not missing:
-            # All required attributes provided, proceed to crawl with VALIDATED category
-            print(f"[CASE 2] All required attributes provided, proceeding to crawl")
-            products = await self.crawler.crawl(validated_category, conversation_state["extracted"])
-            return await self._process_crawl_results(products, conversation_state, case=2)
+            # All required attributes provided → Query DB first
+            logger.info(f"[CASE 2] All required attributes provided, querying database...")
+            db_products = self.product_repository.query_by_category_and_attributes(
+                category_id=category_id,
+                attributes=conversation_state["extracted"],
+                limit=50
+            )
+            
+            if db_products:
+                # DB HIT
+                logger.info(f"[CASE 2] ✅ DB HIT! Found {len(db_products)} products")
+                return await self._process_crawl_results(db_products, conversation_state, case=2, source="db")
+            
+            # DB MISS → Crawl
+            logger.info(f"[CASE 2] ❌ DB MISS! Crawling from external sources...")
+            crawled_products = await self.crawler.crawl(validated_category, conversation_state["extracted"])
+            
+            if not crawled_products:
+                return {
+                    "status": "no_results",
+                    "message": "Không tìm thấy sản phẩm phù hợp.",
+                    "case": 2,
+                    "state": conversation_state
+                }
+            
+            # Save to DB
+            logger.info(f"[CASE 2] 💾 Saving crawled products to database...")
+            self.product_repository.save_products_batch(category_id, crawled_products)
+            
+            return await self._process_crawl_results(crawled_products, conversation_state, case=2, source="crawl")
         
         # Ask for next missing attribute
         next_attr = missing[0]
@@ -495,7 +547,7 @@ class RecommendationOrchestrator:
         # Ensure state structure
         conversation_state = self._ensure_state_structure(conversation_state)
         
-        print(f"[CASE 3] Unclear request, using LLM for category inference")
+        logger.info(f"[CASE 3] Unclear request, using LLM for category inference")
         
         # Call LLM to detect category and suggest attributes
         llm_result = self._detect_category_with_llm(user_input)
@@ -550,7 +602,7 @@ class RecommendationOrchestrator:
         # Ensure state structure
         conversation_state = self._ensure_state_structure(conversation_state)
         
-        print(f"[CASE 4] Abstract intent detected, using LLM for category suggestions")
+        logger.info(f"[CASE 4] Abstract intent detected, using LLM for category suggestions")
         
         # Call LLM with purpose-oriented prompt
         import json
@@ -598,7 +650,7 @@ Be practical and culturally relevant for Vietnamese shopping."""
             }
             
         except Exception as e:
-            print(f"[CASE 4] LLM error: {e}")
+            logger.info(f"[CASE 4] LLM error: {e}")
             return {
                 "status": "error",
                 "message": "Xin lỗi, tôi gặp khó khăn khi phân tích yêu cầu của bạn. Vui lòng thử lại.",
@@ -615,11 +667,17 @@ Be practical and culturally relevant for Vietnamese shopping."""
         """
         CASE 5: Intent shift
         Detect conflict with previous intent, reset context, restart detection
+        
+        Flow:
+        1. Save previous search in history
+        2. Validate new category
+        3. Extract from new category
+        4. Query DB → crawl if needed
         """
         # Ensure state structure
         conversation_state = self._ensure_state_structure(conversation_state)
         
-        print(f"[CASE 5] Intent shift from '{case_data['old_category']}' to '{case_data['new_category']}'")
+        logger.info(f"[CASE 5] Intent shift from '{case_data['old_category']}' to '{case_data['new_category']}'")
         
         # Save history
         if conversation_state.get("category"):
@@ -630,30 +688,73 @@ Be practical and culturally relevant for Vietnamese shopping."""
                 "extracted": conversation_state.get("extracted", {}).copy()
             })
         
-        # Reset context
+        # Validate new category
         new_category = case_data["new_category"]
+        logger.info(f"[CASE 5] Validating new category: '{new_category}'")
+        validation_result = self.category_validator.validate_category(new_category)
+        
+        if not validation_result["success"]:
+            logger.info(f"[CASE 5] ❌ Category validation failed")
+            return {
+                "status": "error",
+                "message": f"Không thể xác định danh mục '{new_category}'",
+                "case": 5,
+                "state": conversation_state
+            }
+        
+        # Reset context with validated category
+        validated_category = validation_result["category"]
+        category_id = validation_result["category_id"]
+        
         conversation_state = {
             "has_category": True,
-            "category": new_category,
+            "category": validated_category,
+            "category_id": category_id,
             "extracted": {},
             "missing_required": [],
             "search_history": conversation_state.get("search_history", []),
             "attributes_asked": []
         }
         
-        # Restart detection for new category - process as new search
-        extract_result = self.attribute_extractor.extract(user_input, new_category, use_llm=False)
+        # Restart detection for new category
+        extract_result = self.attribute_extractor.extract(user_input, validated_category, use_llm=False)
         conversation_state["extracted"] = extract_result["extracted"]
         
-        # Determine if we have enough to crawl or need to ask
-        schema_attrs = self.schema_manager.get_attributes_for_category(new_category)
+        # Determine if we have enough to query/crawl or need to ask
+        schema_attrs = self.schema_manager.get_attributes_for_category(validated_category)
         required_attrs = [attr for attr, constraint in schema_attrs.items() if constraint.required]
         missing = [attr for attr in required_attrs if attr not in conversation_state["extracted"]]
         
         if len(conversation_state["extracted"]) >= 2 or not missing:
-            # Enough info, crawl
-            products = await self.crawler.crawl(new_category, conversation_state["extracted"])
-            return await self._process_crawl_results(products, conversation_state, case=5)
+            # Enough info → Query DB first
+            logger.info(f"[CASE 5] Enough attributes, querying database...")
+            db_products = self.product_repository.query_by_category_and_attributes(
+                category_id=category_id,
+                attributes=conversation_state["extracted"],
+                limit=50
+            )
+            
+            if db_products:
+                # DB HIT
+                logger.info(f"[CASE 5] ✅ Found {len(db_products)} products in DB")
+                return await self._process_crawl_results(db_products, conversation_state, case=5, source="db")
+            
+            # DB MISS → Crawl
+            logger.info(f"[CASE 5] ❌ DB MISS, crawling...")
+            crawled_products = await self.crawler.crawl(validated_category, conversation_state["extracted"])
+            
+            if not crawled_products:
+                return {
+                    "status": "no_results",
+                    "message": "Không tìm thấy sản phẩm phù hợp.",
+                    "case": 5,
+                    "state": conversation_state
+                }
+            
+            # Save to DB
+            self.product_repository.save_products_batch(category_id, crawled_products)
+            return await self._process_crawl_results(crawled_products, conversation_state, case=5, source="crawl")
+        
         else:
             # Need more info
             next_attr = missing[0] if missing else None
@@ -661,7 +762,7 @@ Be practical and culturally relevant for Vietnamese shopping."""
                 conversation_state["attributes_asked"].append(next_attr)
                 question = self.dialogue_manager.generate_question({
                     "has_category": True,
-                    "category": new_category,
+                    "category": validated_category,
                     "extracted": conversation_state["extracted"],
                     "missing_required": [next_attr],
                     "user_input": user_input
@@ -687,7 +788,7 @@ Be practical and culturally relevant for Vietnamese shopping."""
         # Ensure state structure
         conversation_state = self._ensure_state_structure(conversation_state)
         
-        print(f"[CASE 6] Incremental refinement in category '{conversation_state['category']}'")
+        logger.info(f"[CASE 6] Incremental refinement in category '{conversation_state['category']}'")
         
         category = conversation_state["category"]
         
@@ -698,14 +799,14 @@ Be practical and culturally relevant for Vietnamese shopping."""
             # Replace conflicting attributes
             for attr, value in new_attrs["extracted"].items():
                 if attr in conversation_state["extracted"]:
-                    print(f"[CASE 6] Replacing {attr}: '{conversation_state['extracted'][attr]}' → '{value}'")
+                    logger.info(f"[CASE 6] Replacing {attr}: '{conversation_state['extracted'][attr]}' → '{value}'")
                 conversation_state["extracted"][attr] = value
         else:
             # Merge (refine) - don't overwrite existing
             for attr, value in new_attrs["extracted"].items():
                 if attr not in conversation_state["extracted"]:
                     conversation_state["extracted"][attr] = value
-                    print(f"[CASE 6] Adding {attr}: '{value}'")
+                    logger.info(f"[CASE 6] Adding {attr}: '{value}'")
         
         # Use smart crawl with caching
         products = await self._smart_crawl(category, conversation_state["extracted"], conversation_state)
@@ -725,7 +826,7 @@ Be practical and culturally relevant for Vietnamese shopping."""
         # Ensure state structure
         conversation_state = self._ensure_state_structure(conversation_state)
         
-        print(f"[CASE 7] Comparison/advisory request detected")
+        logger.info(f"[CASE 7] Comparison/advisory request detected")
         
         # Use LLM to provide comparison or advice
         import json
@@ -755,7 +856,7 @@ Be concise and helpful."""
             }
             
         except Exception as e:
-            print(f"[CASE 7] LLM error: {e}")
+            logger.info(f"[CASE 7] LLM error: {e}")
             return {
                 "status": "advisory",
                 "answer": "Đây là câu hỏi hay. Để tư vấn tốt hơn, tôi cần biết bạn đang quan tâm đến sản phẩm nào cụ thể.",
@@ -768,15 +869,25 @@ Be concise and helpful."""
         self,
         products: List[Dict[str, Any]],
         conversation_state: Dict[str, Any],
-        case: int
+        case: int,
+        source: str = "crawl"  # NEW: Track source (db, crawl)
     ) -> Dict[str, Any]:
-        """Helper to process crawled products and return formatted results"""
+        """
+        Helper to process crawled/DB products and return formatted results
+        
+        Args:
+            products: List of products
+            conversation_state: Current conversation state
+            case: Case number (1-7)
+            source: Where products came from ("db" or "crawl")
+        """
         if not products:
             return {
                 "status": "no_results",
                 "message": "Không tìm thấy sản phẩm phù hợp.",
                 "case": case,
-                "state": conversation_state
+                "state": conversation_state,
+                "source": source
             }
         
         products = [self._normalize_product(p) for p in products]
@@ -792,7 +903,8 @@ Be concise and helpful."""
                 "status": "no_results",
                 "message": "Không có sản phẩm nào phù hợp với yêu cầu.",
                 "case": case,
-                "state": conversation_state
+                "state": conversation_state,
+                "source": source
             }
         
         # Update cache
@@ -817,16 +929,9 @@ Be concise and helpful."""
             "comparison": comparison,
             "total_found": len(matched_products),
             "case": case,
-            "state": conversation_state
+            "state": conversation_state,
+            "source": source  # Track whether from DB or crawl
         }
-    
-        
-        # Comparison keywords for Case 7 detection
-        self.comparison_keywords = [
-            "so sánh", "khác", "hơn", "tốt hơn", "bền hơn", "rẻ hơn", "đẹp hơn",
-            "với", "hay", "or", "vs", "versus", "compare", "comparison",
-            "nên chọn", "nên mua", "cái nào", "loại nào"
-        ]
     
     def _extract_category_from_input(self, user_input: str) -> Dict[str, Any]:
         """
@@ -880,7 +985,7 @@ Return ONLY valid JSON, no markdown."""
             data = json.loads(response.strip())
             inferred_cat = data.get("inferred_category", "").lower().strip()
             
-            print(f"DEBUG: LLM semantic analysis: {data}")
+            logger.info(f"DEBUG: LLM semantic analysis: {data}")
             
             # Match against UNIVERSAL_KEYWORDS - NOT hardcoded list!
             # LLM said "nước ngọt" → find "nước ngọt" in UNIVERSAL_KEYWORDS
@@ -906,7 +1011,7 @@ Return ONLY valid JSON, no markdown."""
                 "confidence": 0.90
             }
         except json.JSONDecodeError as e:
-            print(f"DEBUG: JSON parse error: {e}, response: {response[:100]}")
+            logger.info(f"DEBUG: JSON parse error: {e}, response: {response[:100]}")
             return {
                 "product_type": user_input,
                 "category": None,
@@ -915,7 +1020,7 @@ Return ONLY valid JSON, no markdown."""
                 "confidence": 0.0
             }
         except Exception as e:
-            print(f"DEBUG: LLM semantic extraction error: {e}")
+            logger.info(f"DEBUG: LLM semantic extraction error: {e}")
             return {
                 "product_type": user_input,
                 "category": None,
@@ -944,7 +1049,7 @@ Return ONLY valid JSON, no markdown."""
         # Check cache first
         cache_key = user_input.lower().strip()
         if cache_key in self.llm_suggestion_cache:
-            print(f"DEBUG: Using cached LLM suggestions for '{cache_key[:30]}...'")
+            logger.info(f"DEBUG: Using cached LLM suggestions for '{cache_key[:30]}...'")
             return self.llm_suggestion_cache[cache_key]
         
         categories_text = ", ".join(AVAILABLE_CATEGORIES)
@@ -974,7 +1079,7 @@ Be concise. Attributes should be practical filtering criteria."""
                 max_tokens=300
             )
             
-            print(f"DEBUG: LLM response:\n{response}")
+            logger.info(f"DEBUG: LLM response:\n{response}")
             
             # Parse JSON response - handle markdown code blocks
             import json
@@ -1008,30 +1113,24 @@ Be concise. Attributes should be practical filtering criteria."""
             
             # Cache the result in memory
             self.llm_suggestion_cache[cache_key] = result
-            print(f"DEBUG: Cached suggestions for reuse")
+            logger.info(f"DEBUG: Cached suggestions for reuse")
             
             # 💾 Save suggestions to persistent storage (DB/file)
             if suggestions:
                 try:
                     saved_ids = self.category_cache.save_multiple(suggestions)
-                    print(f"💾 Saved {len(saved_ids)} categories to persistent cache")
+                    logger.info(f"💾 Saved {len(saved_ids)} categories to persistent cache")
                 except Exception as e:
-                    print(f"⚠️  Failed to save to persistent cache: {e}")
+                    logger.info(f"⚠️  Failed to save to persistent cache: {e}")
             
             return result
             
         except json.JSONDecodeError as e:
-            print(f"DEBUG: LLM JSON parse error: {e}")
+            logger.info(f"DEBUG: LLM JSON parse error: {e}")
             return {"suggested_categories": [], "best_match": None, "confidence": 0.0, "method": "llm"}
         except Exception as e:
-            print(f"DEBUG: LLM detection error: {e}")
+            logger.info(f"DEBUG: LLM detection error: {e}")
             return {"suggested_categories": [], "best_match": None, "confidence": 0.0, "method": "llm"}
-            return {
-                "category": None,
-                "confidence": 0.0,
-                "method": "llm",
-                "error": str(e)
-            }
         
     
     async def process_query(
@@ -1057,13 +1156,13 @@ Be concise. Attributes should be practical filtering criteria."""
             }
         
         # STEP 0: ✅ ANALYZE INTENT - Enrich conversation_state with intent info BEFORE classification
-        print(f"\n[Orchestrator] 📊 Analyzing user intent from: '{user_input}'")
+        logger.info(f"\n[Orchestrator] 📊 Analyzing user intent from: '{user_input}'")
         intent_result = self.intent_mapper.map_intent(user_input)
-        print(f"[Orchestrator] ✅ Intent detected:")
-        print(f"  - Intent: {intent_result['intent']}")
-        print(f"  - Categories: {intent_result['categories']}")
-        print(f"  - Confidence: {intent_result['confidence']:.2f}")
-        print(f"  - Method: {intent_result['method']}")
+        logger.info(f"[Orchestrator] ✅ Intent detected:")
+        logger.info(f"  - Intent: {intent_result['intent']}")
+        logger.info(f"  - Categories: {intent_result['categories']}")
+        logger.info(f"  - Confidence: {intent_result['confidence']:.2f}")
+        logger.info(f"  - Method: {intent_result['method']}")
         
         # Store intent analysis in conversation_state (for classify_request_case to use)
         if not conversation_state.get("detected_intent"):
@@ -1072,10 +1171,10 @@ Be concise. Attributes should be practical filtering criteria."""
         # STEP 1: Classify request into one of 7 cases
         case_info = self.classify_request_case(user_input, conversation_state)
         
-        print(f"\n{'='*80}")
-        print(f"CASE {case_info['case']}: {case_info['case_name']}")
-        print(f"Reason: {case_info['reason']}")
-        print(f"{'='*80}\n")
+        logger.info(f"\n{'='*80}")
+        logger.info(f"CASE {case_info['case']}: {case_info['case_name']}")
+        logger.info(f"Reason: {case_info['reason']}")
+        logger.info(f"{'='*80}\n")
         
         # STEP 2: Route to appropriate handler
         handlers = {
@@ -1119,47 +1218,53 @@ Be concise. Attributes should be practical filtering criteria."""
         conversation_state: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
-        Smart crawl: Use cached products if possible, crawl again if needed.
-        Implements Lazada-style in-memory filtering.
+        Smart crawl: Query DB first → in-memory filter → crawl if needed
+        
+        Flow:
+        1. Query database with category + attributes
+        2. If found → return (DB HIT, fast!)
+        3. If not found → crawl from external sources
+        4. Save crawled results to DB for future queries
         
         Returns:
-            List of products (from cache or fresh crawl)
+            List of products (from DB or crawl)
         """
         
-        if not self.enable_cache:
-            print(f"🔍 Cache disabled, crawling fresh...")
-            products = await self.crawler.crawl(category, attributes)
-            conversation_state["cache_misses"] = conversation_state.get("cache_misses", 0) + 1
-            return products
+        category_id = conversation_state.get("category_id")
         
-        # Check if we have cached products
-        if conversation_state.get("cached_products"):
-            last_params = conversation_state.get("last_crawl_params", {})
-            
-            # If category or brand changed → crawl again
-            if (last_params.get("category") != category or 
-                last_params.get("brand") != attributes.get("brand")):
-                print(f"⚠️ Cache miss: category/brand changed, crawling...")
-                products = await self.crawler.crawl(category, attributes)
-                conversation_state["cache_misses"] = conversation_state.get("cache_misses", 0) + 1
-                return products
-            
-            # Same category & brand → use cached products
-            print(f"✅ Cache HIT! Using {len(conversation_state['cached_products'])} cached products")
-            conversation_state["cache_hits"] = conversation_state.get("cache_hits", 0) + 1
-            
-            # Filter in-memory for better performance (Lazada style)
-            products = self._filter_products_in_memory(
-                conversation_state["cached_products"],
-                attributes
+        # Step 1: Try DB first (fast!)
+        if category_id:
+            logger.info(f"[SMART_CRAWL] 🔍 Querying database (category_id={category_id})...")
+            db_products = self.product_repository.query_by_category_and_attributes(
+                category_id=category_id,
+                attributes=attributes,
+                limit=100
             )
-            return products
+            
+            if db_products:
+                logger.info(f"[SMART_CRAWL] ✅ DB HIT! Found {len(db_products)} products, filtering in-memory...")
+                conversation_state["cache_hits"] = conversation_state.get("cache_hits", 0) + 1
+                
+                # Filter in-memory for additional refinement (Lazada style)
+                filtered = self._filter_products_in_memory(db_products, attributes)
+                logger.info(f"[SMART_CRAWL] After filtering: {len(filtered)} products")
+                return filtered
         
-        # First time → crawl and cache
-        print(f"🔍 First crawl for {category}, caching results...")
-        products = await self.crawler.crawl(category, attributes)
+        # Step 2: DB miss → crawl from external sources
+        logger.info(f"[SMART_CRAWL] ❌ DB MISS! Crawling from external sources...")
         conversation_state["cache_misses"] = conversation_state.get("cache_misses", 0) + 1
-        return products
+        
+        crawled_products = await self.crawler.crawl(category, attributes)
+        
+        if not crawled_products:
+            return []
+        
+        # Step 3: Save crawled results to DB for future queries
+        if category_id:
+            logger.info(f"[SMART_CRAWL] 💾 Saving {len(crawled_products)} products to database...")
+            self.product_repository.save_products_batch(category_id, crawled_products)
+        
+        return crawled_products
     
     def _filter_products_in_memory(
         self,
@@ -1180,7 +1285,7 @@ Be concise. Attributes should be practical filtering criteria."""
                 p for p in filtered 
                 if min_price <= p.get("price", 0) <= max_price
             ]
-            print(f"  💰 Filtered by price: {min_price}-{max_price} → {len(filtered)} products")
+            logger.info(f"  💰 Filtered by price: {min_price}-{max_price} → {len(filtered)} products")
         
         # Filter by color
         if "mau" in attributes:
@@ -1189,7 +1294,7 @@ Be concise. Attributes should be practical filtering criteria."""
                 p for p in filtered 
                 if color in str(p.get("mau", "")).lower()
             ]
-            print(f"  🎨 Filtered by color: {color} → {len(filtered)} products")
+            logger.info(f"  🎨 Filtered by color: {color} → {len(filtered)} products")
         
         # Filter by size
         if "size" in attributes:
@@ -1198,7 +1303,7 @@ Be concise. Attributes should be practical filtering criteria."""
                 p for p in filtered 
                 if p.get("size") == size
             ]
-            print(f"  📏 Filtered by size: {size} → {len(filtered)} products")
+            logger.info(f"  📏 Filtered by size: {size} → {len(filtered)} products")
         
         # Filter by type
         if "loai" in attributes:
@@ -1207,7 +1312,7 @@ Be concise. Attributes should be practical filtering criteria."""
                 p for p in filtered 
                 if loai in str(p.get("loai", "")).lower()
             ]
-            print(f"  🏷️ Filtered by type: {loai} → {len(filtered)} products")
+            logger.info(f"  🏷️ Filtered by type: {loai} → {len(filtered)} products")
         
         return filtered
     

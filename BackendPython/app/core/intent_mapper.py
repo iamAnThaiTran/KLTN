@@ -5,6 +5,11 @@ import re
 import os
 from dotenv import load_dotenv
 from .llm_utils import call_openai
+import logging
+
+# Set up logger
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # Load environment variables
 load_dotenv()
@@ -85,14 +90,14 @@ class IntentMapper:
         
         # ===== STEP 2: Pattern not matched → Try LLM fallback (SMART) =====
         if self.enable_llm_fallback and os.getenv("OPENAI_API_KEY"):
-            print(f"DEBUG: Pattern matching failed, trying LLM...")
+            logger.info(f"DEBUG: Pattern matching failed, trying LLM...")
             try:
                 llm_result = self._map_intent_with_llm(user_input)
                 if llm_result["intent"] and llm_result["categories"]:
-                    print(f"DEBUG: LLM mapped - {llm_result['intent']} → {llm_result['categories']}")
+                    logger.info(f"DEBUG: LLM mapped - {llm_result['intent']} → {llm_result['categories']}")
                     return llm_result
             except Exception as e:
-                print(f"DEBUG: LLM fallback failed: {e}")
+                logger.info(f"DEBUG: LLM fallback failed: {e}")
                 # Fall through to no-match case
         
         # ===== STEP 3: No match (pattern or LLM) =====

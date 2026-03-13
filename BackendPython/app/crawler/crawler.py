@@ -593,8 +593,8 @@ class TikiCrawler:
                             if item and item not in result["materials"]:
                                 result["materials"].append(item)
         
-        if result["materials"]:
-            logger.info(f"      🧵 Materials extracted: {result['materials'][:2]}{'...' if len(result['materials']) > 2 else ''}")
+        # if result["materials"]:
+        #     logger.info(f"      🧵 Materials extracted: {result['materials'][:2]}{'...' if len(result['materials']) > 2 else ''}")
         
         # Loại trùng - giữ thứ tự
         result["sizes"] = list(dict.fromkeys(result["sizes"]))

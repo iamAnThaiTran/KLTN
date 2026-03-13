@@ -71,6 +71,44 @@ orchestrator = RecommendationOrchestrator()
 context_analyzer = get_context_analyzer()
 sku_repo = SKURepository()  # Initialize SKU repository for filters
 
+# ===== HELPER FUNCTIONS =====
+
+def _generate_hints_from_filters(category: str, filter_groups: List[Dict]) -> List[str]:
+    """
+    Generate user-friendly hints from available filters
+    
+    Args:
+        category: Product category name
+        filter_groups: List of available filter groups with options
+    
+    Returns:
+        List of hint messages to suggest to user
+    """
+    hints = []
+    
+    if not filter_groups:
+        return hints
+    
+    # Group filters by type
+    enum_filters = [f for f in filter_groups if f.get('data_type') == 'enum']
+    range_filters = [f for f in filter_groups if f.get('data_type') in ['range', 'number']]
+    
+    # Generate hints for enum filters
+    if enum_filters:
+        filter_names = ", ".join([f['display_name'] for f in enum_filters[:3]])
+        hints.append(f"Bạn có thể lọc theo {filter_names}")
+    
+    # Generate hints for range filters
+    if range_filters:
+        for f in range_filters[:2]:
+            hints.append(f"Cụ thể hơn giá cả hoặc {f['display_name'].lower()}")
+    
+    # If no specific hints, provide generic suggestion
+    if not hints:
+        hints.append(f"Chọn loại {category.lower()} bạn quan tâm")
+    
+    return hints
+
 # ===== ENDPOINTS =====
 
 @app.post("/api/query")
@@ -203,6 +241,8 @@ async def analyze_query(request: QueryRequest):
                 user_input=request.user_input,
                 conversation_state=conversation_state
             )
+            #da clear
+            logger.info(f"[/api/analyze] 🔄 LLM reconstructed intent: '{result_dict}'")
             user_input_to_process = result_dict["intent"]
             
             # 🔴 HANDLE CATEGORY CHANGE
@@ -227,7 +267,7 @@ async def analyze_query(request: QueryRequest):
         # ========================================================================
         # STEP 3: Process with orchestrator
         # ========================================================================
-        logger.info(f"\n{'='*100}")
+        logger.info(f"\n{'-'*200}")
         logger.info(f"[/api/analyze] Processing: '{user_input_to_process}'")
         logger.info(f"[/api/analyze] Original input: '{request.user_input}'")
         
@@ -235,6 +275,7 @@ async def analyze_query(request: QueryRequest):
             user_input=user_input_to_process,
             conversation_state=conversation_state
         )
+        # logger.info(f"[/api/analyze] Orchestrator result : {orch_result}")
         
         # Save updated state
         if "state" in orch_result:
@@ -323,8 +364,8 @@ async def analyze_query(request: QueryRequest):
         
     except Exception as e:
         logger.info(f"[/api/analyze] ❌ Error: {e}")
-        import traceback
-        traceback.logger.info_exc()
+        import traceback as tb
+        logger.exception("Error processing query")
         
         return {
             "success": False,
