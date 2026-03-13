@@ -91,7 +91,7 @@ class ProductMatcher:
                 # Thiếu category → dùng LLM classify
                 product_category = self._llm_classify_product(product, schema.name)
             
-            print(f"    Category check: inferred='{product_category}', expected='{schema.name}'")
+            # print(f"    Category check: inferred='{product_category}', expected='{schema.name}'")
             
             if product_category != schema.name:
                 # Sai category → loại bỏ
@@ -166,10 +166,10 @@ class ProductMatcher:
         completeness = self._calculate_completeness(product, schema)
         score += completeness * 10
         
-        print(f"    Final score: {score}, mismatch_count: {mismatch_count}")
+        # print(f"    Final score: {score}, mismatch_count: {mismatch_count}")
         
         return {
-            "is_valid": True,  # Luôn True trừ khi category sai hoặc quá nhiều mismatch
+            "is_valid": True,  
             "score": max(0, min(100, score)),  # Clamp 0-100
             "reasons": reasons
         }

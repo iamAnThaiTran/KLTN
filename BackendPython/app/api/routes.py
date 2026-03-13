@@ -32,7 +32,10 @@ class FlushingStreamHandler(logging.StreamHandler):
 handler = FlushingStreamHandler(sys.stdout)
 handler.setFormatter(logging.Formatter('[%(name)s] %(levelname)s: %(message)s'))
 logging.root.addHandler(handler)
-logging.root.setLevel(logging.DEBUG)
+logging.root.setLevel(logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)      # Tắt httpx
+logging.getLogger("httpcore").setLevel(logging.WARNING)   # Tắt httpcore
+logging.getLogger("openai").setLevel(logging.WARNING)     # Tắt openai
 logger = logging.getLogger("routes")
 
 def log_analyze(msg):
@@ -199,7 +202,7 @@ async def analyze_query(request: QueryRequest):
         logger.info(f"[/api/analyze] Conversation ID: {conversation_id}")
         
         conversation_state = session_manager.get_session(conversation_id)
-        logger.info(f"[/api/analyze] Initial conversation state: {conversation_state}")
+        # logger.info(f"[/api/analyze] Initial conversation state: {conversation_state}")
         if conversation_state is None:
             conversation_state = {
                 "has_category": False,
@@ -222,7 +225,7 @@ async def analyze_query(request: QueryRequest):
             conversation_state=conversation_state
         )
         
-        logger.info(f"[/api/analyze] ✅ Orchestrator returned: status={orch_result.get('status')}",  )
+        # logger.info(f"[/api/analyze] ✅ Orchestrator returned: status={orch_result.get('status')}",  )
         
         # Step 3: Save state
         if "state" in orch_result:

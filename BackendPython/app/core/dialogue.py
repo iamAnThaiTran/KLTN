@@ -94,8 +94,8 @@ class DialogueManager:
         
         # Handle KeyError: attribute không tồn tại trong schema
         if attr_name not in schema.attributes:
-            print(f"DEBUG: Attribute '{attr_name}' not in schema for category '{category}'")
-            print(f"DEBUG: Available attributes: {list(schema.attributes.keys())}")
+            # print(f"DEBUG: Attribute '{attr_name}' not in schema for category '{category}'")
+            # print(f"DEBUG: Available attributes: {list(schema.attributes.keys())}")
             # Skip this attribute và hỏi attribute khác
             return {
                 "question": f"Vui lòng cung cấp thêm thông tin",

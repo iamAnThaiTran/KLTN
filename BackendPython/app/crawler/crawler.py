@@ -63,7 +63,7 @@ class TikiCrawler:
                 keyword_lower = keyword.lower()
                 if keyword_lower in category_lower or category_lower in keyword_lower:
                     if len(keyword_lower) > 2:  # Avoid false positive với từ ngắn
-                        logger.debug(f"   Category '{category}' matched to '{base_category}' via keyword '{keyword}'")
+                        # logger.debug(f"   Category '{category}' matched to '{base_category}' via keyword '{keyword}'")
                         return base_category
         
         # Nếu không tìm thấy, return original (để system sau xử lý)
@@ -740,7 +740,7 @@ class TikiCrawler:
                 if "attributes" in p:
                     attrs = p["attributes"]
                     if attrs is None:
-                        logger.warning(f"     ⚠️  attributes is None")
+                        # logger.warning(f"     ⚠️  attributes is None")
                         product_dict["extracted_attributes"] = {
                             "sizes": [],
                             "colors": [],
@@ -752,7 +752,7 @@ class TikiCrawler:
                             "colors": attrs.get("colors", []),
                             "materials": attrs.get("materials", [])
                         }
-                        logger.debug(f"     Attributes: sizes={len(product_dict['extracted_attributes']['sizes'])}, colors={len(product_dict['extracted_attributes']['colors'])}, materials={len(product_dict['extracted_attributes']['materials'])}")
+                        # logger.debug(f"     Attributes: sizes={len(product_dict['extracted_attributes']['sizes'])}, colors={len(product_dict['extracted_attributes']['colors'])}, materials={len(product_dict['extracted_attributes']['materials'])}")
                 else:
                     logger.warning(f"     ⚠️  No 'attributes' key in product")
                     product_dict["extracted_attributes"] = {

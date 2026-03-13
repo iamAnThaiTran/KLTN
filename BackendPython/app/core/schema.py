@@ -36,7 +36,7 @@ GIAY_SCHEMA = CategorySchema(
         "gender": AttributeConstraint(
             type="enum",
             values=["nam", "nữ", "unisex", "chưa rõ"],
-            required=False
+            required=True  # ✅ HỎIILENAME
         ),
         "loai": AttributeConstraint(
             type="enum",
@@ -54,7 +54,7 @@ GIAY_SCHEMA = CategorySchema(
         "size": AttributeConstraint(
             type="enum",
             values=["35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "chưa rõ"],
-            required=False 
+            required=True  # ✅ HỎI
         ),
         "mau": AttributeConstraint(
             type="enum",

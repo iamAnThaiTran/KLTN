@@ -76,6 +76,9 @@ class RecommendationOrchestrator:
                 "data": Dict[str, Any]  # Case-specific data
             }
         """
+        # Ensure conversation_state has all required keys before accessing
+        conversation_state = self._ensure_state_structure(conversation_state)
+        
         user_lower = user_input.lower().strip()
         
         # CASE 7: Comparison / advisory request (NO immediate crawl)
@@ -1039,15 +1042,6 @@ Be concise. Attributes should be practical filtering criteria."""
         user_input: str,
         conversation_state: Dict[str, Any] = None
     ) -> Dict[str, Any]:
-        """
-        Main entry point - 7-case intelligent routing system
-        
-        This replaces the old complex process_query with a clean dispatcher pattern.
-        Each case has its own dedicated handler for clarity and maintainability.
-        """
-        print(f"=" * 80)
-        print(f"Orchestrator: Processing query: {user_input}")
-        print(f"=" * 80)
         
         # Initialize state
         if conversation_state is None:

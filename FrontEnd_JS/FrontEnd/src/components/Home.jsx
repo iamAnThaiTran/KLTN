@@ -343,7 +343,7 @@ export default function LandingPage() {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {[
-                  { icon: <Search size={15} />, text: 'Nhập yêu cầu tìm thừ csán', color: '#6366f1' },
+                  { icon: <Search size={15} />, text: 'Nhập yêu cầu tìm kiếm', color: '#6366f1' },
                   { icon: <SlidersHorizontal size={15} />, text: 'Gợi ý bộ lọc thông minh', color: '#0ea5e9' },
                   { icon: <Brain size={15} />, text: 'Hiểu yêu cầu bằng ngôn ngữ tự nhiên', color: '#8b5cf6' },
                 ].map((item, i) => (
