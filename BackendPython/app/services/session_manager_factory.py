@@ -63,11 +63,11 @@ class SessionManagerFactory:
         """
         if cls._instance is None:
             if is_redis_available():
-                print("📦 Using Redis Session Manager")
+                # print("📦 Using Redis Session Manager")
                 cls._instance = RedisSessionManager()
                 cls._using_redis = True
             else:
-                print("💾 Using In-Memory Session Manager (Redis not available)")
+                # print("💾 Using In-Memory Session Manager (Redis not available)")
                 cls._instance = InMemorySessionManager()
                 cls._using_redis = False
         

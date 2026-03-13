@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 from app.core.orchestrator import RecommendationOrchestrator
+from app.core.context_analyzer import get_context_analyzer
 from app.api.sku_routes import router as sku_router
 from app.api.progressive_search_routes import router as progressive_search_router
 from app.api.product_automation_routes import router as product_automation_router
@@ -18,21 +19,8 @@ from app.db.sku_repository import SKURepository
 from app.services.session_manager import get_session_manager
 # from app.core.crawler import YourCrawler  # Import your crawler
 
-# Configure logging with immediate flush
-class FlushingStreamHandler(logging.StreamHandler):
-    """Custom handler that flushes after each log"""
-    def emit(self, record):
-        try:
-            msg = self.format(record)
-            self.stream.write(msg + self.terminator)
-            self.stream.flush()  # 👈 Force flush immediately
-        except Exception:
-            self.handleError(record)
-
-handler = FlushingStreamHandler(sys.stdout)
-handler.setFormatter(logging.Formatter('[%(name)s] %(levelname)s: %(message)s'))
-logging.root.addHandler(handler)
-logging.root.setLevel(logging.INFO)
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logging.getLogger("httpx").setLevel(logging.WARNING)      # Tắt httpx
 logging.getLogger("httpcore").setLevel(logging.WARNING)   # Tắt httpcore
 logging.getLogger("openai").setLevel(logging.WARNING)     # Tắt openai
@@ -62,9 +50,9 @@ app.add_middleware(
 # ===== MODELS =====
 
 class QueryRequest(BaseModel):
-    """Initial query từ user"""
-    user_input: str
-    conversation_id: Optional[str] = None
+    """Query request - context-based intent reconstruction"""
+    user_input: str  # User's input (always required)
+    conversation_id: Optional[str] = None  # For follow-up requests
 
 class ResponseUpdate(BaseModel):
     """User response to a question"""
@@ -78,12 +66,9 @@ class ResponseUpdate(BaseModel):
 session_manager = get_session_manager()
 print(f"[Routes] Session storage type: {session_manager.get_storage_type()}",  )
 
-# ===== INITIALIZE ORCHESTRATOR =====
-# Giả sử bạn có YourCrawler class
-# crawler = YourCrawler()
-# orchestrator = RecommendationOrchestrator(crawler)
-
+# ===== INITIALIZE ORCHESTRATOR + CONTEXT ANALYZER =====
 orchestrator = RecommendationOrchestrator()
+context_analyzer = get_context_analyzer()
 sku_repo = SKURepository()  # Initialize SKU repository for filters
 
 # ===== ENDPOINTS =====
@@ -165,44 +150,34 @@ async def process_query(request: QueryRequest):
 
 @app.post("/api/analyze")
 async def analyze_query(request: QueryRequest):
-    """
-    FAST endpoint: Analyze user input + get initial products
-    
-    ✅ NOW using orchestrator.process_query() with 7-case routing
-    
-    Returns (same format as before):
-    {
-        "success": True,
-        "category": "giày",
-        "clarifying_hints": ["👟 Giới tính: Nam / Nữ?", ...],
-        "filters": [{
-            "attribute_name": "gender",
-            "display_name": "Giới tính",
-            "options": [{"attribute_value": "Nam", "product_count": 25}]
-        }],
-        "products": [initial products from DB],
-        "total": 25,
-        "total_pages": 2,
-        "conversation_id": "abc123",
-        "selected_attributes": {"brand": "Nike", ...}
-    }
-    """
-    
     try:
-        logger.info(f"\n{'='*100}")
-        logger.info(f"[/api/analyze] ✅ ENDPOINT HIT!")
-        logger.info(f"[/api/analyze] Request: {request.user_input}")
+        # Validation
+        if not request.user_input or request.user_input.strip() == "":
+            return {
+                "success": False,
+                "error": "user_input is required"
+            }
         
-        print(f"[/api/analyze] Starting analysis with orchestrator...",  )
-        
-        # Step 1: Get or create session
+        is_new_query = not request.conversation_id
         conversation_id = request.conversation_id
+        
+        # ========================================================================
+        # STEP 1: Tao session mới hoặc lấy session cũ dựa trên conversation_id
+        # ========================================================================
         if not conversation_id:
             conversation_id = session_manager.create_session()
-        logger.info(f"[/api/analyze] Conversation ID: {conversation_id}")
+            conversation_state = None
+            logger.info(f"\n[/api/analyze] 🆕 NEW CONVERSATION: {conversation_id}")
+        else:
+            if not session_manager.session_exists(conversation_id):
+                return {
+                    "success": False,
+                    "error": f"Session {conversation_id} not found"
+                }
+            conversation_state = session_manager.get_session(conversation_id)
+            logger.info(f"\n[/api/analyze] 📝 EXISTING CONVERSATION: {conversation_id}")
         
-        conversation_state = session_manager.get_session(conversation_id)
-        # logger.info(f"[/api/analyze] Initial conversation state: {conversation_state}")
+        # Initialize state if needed
         if conversation_state is None:
             conversation_state = {
                 "has_category": False,
@@ -211,29 +186,76 @@ async def analyze_query(request: QueryRequest):
                 "missing_required": [],
                 "search_history": [],
                 "attributes_asked": [],
-                "cached_products": None,
-                "cached_filters": None,
                 "last_crawl_params": None,
                 "cache_hits": 0,
                 "cache_misses": 0
             }
         
-        # Step 2: ✅ USE ORCHESTRATOR - Let it handle all 7 cases!
-        logger.info(f"[/api/analyze] Calling orchestrator.process_query()...",  )
+        # ========================================================================
+        # STEP 2: Nếu có history, dùng LLM để reconstruct intent (ví dụ: "giày màu đen") và detect category change
+        # ========================================================================
+        user_input_to_process = request.user_input
+        # Nếu có search history, gọi LLM để reconstruct intent
+        if not is_new_query and conversation_state.get("search_history"):
+            # 🎯 Use LLM to reconstruct intent
+            logger.info(f"[/api/analyze] 🔄 RECONSTRUCTING INTENT")
+            result_dict = context_analyzer.reconstruct_intent(
+                user_input=request.user_input,
+                conversation_state=conversation_state
+            )
+            user_input_to_process = result_dict["intent"]
+            
+            # 🔴 HANDLE CATEGORY CHANGE
+            if result_dict.get("category_changed"):
+                logger.info(f"[/api/analyze] 🔄 CATEGORY CHANGE DETECTED!")
+                logger.info(f"  Old category: {conversation_state.get('category')}")
+                logger.info(f"  New category: {result_dict.get('new_category')}")
+                
+                # Reset context for new category
+                conversation_state["search_history"] = [request.user_input]  # Start fresh
+                conversation_state["extracted"] = {}  # Clear old attributes
+                conversation_state["category"] = None  # Will be re-detected
+                conversation_state["has_category"] = False
+                conversation_state["missing_required"] = []
+                conversation_state["attributes_asked"] = []
+                conversation_state["last_crawl_params"] = None
+                
+                logger.info(f"[/api/analyze] ✅ Context reset for new category")
+        else:
+            logger.info(f"[/api/analyze] ✅ FIRST REQUEST - Using input as-is: '{request.user_input}'")
+        
+        # ========================================================================
+        # STEP 3: Process with orchestrator
+        # ========================================================================
+        logger.info(f"\n{'='*100}")
+        logger.info(f"[/api/analyze] Processing: '{user_input_to_process}'")
+        logger.info(f"[/api/analyze] Original input: '{request.user_input}'")
+        
         orch_result = await orchestrator.process_query(
-            user_input=request.user_input,
+            user_input=user_input_to_process,
             conversation_state=conversation_state
         )
         
-        # logger.info(f"[/api/analyze] ✅ Orchestrator returned: status={orch_result.get('status')}",  )
-        
-        # Step 3: Save state
+        # Save updated state
         if "state" in orch_result:
-            session_manager.set_session(conversation_id, orch_result["state"])
             conversation_state = orch_result["state"]
+            session_manager.set_session(conversation_id, conversation_state)
         
-        # Step 4: Transform orchestrator response to /api/analyze format
-        # Get products and category from result
+        # ========================================================================
+        # STEP 4: Update search history (smart - replace duplicate attributes)
+        # ========================================================================
+        if "search_history" not in conversation_state:
+            conversation_state["search_history"] = []
+        
+        conversation_state["search_history"] = _update_search_history_smart(
+            conversation_state["search_history"],
+            request.user_input
+        )
+        session_manager.set_session(conversation_id, conversation_state)
+        
+        # ========================================================================
+        # STEP 5: Build response
+        # ========================================================================
         products = orch_result.get("products", [])
         total_products = orch_result.get("total_found", len(products))
         total_pages = (total_products + 19) // 20 if total_products > 0 else 0
@@ -241,7 +263,7 @@ async def analyze_query(request: QueryRequest):
         category = conversation_state.get("category", "")
         extracted_attrs = conversation_state.get("extracted", {})
         
-        # Step 5: Fetch filters from DB (if category exists)
+        # Fetch filters from DB
         filter_groups = []
         hints = []
         
@@ -251,7 +273,6 @@ async def analyze_query(request: QueryRequest):
                 if category_slug:
                     available_filters = sku_repo.get_available_filters(category_slug)
                     
-                    # Build filter groups
                     for f in available_filters:
                         filter_groups.append({
                             "attribute_name": f['attribute_name'],
@@ -264,27 +285,28 @@ async def analyze_query(request: QueryRequest):
                             ]
                         })
                     
-                    # Generate hints from filters
                     hints = _generate_hints_from_filters(category, filter_groups)
-                    
-                    print(f"[/api/analyze] ✅ Fetched {len(filter_groups)} filters from DB",  )
+                    logger.info(f"✅ Fetched {len(filter_groups)} filters from DB")
                 else:
-                    print(f"[/api/analyze] ⚠️ Category '{category}' not found in DB",  )
+                    logger.warning(f"Category '{category}' not found in DB")
             except Exception as e:
-                print(f"[/api/analyze] ⚠️ Error fetching filters: {e}",  )
+                logger.error(f"Error fetching filters: {e}")
         
-        print(f"\n{'='*80}",  )
-        print(f"[/api/analyze] 💡 FINAL RESPONSE",  )
-        print(f"{'='*80}",  )
-        print(f"[/api/analyze] Success: True",  )
-        print(f"[/api/analyze] Category: {category}",  )
-        print(f"[/api/analyze] Products: {len(products)}",  )
-        print(f"[/api/analyze] Total: {total_products}",  )
-        print(f"[/api/analyze] Filters: {len(filter_groups)}",  )
-        print(f"[/api/analyze] Hints: {len(hints)}",  )
-        print(f"[/api/analyze] {'='*80}\n",  )
+        # ========================================================================
+        # STEP 6: Log & return
+        # ========================================================================
+        logger.info(f"\n{'='*80}")
+        logger.info(f"[/api/analyze] 💡 RESPONSE SUMMARY")
+        logger.info(f"{'='*80}")
+        logger.info(f"Input: '{request.user_input}'")
+        if user_input_to_process != request.user_input:
+            logger.info(f"Reconstructed: '{user_input_to_process}'")
+        logger.info(f"Category: {category}")
+        logger.info(f"Products: {len(products)}")
+        logger.info(f"Filters: {len(filter_groups)}")
+        logger.info(f"Search History: {conversation_state.get('search_history', [])}")
+        logger.info(f"{'='*80}\n")
         
-        # Step 6: Return in /api/analyze format
         return {
             "success": True,
             "category": category,
@@ -295,13 +317,15 @@ async def analyze_query(request: QueryRequest):
             "total_pages": total_pages,
             "conversation_id": conversation_id,
             "selected_attributes": extracted_attrs,
-            "routing_info": orch_result.get("routing_info", {})  # NEW: Include routing info for debugging
+            "search_history": conversation_state.get("search_history", []),
+            "routing_info": orch_result.get("routing_info", {})
         }
         
     except Exception as e:
-        print(f"[/api/analyze] ❌ Error: {e}",  )
+        logger.info(f"[/api/analyze] ❌ Error: {e}")
         import traceback
-        traceback.print_exc()
+        traceback.logger.info_exc()
+        
         return {
             "success": False,
             "error": str(e),
@@ -417,82 +441,78 @@ async def crawl_tiki(request: Dict[str, Any]):
         
     except Exception as e:
         import traceback
-        traceback.print_exc()
+        traceback.logger.info_exc()
         return {
             "success": False,
             "error": str(e)
         }
 
-# ===== EXAMPLE USAGE =====
-
-"""
-Flow 1: Query mơ hồ
-----------------------
-POST /api/query
-{
-  "user_input": "tôi muốn mua quà"
-}
-
-Response:
-{
-  "status": "need_info",
-  "question": "Bạn muốn mua quà gì? Chọn một loại sản phẩm:",
-  "options": [
-    {"label": "Giày", "value": "giày"},
-    {"label": "Bột giặt", "value": "bột giặt"}
-  ],
-  "conversation_id": "abc-123"
-}
-
-POST /api/respond
-{
-  "conversation_id": "abc-123",
-  "question_type": "category",
-  "value": "giày"
-}
-
-Response:
-{
-  "status": "need_info",
-  "question": "Bạn cần giày loại nào?",
-  "options": [
-    {"label": "Thể thao", "value": "thể thao"},
-    ...
-  ]
-}
-
-... (tiếp tục hỏi cho đến khi đủ info)
-
-Final Response:
-{
-  "status": "results",
-  "products": [
-    {
-      "name": "Nike Air Max 90",
-      "price": 1800000,
-      "match_score": 85,
-      "explanation": "Phù hợp với yêu cầu giày thể thao..."
-    }
-  ]
-}
-
-Flow 2: Query cụ thể
-----------------------
-POST /api/query
-{
-  "user_input": "giày thể thao size 42 màu trắng"
-}
-
-Response:
-{
-  "status": "results",
-  "products": [...]
-}
-"""
-
 # ===== HELPER FUNCTIONS =====
 
-def _generate_hints_from_filters(category: str, filters: list) -> list:
+def _detect_attribute_type(text: str) -> Optional[str]:
+    """
+    Detect attribute type from user input.
+    
+    Returns: "color", "size", "material", "brand", "type", or None
+    """
+    text_lower = text.lower()
+    
+    # Color keywords
+    if any(kw in text_lower for kw in ["màu", "color", "sắc", "đen", "trắng", "xanh", "đỏ", "vàng", "hồng", "tím", "cam", "xám", "beige"]):
+        return "color"
+    
+    # Size keywords
+    if any(kw in text_lower for kw in ["size", "kích thước", "kich thuoc", "39", "40", "41", "42", "43", "44", "45", "m", "l", "xl", "xxl", "xs", "s"]):
+        return "size"
+    
+    # Material keywords
+    if any(kw in text_lower for kw in ["chất liệu", "chat lieu", "vải", "da", "cao su", "nhựa", "vàng đồng", "material", "fabric", "leather"]):
+        return "material"
+    
+    # Brand keywords
+    if any(kw in text_lower for kw in ["nike", "adidas", "puma", "reebok", "vans", "converse", "timberland", "brand"]):
+        return "brand"
+    
+    # Type/Style keywords
+    if any(kw in text_lower for kw in ["thể thao", "casual", "chạy bộ", "bóng rổ", "đế bệm", "thấp", "cao", "cổ thấp", "cổ cao"]):
+        return "type"
+    
+    return None
+
+def _update_search_history_smart(history: list, new_input: str, max_items: int = 8) -> list:
+    """
+    Smart search history update - replace duplicate attributes, keep max items.
+    
+    Logic:
+    1. Detect attribute type of new_input
+    2. If it's an attribute (color, size, etc) → remove same type from history
+    3. Append new input
+    4. Keep only last max_items (default 8)
+    
+    Example:
+    - history = ["giày nike", "màu đen", "thể thao"]
+    - new_input = "màu đỏ"
+    - detected_type = "color"
+    - Remove "màu đen" (same type)
+    - Result: ["giày nike", "thể thao", "màu đỏ"]
+    """
+    detected_type = _detect_attribute_type(new_input)
+    
+    # If it's an attribute type, remove same type from history
+    if detected_type:
+        history = [
+            h for h in history 
+            if isinstance(h, str) and _detect_attribute_type(h) != detected_type
+        ]
+    
+    # Append new input
+    history.append(new_input)
+    
+    # Keep only last max_items
+    return history[-max_items:]
+
+
+
     """
     Generate clarifying hints from available filters
     
@@ -573,12 +593,12 @@ async def _trigger_crawl(
         extracted_attrs: Extracted attributes from query (e.g., {brand: "Nike"})
     """
     try:
-        print(f"\n{'='*80}",  )
-        print(f"[_trigger_crawl] 🌐 STARTING BACKGROUND CRAWL",  )
-        print(f"{'='*80}",  )
-        print(f"[_trigger_crawl] Query: '{search_query}'",  )
-        print(f"[_trigger_crawl] Category: '{category}'",  )
-        print(f"[_trigger_crawl] Attributes: {extracted_attrs}",  )
+        logger.info(f"\n{'='*80}",  )
+        logger.info(f"[_trigger_crawl] 🌐 STARTING BACKGROUND CRAWL",  )
+        logger.info(f"{'='*80}",  )
+        logger.info(f"[_trigger_crawl] Query: '{search_query}'",  )
+        logger.info(f"[_trigger_crawl] Category: '{category}'",  )
+        logger.info(f"[_trigger_crawl] Attributes: {extracted_attrs}",  )
         
         # Import crawler
         from app.crawler.crawler import TikiCrawler
@@ -586,14 +606,14 @@ async def _trigger_crawl(
         # Create crawler and crawl
         crawler = TikiCrawler()
         
-        print(f"[_trigger_crawl] Crawling from Tiki...",  )
+        logger.info(f"[_trigger_crawl] Crawling from Tiki...",  )
         crawled_products = await crawler.crawl(
             category=category,
             attributes=extracted_attrs,
             get_details=True
         )
         
-        print(f"[_trigger_crawl] ✅ Crawled {len(crawled_products)} products from Tiki",  )
+        logger.info(f"[_trigger_crawl] ✅ Crawled {len(crawled_products)} products from Tiki",  )
         
         # Save to DB
         if crawled_products:
@@ -603,7 +623,7 @@ async def _trigger_crawl(
                 reconciler = SchemaReconciler()
                 
                 actual_schema = reconciler.extract_actual_schema(crawled_products)
-                print(f"[_trigger_crawl] ✅ Extracted schema: {len(actual_schema)} attributes",  )
+                logger.info(f"[_trigger_crawl] ✅ Extracted schema: {len(actual_schema)} attributes",  )
                 
                 # Save products
                 saved_count = reconciler.save_products_to_db(
@@ -613,18 +633,18 @@ async def _trigger_crawl(
                     schema=actual_schema
                 )
                 
-                print(f"[_trigger_crawl] ✅ Saved {saved_count} products to DB",  )
-                print(f"[_trigger_crawl] ℹ️ Products now available in /api/analyze",  )
+                logger.info(f"[_trigger_crawl] ✅ Saved {saved_count} products to DB",  )
+                logger.info(f"[_trigger_crawl] ℹ️ Products now available in /api/analyze",  )
                 
             except Exception as save_error:
-                print(f"[_trigger_crawl] ⚠️ Could not save to DB: {save_error}",  )
+                logger.info(f"[_trigger_crawl] ⚠️ Could not save to DB: {save_error}",  )
                 import traceback
-                traceback.print_exc()
+                traceback.logger.info_exc()
         
-        print(f"[_trigger_crawl] ✅ Background crawl completed",  )
-        print(f"{'='*80}\n",  )
+        logger.info(f"[_trigger_crawl] ✅ Background crawl completed",  )
+        logger.info(f"{'='*80}\n",  )
         
     except Exception as e:
-        print(f"[_trigger_crawl] ❌ Crawl error: {e}",  )
+        logger.info(f"[_trigger_crawl] ❌ Crawl error: {e}",  )
         import traceback
         traceback.print_exc()

@@ -76,9 +76,6 @@ class RecommendationOrchestrator:
                 "data": Dict[str, Any]  # Case-specific data
             }
         """
-        # Ensure conversation_state has all required keys before accessing
-        conversation_state = self._ensure_state_structure(conversation_state)
-        
         user_lower = user_input.lower().strip()
         
         # CASE 7: Comparison / advisory request (NO immediate crawl)
@@ -1042,7 +1039,7 @@ Be concise. Attributes should be practical filtering criteria."""
         user_input: str,
         conversation_state: Dict[str, Any] = None
     ) -> Dict[str, Any]:
-        
+
         # Initialize state
         if conversation_state is None:
             conversation_state = {
@@ -1058,6 +1055,19 @@ Be concise. Attributes should be practical filtering criteria."""
                 "cache_hits": 0,
                 "cache_misses": 0
             }
+        
+        # STEP 0: ✅ ANALYZE INTENT - Enrich conversation_state with intent info BEFORE classification
+        print(f"\n[Orchestrator] 📊 Analyzing user intent from: '{user_input}'")
+        intent_result = self.intent_mapper.map_intent(user_input)
+        print(f"[Orchestrator] ✅ Intent detected:")
+        print(f"  - Intent: {intent_result['intent']}")
+        print(f"  - Categories: {intent_result['categories']}")
+        print(f"  - Confidence: {intent_result['confidence']:.2f}")
+        print(f"  - Method: {intent_result['method']}")
+        
+        # Store intent analysis in conversation_state (for classify_request_case to use)
+        if not conversation_state.get("detected_intent"):
+            conversation_state["detected_intent"] = intent_result
         
         # STEP 1: Classify request into one of 7 cases
         case_info = self.classify_request_case(user_input, conversation_state)

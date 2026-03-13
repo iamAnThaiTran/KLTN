@@ -25,11 +25,11 @@ class MultiCrawler:
         attributes = attributes or {}
         sources = sources or ["tiki", "lazada"]
 
-        logger.info("=" * 70)
-        logger.info(f"🔍 Multi-Crawler: Crawling '{category}'")
-        logger.info(f"📋 Attributes: {json.dumps(attributes, ensure_ascii=False)}")
-        logger.info(f"📦 Sources: {', '.join(sources)}")
-        logger.info("=" * 70)
+        # logger.info("=" * 70)
+        # logger.info(f"🔍 Multi-Crawler: Crawling '{category}'")
+        # logger.info(f"📋 Attributes: {json.dumps(attributes, ensure_ascii=False)}")
+        # logger.info(f"📦 Sources: {', '.join(sources)}")
+        # logger.info("=" * 70)
 
         all_products = []
 
@@ -42,7 +42,7 @@ class MultiCrawler:
                     attributes=attributes,
                     get_details=get_details
                 )
-                logger.info(f"✅ Tiki: Found {len(tiki_products)} products")
+                # logger.info(f"✅ Tiki: Found {len(tiki_products)} products")
                 all_products.extend(tiki_products)
             except Exception as e:
                 logger.error(f"❌ Tiki crawl error: {str(e)}")
@@ -59,9 +59,9 @@ class MultiCrawler:
         #     except Exception as e:
         #         logger.warning(f"⚠️ Lazada crawl skipped: {type(e).__name__}")
 
-        logger.info(f"📊 Total products: {len(all_products)}")
+        # logger.info(f"📊 Total products: {len(all_products)}")
         merged_products = self._deduplicate_products(all_products)
-        logger.info(f"📊 After dedup: {len(merged_products)} products")
+        # logger.info(f"📊 After dedup: {len(merged_products)} products")
 
         return merged_products
 

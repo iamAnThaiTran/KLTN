@@ -123,11 +123,11 @@ class TikiCrawler:
             
             # Bước 1: Tối ưu search query
             search_query = self._build_search_query(category, attributes)
-            logger.info(f"🔎 Search query: '{search_query}'")
+            # logger.info(f"🔎 Search query: '{search_query}'")
             
             # Bước 2: Crawl danh sách sản phẩm
             products = await self._crawl_product_list(browser, search_query)
-            logger.info(f"✅ Tìm thấy {len(products)} sản phẩm\n")
+            # logger.info(f"✅ Tìm thấy {len(products)} sản phẩm\n")
             
             if len(products) == 0:
                 return []
@@ -135,7 +135,7 @@ class TikiCrawler:
             # Bước 3: Filter đơn giản từ title (cho các attributes đơn giản)
             if not get_details:
                 filtered = self._filter_by_title(products, attributes)
-                logger.info(f"✅ Sau khi filter từ title: {len(filtered)} sản phẩm")
+                # logger.info(f"✅ Sau khi filter từ title: {len(filtered)} sản phẩm")
                 return filtered
             
             # Bước 4: Crawl chi tiết và filter (cho attributes phức tạp)
@@ -146,16 +146,16 @@ class TikiCrawler:
             # Bước 5: Filter theo attributes
             filtered = self._filter_by_attributes(detailed_products, attributes)
             
-            logger.info("\n" + "=" * 60)
-            logger.info(f"✅ Hoàn thành!")
-            logger.info(f"📊 Tổng sản phẩm tìm thấy: {len(products)}")
-            logger.info(f"✔️  Sản phẩm đạt yêu cầu: {len(filtered)}")
-            logger.info(f"❌ Sản phẩm không đạt: {len(products) - len(filtered)}")
-            logger.info("=" * 60 + "\n")
+            # logger.info("\n" + "=" * 60)
+            # logger.info(f"✅ Hoàn thành!")
+            # logger.info(f"📊 Tổng sản phẩm tìm thấy: {len(products)}")
+            # logger.info(f"✔️  Sản phẩm đạt yêu cầu: {len(filtered)}")
+            # logger.info(f"❌ Sản phẩm không đạt: {len(products) - len(filtered)}")
+            # logger.info("=" * 60 + "\n")
             
             # AUTO-SAVE vào SKU database nếu crawl được details
             if get_details and len(detailed_products) > 0:
-                logger.info("💾 Auto-saving products to SKU database...")
+                # logger.info("💾 Auto-saving products to SKU database...")
                 try:
                     self._save_to_sku_database(detailed_products, category)
                 except Exception as e:
@@ -262,7 +262,7 @@ class TikiCrawler:
             })
             
             url = f"https://tiki.vn/search?q={query}"
-            logger.info(f"🌐 Truy cập: {url}")
+            # logger.info(f"🌐 Truy cập: {url}")
             
             # QUAN TRỌNG: Đổi wait_until từ "networkidle" sang "domcontentloaded"
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -272,13 +272,13 @@ class TikiCrawler:
             
             try:
                 await page.wait_for_selector("a.product-item", timeout=10000)
-                logger.info("✓ Đã tìm thấy product items")
+                # logger.info("✓ Đã tìm thấy product items")
             except Exception as e:
                 logger.warning(f"⚠️  Không tìm thấy sản phẩm: {str(e)}")
                 # Screenshot để debug
                 try:
                     await page.screenshot(path="debug_tiki.png")
-                    logger.info("📸 Đã lưu screenshot debug_tiki.png")
+                    # logger.info("📸 Đã lưu screenshot debug_tiki.png")
                 except:
                     pass
                 return []
@@ -362,7 +362,7 @@ class TikiCrawler:
                     }
                 """)
                 
-                logger.info(f"✅ Đã extract {len(products)} sản phẩm")
+                # logger.info(f"✅ Đã extract {len(products)} sản phẩm")
                 
                 # Log chi tiết từng sản phẩm
                 # logger.info("\n" + "="*70)
@@ -390,7 +390,7 @@ class TikiCrawler:
             if page:
                 try:
                     await page.screenshot(path="debug_error.png")
-                    logger.info("📸 Đã lưu screenshot lỗi: debug_error.png")
+                    # logger.info("📸 Đã lưu screenshot lỗi: debug_error.png")
                 except:
                     pass
             return []
@@ -409,7 +409,7 @@ class TikiCrawler:
         attributes: Dict
     ) -> List[Dict]:
         """Crawl chi tiết từng sản phẩm (parallel processing)"""
-        logger.info(f"📦 Bắt đầu crawl chi tiết {len(products)} sản phẩm...")
+        # logger.info(f"📦 Bắt đầu crawl chi tiết {len(products)} sản phẩm...")
         
         results = []
         concurrent = self.config["concurrent_details"]
@@ -433,7 +433,7 @@ class TikiCrawler:
                 if isinstance(result, dict):
                     results.append(result)
         
-        logger.info(f"✅ Đã crawl chi tiết xong {len(results)} sản phẩm\n")
+        # logger.info(f"✅ Đã crawl chi tiết xong {len(results)} sản phẩm\n")
         return results
 
     async def _extract_single_product_detail(
@@ -711,13 +711,13 @@ class TikiCrawler:
             
             # NORMALIZE category name to match database
             normalized_category = self._normalize_category(category)
-            logger.info(f"   Category: '{category}' → '{normalized_category}'")
+            # logger.info(f"   Category: '{category}' → '{normalized_category}'")
             
             adapter = CrawlerToSKUAdapter()
             
             # Convert detailed products to simple format with extracted attributes
             products_to_save = []
-            logger.info(f"\n📦 Converting {len(products)} products to database format...")
+            # logger.info(f"\n📦 Converting {len(products)} products to database format...")
             
             for idx, p in enumerate(products, 1):
                 # logger.info(f"\n  [{idx}/{len(products)}] Processing: {p.get('title', 'N/A')[:60]}")
@@ -764,12 +764,12 @@ class TikiCrawler:
                 products_to_save.append(product_dict)
                 # logger.info(f"     ✅ Added to save list")
             
-            logger.info(f"\n💾 Calling save_crawled_products with {len(products_to_save)} products to category '{normalized_category}'")
+            # logger.info(f"\n💾 Calling save_crawled_products with {len(products_to_save)} products to category '{normalized_category}'")
             
             # Save to database
             try:
                 result = adapter.save_crawled_products(products_to_save, normalized_category)
-                logger.info(f"   Adapter returned: {result}")
+                # logger.info(f"   Adapter returned: {result}")
                 
                 if result is None:
                     logger.error(f"   ❌ Adapter returned None!")
