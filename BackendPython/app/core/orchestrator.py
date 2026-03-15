@@ -68,12 +68,47 @@ class RecommendationOrchestrator:
         user_input: str, 
         conversation_state: Dict[str, Any]
     ) -> Dict[str, Any]:
-
-        user_lower = user_input.lower().strip()
+        """
+        Classify user request into one of 7 cases.
         
-        # CASE 7: Comparison / advisory request (NO immediate crawl)
-        # Check this first as it's most specific
-        if self._is_comparison_request(user_input):
+        Uses detected_intent from Intent Mapper - NO re-analysis!
+        
+        Flow:
+        1. Get detected_intent from conversation_state (populated by STEP 0)
+        2. Check for special conversation states (CASE 5, CASE 6)
+        3. Classify based ONLY on intent_type + confidence + categories
+        """
+        
+        # Get intent detection result (from STEP 0)
+        detected_intent = conversation_state.get("detected_intent", {})
+        intent_type = detected_intent.get("intent_type", "none")
+        intent = detected_intent.get("intent")
+        categories = detected_intent.get("categories", [])
+        confidence = detected_intent.get("confidence", 0.0)
+        is_new_category = detected_intent.get("is_new_category", False)
+        
+        logger.info(f"[classify_request_case] Classifying based on intent_type='{intent_type}', confidence={confidence:.2f}, categories={categories}, is_new={is_new_category}")
+        
+        # ===== PRIORITY 0: Dynamic Category Creation (NEW categories not in DB) =====
+        if is_new_category and categories:
+            logger.info(f"[classify_request_case] ✅ CASE 8: New category '{categories[0]}' needs schema creation")
+            return {
+                "case": 8,
+                "case_name": "dynamic_category_creation",
+                "reason": f"User requested new category '{categories[0]}' not in system",
+                "data": {
+                    "new_category": categories[0],
+                    "intent": intent,
+                    "should_create_schema": True,
+                    "should_crawl": True
+                }
+            }
+        
+        # ===== PRIORITY 1: Special conversation states =====
+        
+        # CASE 7: Comparison/advisory request (NO immediate crawl)
+        if intent_type == "comparison":
+            logger.info(f"[classify_request_case] ✅ CASE 7: Comparison/advisory detected")
             return {
                 "case": 7,
                 "case_name": "comparison_advisory",
@@ -84,37 +119,71 @@ class RecommendationOrchestrator:
                 }
             }
         
-        # CASE 5: Intent shift (context reset)
+        # CASE 5: Intent shift (context reset) - ONLY if in conversation and input changed
         if conversation_state.get("has_category"):
-            intent_change = self.intent_detector.detect_intent_change(user_input, conversation_state)
-            if intent_change["intent_type"] == "switch_category":
-                return {
-                    "case": 5,
-                    "case_name": "intent_shift",
-                    "reason": f"User switched from '{conversation_state.get('category')}' to '{intent_change.get('new_category')}'",
-                    "data": {
-                        "old_category": conversation_state.get("category"),
-                        "new_category": intent_change.get("new_category"),
-                        "should_reset": True
+            last_input = conversation_state.get("last_user_input", "").strip().lower()
+            current_input = user_input.strip().lower()
+            
+            if last_input != current_input:  # Only if input is DIFFERENT
+                # Check if category changed
+                old_category = conversation_state.get("category")
+                new_categories = categories
+                
+                # Detect intent shift in 2 ways:
+                # 1. Old category completely removed from new categories (clear shift)
+                # 2. Category scope exploded (e.g., specific "quần áo" → 7 gift categories)
+                
+                category_removed = old_category and new_categories and old_category.lower() not in [c.lower() for c in new_categories]
+                scope_exploded = (
+                    old_category and 
+                    new_categories and 
+                    old_category.lower() in [c.lower() for c in new_categories] and  # Old category still present but...
+                    len(new_categories) > 3  # ...suddenly many new categories appeared
+                )
+                
+                if category_removed or scope_exploded:
+                    reason = (
+                        f"User switched from '{old_category}' to new category"
+                        if category_removed
+                        else f"User expanded scope: '{old_category}' → {len(new_categories)} gift categories"
+                    )
+                    logger.info(f"[classify_request_case] ✅ CASE 5: Intent shift detected - {reason}")
+                    return {
+                        "case": 5,
+                        "case_name": "intent_shift",
+                        "reason": reason,
+                        "data": {
+                            "old_category": old_category,
+                            "new_category": new_categories[0] if new_categories else None,
+                            "should_reset": True
+                        }
                     }
-                }
         
         # CASE 6: Incremental refinement (context accumulation)
         if conversation_state.get("has_category") and conversation_state.get("extracted"):
-            intent_change = self.intent_detector.detect_intent_change(user_input, conversation_state)
-            if intent_change["intent_type"] in ["refine", "switch_attribute"]:
-                return {
-                    "case": 6,
-                    "case_name": "incremental_refinement",
-                    "reason": "User adding or modifying attributes in same category",
-                    "data": {
-                        "intent_type": intent_change["intent_type"],
-                        "should_merge": True
+            last_input = conversation_state.get("last_user_input", "").strip().lower()
+            current_input = user_input.strip().lower()
+            
+            if last_input != current_input and intent_type == "specific":
+                # User added more attributes to same category
+                old_category = conversation_state.get("category")
+                if old_category and categories and old_category in [c.lower() for c in categories]:
+                    logger.info(f"[classify_request_case] ✅ CASE 6: Incremental refinement")
+                    return {
+                        "case": 6,
+                        "case_name": "incremental_refinement",
+                        "reason": "User adding or modifying attributes in same category",
+                        "data": {
+                            "intent_type": "refine",
+                            "should_merge": True
+                        }
                     }
-                }
         
-        # CASE 4: Very vague / abstract intent (CALL LLM)
-        if self._is_abstract_intent(user_input):
+        # ===== PRIORITY 2: Based on intent_type =====
+        
+        # CASE 4: Abstract intent (high-level need, no specific product)
+        if intent_type == "abstract":
+            logger.info(f"[classify_request_case] ✅ CASE 4: Abstract intent detected")
             return {
                 "case": 4,
                 "case_name": "abstract_intent",
@@ -125,146 +194,81 @@ class RecommendationOrchestrator:
                 }
             }
         
-        # For remaining cases, analyze query clarity
-        clarity_score = self._assess_query_clarity(user_input)
-        category_result = self._quick_category_detection(user_input)
-        
-        # CASE 1: Clear request (NO LLM)
-        if clarity_score >= 0.7 and category_result.get("confidence", 0) >= 0.7:
+        # CASE 1: Clear/Specific request (intent_type == "specific" + high confidence)
+        if intent_type == "specific" and confidence >= 0.65 and categories:
+            logger.info(f"[classify_request_case] ✅ CASE 1: Specific request with high confidence")
             return {
                 "case": 1,
                 "case_name": "clear_request",
-                "reason": "Clear and specific request with detectable category and attributes",
+                "reason": "Intent Mapper detected specific product/category with confidence >= 0.65",
                 "data": {
-                    "category": category_result.get("category"),
-                    "confidence": clarity_score,
+                    "category": categories[0],
+                    "confidence": confidence,
                     "should_use_llm": False,
                     "can_crawl_immediately": True
                 }
             }
         
-        # CASE 2: Unclear request but category is confidently detected (schema exists)
-        if category_result.get("category") and category_result.get("confidence", 0) >= 0.5:
-            # Check if schema exists
-            schema = get_schema(category_result["category"])
-            if schema:
-                return {
-                    "case": 2,
-                    "case_name": "unclear_with_schema",
-                    "reason": "Request missing attributes, but category detected and schema exists",
-                    "data": {
-                        "category": category_result["category"],
-                        "confidence": category_result["confidence"],
-                        "should_use_llm": False,
-                        "should_ask_attributes": True
-                    }
+        # CASE 2: Specific intent but lower confidence OR missing attributes
+        if intent_type == "specific" and 0.5 <= confidence < 0.65 and categories:
+            logger.info(f"[classify_request_case] ✅ CASE 2: Specific but lower confidence")
+            return {
+                "case": 2,
+                "case_name": "unclear_with_schema",
+                "reason": "Intent detected but confidence or attributes are incomplete",
+                "data": {
+                    "category": categories[0],
+                    "confidence": confidence,
+                    "should_ask_attributes": True
                 }
+            }
         
-        # CASE 3: Unclear request and schema is missing or confidence is low (CALL LLM)
+        # CASE 3: Unclear/None intent (no category detected or confidence too low)
+        logger.info(f"[classify_request_case] ✅ CASE 3: Unclear intent, need LLM inference")
         return {
             "case": 3,
             "case_name": "unclear_no_schema",
-            "reason": "Request unclear and either no category detected or low confidence",
+            "reason": f"Intent type '{intent_type}' or confidence {confidence:.2f} too low for direct action",
             "data": {
                 "should_use_llm": True,
-                "category": category_result.get("category"),
-                "confidence": category_result.get("confidence", 0)
+                "detected_intent": intent_type,
+                "confidence": confidence
             }
         }
     
     def _is_comparison_request(self, user_input: str) -> bool:
-        """Check if user is asking for comparison/advice rather than buying"""
-        user_lower = user_input.lower()
+        """
+        ⚠️  DEPRECATED: Use intent_mapper.intent_type == "comparison" instead
         
-        # Check for comparison keywords with word boundaries to avoid false positives
-        # (e.g., "or" in "Force" should not match)
-        comparison_patterns = [
-            r'\bso sánh\b', r'\bkhác\b', r'\bhơn\b', r'\btốt hơn\b', r'\bbền hơn\b', 
-            r'\brẻ hơn\b', r'\bđẹp hơn\b', r'\bvới\b', r'\bhay\b', r'\bor\b', 
-            r'\bvs\b', r'\bversus\b', r'\bcompare\b', r'\bcomparison\b',
-            r'\bnên chọn\b', r'\bnên mua\b', r'\bcái nào\b', r'\bloại nào\b'
-        ]
-        
-        for pattern in comparison_patterns:
-            if re.search(pattern, user_lower):
-                return True
-        
-        # Check for question patterns without purchase intent
-        question_patterns = [
-            r'(nên|có nên|nên không)\s+(mua|chọn|lấy)',
-            r'(cái nào|loại nào|sản phẩm nào)\s+(tốt|bền|đẹp|rẻ)',
-            r'(khác nhau|khác gì|giống nhau)',
-        ]
-        
-        for pattern in question_patterns:
-            if re.search(pattern, user_lower):
-                return True
-        
-        return False
+        This function is kept for backward compatibility but no longer used by classify_request_case()
+        """
+        pass  # Logic moved to intent_mapper._infer_intent_type()
     
     def _is_abstract_intent(self, user_input: str) -> bool:
-        """Check if user expresses abstract/high-level need without specific product"""
-        user_lower = user_input.lower()
+        """
+        ⚠️  DEPRECATED: Use intent_mapper.intent_type == "abstract" instead
         
-        # Abstract intent patterns
-        abstract_patterns = [
-            r'mua quà.*cho',  # "mua quà cho bố"
-            r'(muốn|cần)\s+(mua|tìm)\s+(thứ|cái|gì)\s+(gì|đó)',  # "muốn mua thứ gì đó..."
-            r'(để|cho|phục vụ)\s+\w+',  # "để tránh thai", "cho việc..."
-            r'giúp.*\b(vấn đề|việc|công việc)\b',  # "giúp vấn đề..."
-        ]
-        
-        for pattern in abstract_patterns:
-            if re.search(pattern, user_lower):
-                return True
-        
-        return False
+        This function is kept for backward compatibility but no longer used by classify_request_case()
+        """
+        pass  # Logic moved to intent_mapper._infer_intent_type()
     
     def _assess_query_clarity(self, user_input: str) -> float:
         """
-        Assess how clear and specific a query is
-        Returns: clarity score 0.0 to 1.0
+        ⚠️  DEPRECATED: No longer used for Case classification
+        
+        Intent Mapper's intent_type + confidence replaces this logic.
+        Kept for backward compatibility only.
         """
-        score = 0.0
-        user_lower = user_input.lower()
-        
-        # Has brand mention (+0.3)
-        brand_patterns = [
-            r'\b(nike|adidas|puma|reebok|samsung|apple|sony|lg|dell|hp|asus|lenovo)\b',
-            r'\b(cocacola|pepsi|uniqlo|zara|h&m|gucci|louis vuitton)\b'
-        ]
-        if any(re.search(p, user_lower) for p in brand_patterns):
-            score += 0.3
-        
-        # Has specific model/line (+0.3)
-        model_patterns = [
-            r'\b(air force|pegasus|galaxy|iphone|xperia|wh-1000xm\d)\b',
-            r'\b(xps|inspiron|thinkpad|macbook)\b'
-        ]
-        if any(re.search(p, user_lower) for p in model_patterns):
-            score += 0.3
-        
-        # Has size/quantity/color (+0.2)
-        if re.search(r'\b(size|cỡ|màu|số)\s+\d+', user_lower):
-            score += 0.2
-        if re.search(r'\b(đen|trắng|đỏ|xanh|black|white|red|blue)\b', user_lower):
-            score += 0.1
-        
-        # Has price mention (+0.2)
-        if re.search(r'(giá|price|đồng|triệu|nghìn|dưới|trên|từ.*đến)', user_lower):
-            score += 0.2
-        
-        # Has specific product name format (Brand + Model + specs) (+0.2)
-        # e.g., "Sony WH-1000XM5"
-        if re.search(r'\b[A-Z][a-z]+\s+[A-Z0-9-]+', user_input):
-            score += 0.2
-        
-        return min(score, 1.0)
+        return 0.5  # Default value for legacy code
     
     def _quick_category_detection(self, user_input: str) -> Dict[str, Any]:
-        """Quick rule-based category detection without LLM"""
-        # Use existing intent detector's keyword-based detection
-        return self.intent_detector._detect_category(user_input)
+        """
+        ⚠️  DEPRECATED: No longer used for Case classification
+        
+        Intent Mapper handles all category detection (pattern + LLM).
+        Kept for backward compatibility only.
+        """
+        return {"category": None, "confidence": 0.0}
     
     # ====================================================================================
     # CASE HANDLERS
@@ -295,7 +299,6 @@ class RecommendationOrchestrator:
         # NEW: Validate category before crawling
         logger.info(f"[CASE 1] Validating category: '{category}'")
         validation_result = self.category_validator.validate_category(category)
-        
         if not validation_result["success"]:
             logger.info(f"[CASE 1] ❌ Category validation failed: {validation_result['reason']}")
             return {
@@ -377,7 +380,8 @@ class RecommendationOrchestrator:
             "cached_filters": None,
             "last_crawl_params": None,
             "cache_hits": 0,
-            "cache_misses": 0
+            "cache_misses": 0,
+            "last_user_input": ""  # Track previous user input to avoid false intent_shift detection
         }
         for key, value in defaults.items():
             if key not in conversation_state:
@@ -865,6 +869,159 @@ Be concise and helpful."""
                 "state": conversation_state
             }
     
+    async def handle_case_8_dynamic_category_creation(
+        self,
+        user_input: str,
+        case_data: Dict[str, Any],
+        conversation_state: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        CASE 8: NEW category not in system
+        
+        Flow:
+        1. LLM creates schema for new category (extract attributes)
+        2. Crawl from external sources using new category name
+        3. Create category in database
+        4. Save products with new schema
+        
+        Example: User says "bột giặt" → System creates "bột giặt" category with schema
+        """
+        # Ensure state structure
+        conversation_state = self._ensure_state_structure(conversation_state)
+        
+        new_category = case_data.get("new_category")
+        intent_desc = case_data.get("intent", "")
+        
+        logger.info(f"[CASE 8] Creating new dynamic category: '{new_category}'")
+        logger.info(f"[CASE 8] Intent: {intent_desc}")
+        
+        # ===== STEP 1: LLM creates schema for new category =====
+        logger.info(f"[CASE 8] Using LLM to create schema for category '{new_category}'")
+        
+        import json
+        schema_prompt = f"""Create a database schema for a new product category.
+
+Category: "{new_category}"
+User intent: "{intent_desc}"
+
+Generate JSON with:
+1. category_name: normalized category name
+2. attributes: list of important filtering attributes (5-8)
+3. keywords: Vietnamese keywords for searching
+4. suggested_brands: popular brands in this category (if any)
+
+Format:
+{{
+  "category_name": "normalized name",
+  "display_name": "display name (Vietnamese)",
+  "attributes": [
+    {{"name": "attr1", "type": "text|select|range", "importance": "high|medium|low"}},
+    ...
+  ],
+  "keywords": ["keyword1", "keyword2", ...],
+  "suggested_brands": ["brand1", "brand2", ...]
+}}"""
+        
+        try:
+            schema_response = call_openai(
+                schema_prompt, 
+                model="gpt-4o-mini", 
+                temperature=0.3, 
+                max_tokens=500
+            )
+            schema_data = json.loads(schema_response.strip().replace("```json", "").replace("```", ""))
+            
+            category_name = schema_data.get("category_name", new_category)
+            display_name = schema_data.get("display_name", new_category)
+            attributes = schema_data.get("attributes", [])
+            keywords = schema_data.get("keywords", [new_category])
+            
+            logger.info(f"[CASE 8] ✅ Schema created: {category_name}")
+            logger.info(f"[CASE 8] Attributes: {[a['name'] for a in attributes]}")
+            
+        except Exception as e:
+            logger.error(f"[CASE 8] ❌ Failed to create schema: {e}")
+            return {
+                "status": "error",
+                "message": f"Không thể tạo schema cho danh mục '{new_category}'. Vui lòng thử lại.",
+                "case": 8,
+                "state": conversation_state
+            }
+        
+        # ===== STEP 2: Register new category in schema manager =====
+        try:
+            # Register category with attributes
+            self.schema_manager.register_new_category(
+                category_name=category_name,
+                display_name=display_name,
+                attributes=attributes,
+                keywords=keywords
+            )
+            logger.info(f"[CASE 8] ✅ Registered new category in schema manager")
+        except Exception as e:
+            logger.error(f"[CASE 8] ⚠️  Warning: Failed to register in schema manager: {e}")
+            # Don't fail - we can still crawl without schema registration
+        
+        # ===== STEP 3: Crawl from external sources =====
+        logger.info(f"[CASE 8] 🔍 Crawling for products in category '{category_name}'")
+        
+        try:
+            # Crawl using the new category name
+            crawled_products = await self.crawler.crawl(category_name, {})
+            
+            if not crawled_products:
+                logger.warning(f"[CASE 8] No products found when crawling '{category_name}'")
+                return {
+                    "status": "no_results",
+                    "message": f"Không tìm thấy sản phẩm trong danh mục '{display_name}'. Vui lòng thử lại sau.",
+                    "case": 8,
+                    "state": conversation_state
+                }
+            
+            logger.info(f"[CASE 8] ✅ Crawled {len(crawled_products)} products")
+            
+        except Exception as e:
+            logger.error(f"[CASE 8] ❌ Crawl failed: {e}")
+            return {
+                "status": "error",
+                "message": "Lỗi khi tìm kiếm sản phẩm. Vui lòng thử lại.",
+                "case": 8,
+                "state": conversation_state
+            }
+        
+        # ===== STEP 4: Save to database with new category =====
+        try:
+            # Create category record in DB
+            category_id = self.product_repository.create_category(
+                category_name=category_name,
+                display_name=display_name,
+                schema={"attributes": attributes}
+            )
+            logger.info(f"[CASE 8] ✅ Created category in DB: id={category_id}")
+            
+            # Save crawled products to DB
+            self.product_repository.save_products_batch(category_id, crawled_products)
+            logger.info(f"[CASE 8] ✅ Saved {len(crawled_products)} products to DB")
+            
+        except Exception as e:
+            logger.error(f"[CASE 8] ⚠️  Warning: Failed to save to DB: {e}")
+            # Don't fail - we can still return results even if DB save failed
+        
+        # ===== STEP 5: Update conversation state =====
+        conversation_state["has_category"] = True
+        conversation_state["category"] = category_name
+        conversation_state["category_id"] = category_id if 'category_id' in locals() else None
+        conversation_state["extracted"] = {}  # No attributes extracted yet
+        
+        # ===== STEP 6: Process and return results =====
+        logger.info(f"[CASE 8] Processing crawled results...")
+        return await self._process_crawl_results(
+            crawled_products, 
+            conversation_state, 
+            case=8, 
+            source="crawl_dynamic"
+        )
+    
     async def _process_crawl_results(
         self,
         products: List[Dict[str, Any]],
@@ -1160,13 +1317,20 @@ Be concise. Attributes should be practical filtering criteria."""
         intent_result = self.intent_mapper.map_intent(user_input)
         logger.info(f"[Orchestrator] ✅ Intent detected:")
         logger.info(f"  - Intent: {intent_result['intent']}")
+        logger.info(f"  - Intent Type: {intent_result['intent_type']}")
         logger.info(f"  - Categories: {intent_result['categories']}")
         logger.info(f"  - Confidence: {intent_result['confidence']:.2f}")
         logger.info(f"  - Method: {intent_result['method']}")
         
         # Store intent analysis in conversation_state (for classify_request_case to use)
-        if not conversation_state.get("detected_intent"):
+        # IMPORTANT: Always update if detected_intent is None (when category was reset)
+        if not conversation_state.get("detected_intent") or not conversation_state.get("has_category"):
+            if not conversation_state.get("detected_intent"):
+                logger.info(f"[Orchestrator] 🔄 Detected intent was None → Updating with new analysis")
             conversation_state["detected_intent"] = intent_result
+            conversation_state["last_user_input"] = user_input  # Track for intent shift detection
+        else:
+            logger.info(f"[Orchestrator] ℹ️  Using cached detected_intent (has_category=True)")
         
         # STEP 1: Classify request into one of 7 cases
         case_info = self.classify_request_case(user_input, conversation_state)
@@ -1184,7 +1348,8 @@ Be concise. Attributes should be practical filtering criteria."""
             4: self.handle_case_4_abstract_intent,
             5: self.handle_case_5_intent_shift,
             6: self.handle_case_6_incremental_refinement,
-            7: self.handle_case_7_comparison_advisory
+            7: self.handle_case_7_comparison_advisory,
+            8: self.handle_case_8_dynamic_category_creation  # ← NEW
         }
         
         handler = handlers.get(case_info["case"])
@@ -1204,6 +1369,9 @@ Be concise. Attributes should be practical filtering criteria."""
             "case_name": case_info["case_name"],
             "reason": case_info["reason"]
         }
+        
+        # STEP 5: Save current user input for next call (to avoid false intent_shift detection)
+        conversation_state["last_user_input"] = user_input
         
         return result
     

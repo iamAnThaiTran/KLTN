@@ -43,6 +43,11 @@ class IntentMapper:
             r"để nấu ăn|nấu ăn|nấu": ["nồi", "chảo", "dao", "cốc"],
             r"để học|học tập|sách": ["sách", "bút", "vở", "máy tính"],
             r"để ngủ|nệm|gối|chăn": ["nệm", "gối", "chăn", "ga trải giường"],
+            
+            # Cleaning products (NEW)
+            r"bột giặt|giặt quần áo|nước xả|xà phòng giặt": ["bột giặt"],
+            r"nước lau nhà|lau nhà|dọn nhà|vệ sinh": ["nước lau nhà"],
+            r"xà phòng|xà bông": ["xà phòng"],
         }
         
         # Available categories (for LLM to map to)
@@ -51,7 +56,8 @@ class IntentMapper:
             "dụng cụ", "công nghệ", "quà tặng", "nước", "nước ngọt", "cà phê", "trà",
             "thuốc tránh thai", "bao cao su", "skincare", "trang điểm", "máy tính", "console", 
             "monitor", "bàn phím", "ba lô", "dụng cụ tập", "nồi", "chảo", "dao", "cốc",
-            "sách", "bút", "vở", "nệm", "gối", "chăn", "ga trải giường"
+            "sách", "bút", "vở", "nệm", "gối", "chăn", "ga trải giường",
+            "bột giặt", "nước lau nhà", "xà phòng", "sản phẩm vệ sinh"  # ← ADD categories
         ]
         
         # LLM fallback enabled (set False to disable)
@@ -66,13 +72,15 @@ class IntentMapper:
         
         Returns:
             {
-                "intent": str (usage intent),
+                "intent": str (usage intent, e.g., "gift for girlfriend"),
+                "intent_type": str (specific | abstract | comparison | none),
                 "categories": [cat1, cat2, ...],
                 "confidence": float,
-                "method": "pattern" | "llm"  # NEW: Track which method was used
+                "method": "pattern" | "llm" | "none"
             }
         """
         user_input_lower = user_input.lower()
+        logger.info(f"Mapping intent for user input: '{user_input}'")
         
         # ===== STEP 1: Try pattern matching (FAST) =====
         for pattern, categories in self.intent_patterns.items():
@@ -81,11 +89,15 @@ class IntentMapper:
                 intent_match = re.search(pattern, user_input_lower)
                 intent = intent_match.group(0) if intent_match else pattern
                 
+                # Infer intent_type from pattern
+                intent_type = self._infer_intent_type(intent, categories)
+                
                 return {
                     "intent": intent,
+                    "intent_type": intent_type,
                     "categories": categories,
                     "confidence": 0.9,
-                    "method": "pattern"  # NEW
+                    "method": "pattern"
                 }
         
         # ===== STEP 2: Pattern not matched → Try LLM fallback (SMART) =====
@@ -103,45 +115,156 @@ class IntentMapper:
         # ===== STEP 3: No match (pattern or LLM) =====
         return {
             "intent": None,
+            "intent_type": "none",
             "categories": [],
             "confidence": 0.0,
-            "method": "none"  # NEW
+            "method": "none"
         }
+    
+    def _infer_intent_type(self, intent: str, categories: List[str]) -> str:
+        """
+        Infer intent_type (specific | abstract | comparison | none)
+        from intent string and categories
+        
+        PRIORITY ORDER:
+        1. If comparison keywords → "comparison"
+        2. If 1-2 categories (focused) → "specific"
+        3. If 3+ categories OR abstract keywords → "abstract"
+        4. Otherwise → "none"
+        
+        KEY INSIGHT: Multiple categories = scope explosion = abstract intent!
+        Example: "mua quà cho bạn gái" → 7 gift categories = too many options = abstract
+        """
+        intent_lower = str(intent).lower()
+        
+        # ===== PRIORITY 1: COMPARISON intent =====
+        if any(word in intent_lower for word in ["so sánh", "khác", "so", "compare", "vs"]):
+            return "comparison"
+        
+        # ===== PRIORITY 2: SPECIFIC intent (1-2 focused categories) =====
+        # If user mentioned specific product/category with narrow scope
+        if categories and 1 <= len(categories) <= 2:
+            return "specific"
+        
+        # ===== PRIORITY 3: ABSTRACT intent (3+ categories OR abstract keywords) =====
+        # If scope exploded to multiple categories = user exploring many options = abstract
+        # OR if abstract keywords present
+        abstract_keywords = ["gì đó", "thứ", "cái", "để", "cho", "muốn", "cần"]
+        
+        if (categories and len(categories) >= 3) or any(word in intent_lower for word in abstract_keywords):
+            return "abstract"
+        
+        # ===== FALLBACK: NONE =====
+        return "none"
     
     def _map_intent_with_llm(self, user_input: str) -> Dict[str, Any]:
         """
         Use LLM (OpenAI) để semantic understand intent + map categories
         
-        Example: "tôi muốn mua gì đó ấm áp" → detect "warmth/comfort" need → 
-                 map to [quần áo, áo khoác, nệm, gối]
+        NEW: LLM can now suggest NEW categories if user input doesn't match available ones
+        
+        Example: "bột giặt" → LLM suggests creating new category "bột giặt" with attributes
+                 instead of forcing to "dụng cụ"
         """
         # Get available category names
         categories_str = ", ".join(self.available_categories)
         
-        prompt = f"""Analyze user's purchase intent and map to product categories.
+        prompt = f"""TASK: Analyze user's shopping request and classify as CLEAR or ABSTRACT, then map categories accordingly.
 
 User input: "{user_input}"
 
 Available categories: {categories_str}
 
-TASK: 
-1. Understand what the user wants to buy (semantic meaning, not just keywords)
-2. Identify the INTENT (reason/purpose)
-3. Map to 2-5 most relevant categories
+CLASSIFICATION RULES:
+===================
 
-IMPORTANT: Output ONLY valid JSON, nothing else.
+**CLEAR REQUEST (Specific):**
+- User mentions EXACTLY 1 product category (e.g., "giày", "áo", "nước hoa")
+- User input is SHORT and DIRECT (1-3 words)
+- Action: Return ONLY 1 category with HIGH confidence (0.9-0.95)
+- NOTE: If no available category matches, CREATE a NEW category specific to user needs!
 
-Format:
+**ABSTRACT REQUEST (Vague purpose):**
+- User describes a PURPOSE/FEELING/NEED but NOT specific product (e.g., "tôi cần thứ ấm áp", "để tặng bạn gái")
+- User input is LONG and DESCRIPTIVE (4+ words)
+- User uses words like: "để", "cần", "muốn", "gì đó", "thứ"
+- Action: Return MULTIPLE related categories (3-5) with MEDIUM confidence (0.6-0.7)
+
+IMPORTANT RULES:
+================
+1. If user input EXACTLY MATCHES an available category → Use it
+2. If user input is a SPECIFIC product NOT in available categories → CREATE NEW category!
+   Example: "bột giặt" → NOT in available, so create category "bột giặt" (NEW)
+   Example: "nước lau nhà" → NOT in available, so create category "nước lau nhà" (NEW)
+3. If user input contains VAGUE keywords → Map to multiple available categories
+4. OUTPUT ONLY valid JSON, nothing else
+
+FORMAT:
 {{
-  "intent": "short description of intent",
-  "categories": ["category1", "category2"],
+  "intent": "short description",
+  "categories": ["cat1", "cat2"],  // Can be NEW categories!
+  "is_new_category": false,        // NEW field: True if category was created, not from available list
+  "clarity": "clear|abstract",
+  "confidence": 0.9,
   "reasoning": "brief explanation"
 }}
 
-Examples:
-- User: "tôi muốn gì đó ấm áp" → Intent: "warmth/comfort", Categories: ["quần áo", "nệm", "gối"]
-- User: "chuẩn bị cho chuyến đi mưa" → Intent: "rain travel preparation", Categories: ["quần áo", "ba lô", "giày"]
-- User: "tôi cần thứ bền để dùng lâu" → Intent: "durability", Categories: ["quần áo", "giày", "dụng cụ"]
+EXAMPLES:
+=========
+User: "giày" 
+→ EXISTS in available categories
+→ {{
+    "intent": "purchase shoes",
+    "categories": ["giày"],
+    "is_new_category": false,
+    "clarity": "clear",
+    "confidence": 0.95,
+    "reasoning": "Exact match with available 'giày'"
+  }}
+
+User: "bột giặt"
+→ NOT in available categories, CREATE NEW
+→ {{
+    "intent": "purchase laundry detergent",
+    "categories": ["bột giặt"],
+    "is_new_category": true,
+    "clarity": "clear",
+    "confidence": 0.95,
+    "reasoning": "User wants specific product 'bột giặt' (not in available), create new category"
+  }}
+
+User: "nước lau nhà"
+→ NOT in available, CREATE NEW
+→ {{
+    "intent": "purchase floor cleaner",
+    "categories": ["nước lau nhà"],
+    "is_new_category": true,
+    "clarity": "clear",
+    "confidence": 0.90,
+    "reasoning": "Specific product 'nước lau nhà' not in system, create new"
+  }}
+
+User: "tôi muốn gì đó ấm áp"
+→ ABSTRACT, use available categories
+→ {{
+    "intent": "warmth/comfort",
+    "categories": ["quần áo", "áo khoác", "nệm", "gối", "chăn"],
+    "is_new_category": false,
+    "clarity": "abstract",
+    "confidence": 0.65,
+    "reasoning": "Purpose-driven, map to existing categories"
+  }}
+
+User: "để tặng bạn gái"
+→ ABSTRACT, use available categories
+→ {{
+    "intent": "gift for girlfriend",
+    "categories": ["quần áo", "phụ kiện", "mỹ phẩm", "nước hoa"],
+    "is_new_category": false,
+    "clarity": "abstract",
+    "confidence": 0.65,
+    "reasoning": "Gift purpose, map to existing categories"
+  }}
 """
         
         try:
@@ -170,26 +293,51 @@ Examples:
                         "intent": None,
                         "categories": [],
                         "confidence": 0.0,
-                        "method": "llm_failed"
+                        "method": "llm_failed",
+                        "is_new_category": False
                     }
             
-            # Validate categories (only use available ones)
-            valid_categories = [
-                cat for cat in result.get("categories", [])
-                if cat.lower() in [c.lower() for c in self.available_categories]
-            ]
+            # Check if LLM suggests a NEW category
+            is_new_category = result.get("is_new_category", False)
+            
+            # Validate categories based on is_new_category flag
+            if is_new_category:
+                # Allow new categories! Don't filter against available_categories
+                valid_categories = result.get("categories", [])
+                logger.info(f"[LLM RESPONSE] NEW CATEGORY detected: {valid_categories}")
+            else:
+                # Only use existing/available categories
+                valid_categories = [
+                    cat for cat in result.get("categories", [])
+                    if cat.lower() in [c.lower() for c in self.available_categories]
+                ]
+                logger.info(f"[LLM RESPONSE] Using available categories: {valid_categories}")
+            
+            # Get clarity from LLM response (clear or abstract)
+            clarity = result.get("clarity", "abstract").lower()  # default to abstract if missing
+            
+            # Map clarity → intent_type
+            intent_type = "specific" if clarity == "clear" else "abstract"
+            
+            # Use confidence from LLM response
+            confidence = result.get("confidence", 0.65)  # default to 0.65
+            
+            logger.info(f"[LLM RESPONSE] clarity='{clarity}' → intent_type='{intent_type}', confidence={confidence}, is_new={is_new_category}")
             
             return {
                 "intent": result.get("intent", ""),
+                "intent_type": intent_type,
                 "categories": valid_categories,
-                "confidence": 0.7,  # Lower confidence than pattern matching
-                "method": "llm"
+                "confidence": confidence,
+                "method": "llm",
+                "is_new_category": is_new_category  # ← NEW: Pass through flag
             }
             
         except Exception as e:
             print(f"ERROR in LLM intent mapping: {e}")
             return {
                 "intent": None,
+                "intent_type": "none",
                 "categories": [],
                 "confidence": 0.0,
                 "method": "llm_error"

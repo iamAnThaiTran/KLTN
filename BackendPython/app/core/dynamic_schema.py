@@ -149,6 +149,7 @@ UNIVERSAL_KEYWORDS = {
     "đồng hồ": ["đồng hồ", "watch", "smartwatch", "đồng hồ thông minh"],
     "nước ngọt": ["nước ngọt", "nước", "cola", "cocacola", "sprite", "fanta", "pepsi", "cà phê", "cafe", "nước mắm", "nước tương"],
     "trà": ["trà", "trà xanh", "trà đen", "tea", "trà oolong"],
+    "bột giặt": ["bột giặt", "bôt giặt", "nước giặt", "detergent", "washing powder", "ariel", "omo", "tide", "surf", "comfort"],
 }
 
 # Global category list - for LLM category detection

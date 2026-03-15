@@ -209,7 +209,11 @@ Product description: {(product.get('description') or 'N/A')[:200]}
 Respond ONLY with "yes" or "no".
 """
         
-        response = call_llm(prompt, max_tokens=5).strip().lower()
+        response = call_llm(prompt, max_tokens=5)
+        if not response:
+            return "unknown"
+        
+        response = response.strip().lower()
         
         return expected_category if response == "yes" else "unknown"
     

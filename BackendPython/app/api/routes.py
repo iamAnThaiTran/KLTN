@@ -259,6 +259,7 @@ async def analyze_query(request: QueryRequest):
                 conversation_state["missing_required"] = []
                 conversation_state["attributes_asked"] = []
                 conversation_state["last_crawl_params"] = None
+                conversation_state["detected_intent"] = None  # ← CRITICAL: Clear cached intent so new one is re-analyzed
                 
                 logger.info(f"[/api/analyze] ✅ Context reset for new category")
         else:
@@ -303,6 +304,45 @@ async def analyze_query(request: QueryRequest):
         
         category = conversation_state.get("category", "")
         extracted_attrs = conversation_state.get("extracted", {})
+        
+        # NEW: Handle non-results status from orchestrator
+        orch_status = orch_result.get("status")
+        
+        if orch_status == "need_info":
+            # CASE 4 (abstract), CASE 2/3 (need attributes), etc.
+            logger.info(f"[/api/analyze] 💬 Returning clarification question (status: need_info)")
+            session_manager.set_session(conversation_id, conversation_state)  # ← Save state
+            return {
+                "success": True,
+                "status": "need_info",
+                "question": orch_result.get("question"),
+                "options": orch_result.get("options", []),
+                "case": orch_result.get("case"),
+                "conversation_id": conversation_id,
+                "search_history": conversation_state.get("search_history", [])
+            }
+        
+        if orch_status == "no_results":
+            logger.info(f"[/api/analyze] 🔍 No products found")
+            session_manager.set_session(conversation_id, conversation_state)  # ← Save state
+            return {
+                "success": True,
+                "status": "no_results",
+                "message": orch_result.get("message", "Không tìm thấy sản phẩm phù hợp"),
+                "category": category,
+                "conversation_id": conversation_id,
+                "search_history": conversation_state.get("search_history", [])
+            }
+        
+        if orch_status == "error":
+            logger.info(f"[/api/analyze] ❌ Orchestrator error")
+            session_manager.set_session(conversation_id, conversation_state)  # ← Save state
+            return {
+                "success": False,
+                "status": "error",
+                "message": orch_result.get("message", "Xin lỗi, đã xảy ra lỗi. Vui lòng thử lại."),
+                "conversation_id": conversation_id
+            }
         
         # Fetch filters from DB
         filter_groups = []
