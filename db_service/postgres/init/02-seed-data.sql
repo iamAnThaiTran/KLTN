@@ -1,52 +1,155 @@
--- ==========================================
--- SEED DATA
--- ==========================================
+-- ============================================================================
+-- SEED DATA - CATEGORIES
+-- ============================================================================
 
--- Insert Categories (Level 0 - Root)
-INSERT INTO categories (name, slug, level, keywords, icon, priority) VALUES
-('Điện tử', 'dien-tu', 0, ARRAY['điện tử', 'electronics', 'công nghệ'], '💻', 100),
-('Gia dụng', 'gia-dung', 0, ARRAY['gia dụng', 'household', 'nhà cửa'], '🏠', 90),
-('Thời trang', 'thoi-trang', 0, ARRAY['thời trang', 'fashion', 'quần áo'], '👗', 80),
-('Sách', 'sach', 0, ARRAY['sách', 'books', 'đọc'], '📚', 70);
+INSERT INTO categories (name, slug, description, icon) VALUES
+('Giày', 'giay', 'Giày dép các loại: thể thao, tây, sandal, dép', '👟'),
+('Đồng hồ', 'dong-ho', 'Đồng hồ đeo tay, smartwatch', '⌚'),
+('Laptop', 'laptop', 'Máy tính xách tay', '💻'),
+('Tai nghe', 'tai-nghe', 'Tai nghe, headphone, earbuds', '🎧');
 
--- Insert Categories (Level 1 - Sub categories)
-INSERT INTO categories (name, slug, parent_id, level, keywords, icon, priority) VALUES
--- Điện tử
-('Điện thoại', 'dien-thoai', 1, 1, ARRAY['điện thoại', 'smartphone', 'di động', 'phone'], '📱', 100),
-('Laptop', 'laptop', 1, 1, ARRAY['laptop', 'máy tính xách tay', 'notebook'], '💻', 90),
-('Tai nghe', 'tai-nghe', 1, 1, ARRAY['tai nghe', 'headphone', 'earphone'], '🎧', 80),
-('Máy tính bảng', 'may-tinh-bang', 1, 1, ARRAY['máy tính bảng', 'tablet', 'ipad'], '📲', 70),
+-- ============================================================================
+-- SEED DATA - CATEGORY ATTRIBUTES
+-- ============================================================================
 
--- Gia dụng
-('Bột giặt', 'bot-giat', 2, 1, ARRAY['bột giặt', 'nước giặt', 'detergent'], '🧼', 100),
-('Nước rửa chén', 'nuoc-rua-chen', 2, 1, ARRAY['nước rửa chén', 'dishwashing', 'rửa bát'], '🧽', 90),
-('Dụng cụ nhà bếp', 'dung-cu-nha-bep', 2, 1, ARRAY['dụng cụ nhà bếp', 'kitchen', 'nấu ăn'], '🍳', 80);
+-- Attributes for Giày
+INSERT INTO category_attributes (category_id, name, display_name, data_type, possible_values, is_filterable, sort_order) VALUES
+(1, 'size', 'Kích cỡ', 'enum', '["35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45"]'::jsonb, true, 1),
+(1, 'color', 'Màu sắc', 'enum', '["Đen", "Trắng", "Xanh", "Đỏ", "Vàng", "Nâu", "Xám"]'::jsonb, true, 2),
+(1, 'gender', 'Giới tính', 'enum', '["Nam", "Nữ", "Unisex"]'::jsonb, true, 3),
+(1, 'type', 'Loại giày', 'enum', '["Thể thao", "Chạy bộ", "Sneaker", "Sandal", "Boot"]'::jsonb, true, 4),
+(1, 'brand', 'Thương hiệu', 'text', '["Nike", "Adidas", "Puma", "Converse", "Vans"]'::jsonb, true, 5);
 
--- Insert Categories (Level 2 - Brands/Specific)
-INSERT INTO categories (name, slug, parent_id, level, keywords, priority) VALUES
--- Điện thoại brands
-('iPhone', 'iphone', 5, 2, ARRAY['iphone', 'apple', 'ios'], 100),
-('Samsung', 'samsung', 5, 2, ARRAY['samsung', 'galaxy'], 90),
-('Xiaomi', 'xiaomi', 5, 2, ARRAY['xiaomi', 'redmi', 'poco'], 80),
+-- Attributes for Đồng hồ
+INSERT INTO category_attributes (category_id, name, display_name, data_type, possible_values, is_filterable, sort_order) VALUES
+(2, 'style', 'Phong cách', 'enum', '["Casual", "Sport", "Luxury", "Smartwatch"]'::jsonb, true, 1),
+(2, 'gender', 'Giới tính', 'enum', '["Nam", "Nữ", "Unisex"]'::jsonb, true, 2),
+(2, 'material', 'Chất liệu', 'enum', '["Da", "Kim loại", "Nhựa", "Silicon"]'::jsonb, true, 3),
+(2, 'waterproof', 'Chống nước', 'enum', '["Có", "Không"]'::jsonb, true, 4),
+(2, 'brand', 'Thương hiệu', 'text', '["Seiko", "Casio", "Citizen", "Omega"]'::jsonb, true, 5);
 
--- Laptop brands
-('MacBook', 'macbook', 6, 2, ARRAY['macbook', 'apple', 'mac'], 100),
-('Dell', 'dell', 6, 2, ARRAY['dell', 'latitude', 'xps'], 90),
-('Asus', 'asus', 6, 2, ARRAY['asus', 'vivobook', 'zenbook'], 80),
+-- Attributes for Laptop
+INSERT INTO category_attributes (category_id, name, display_name, data_type, possible_values, is_filterable, sort_order) VALUES
+(3, 'brand', 'Thương hiệu', 'text', '["Apple", "Dell", "HP", "Asus", "Lenovo"]'::jsonb, true, 1),
+(3, 'cpu', 'Bộ xử lý', 'text', '["Intel i5", "Intel i7", "M1", "M2", "AMD Ryzen"]'::jsonb, true, 2),
+(3, 'ram', 'RAM', 'enum', '["8GB", "16GB", "32GB"]'::jsonb, true, 3),
+(3, 'storage', 'Lưu trữ', 'enum', '["256GB", "512GB", "1TB"]'::jsonb, true, 4),
+(3, 'screen_size', 'Kích thước màn hình', 'enum', '["13 inch", "14 inch", "15 inch", "16 inch"]'::jsonb, true, 5);
 
--- Bột giặt brands
-('Omo', 'omo', 9, 2, ARRAY['omo', 'unilever'], 100),
-('Tide', 'tide', 9, 2, ARRAY['tide', 'p&g'], 90);
+-- Attributes for Tai nghe
+INSERT INTO category_attributes (category_id, name, display_name, data_type, possible_values, is_filterable, sort_order) VALUES
+(4, 'type', 'Loại', 'enum', '["Over-ear", "On-ear", "In-ear", "Earbuds"]'::jsonb, true, 1),
+(4, 'brand', 'Thương hiệu', 'text', '["Sony", "Bose", "Apple", "JBL", "Sennheiser"]'::jsonb, true, 2),
+(4, 'noise_cancel', 'Khử tiếng ồn', 'enum', '["Có", "Không"]'::jsonb, true, 3),
+(4, 'wireless', 'Wireless', 'enum', '["Có", "Không"]'::jsonb, true, 4);
+
+-- ============================================================================
+-- SEED DATA - SAMPLE PRODUCTS & SKUS
+-- ============================================================================
+
+-- Sample Product 1: Nike Air Max
+INSERT INTO products (category_id, title, brand, description, product_url, thumbnail, source, is_active) VALUES
+(1, 'Nike Air Max 2024', 'Nike', 'Giày thể thao Nike Air Max 2024, đế cao su Max Air', 'https://tiki.vn/nike-air-max', 'nike_air_max.jpg', 'tiki', true);
+
+-- SKUs for Nike Air Max
+INSERT INTO skus (product_id, sku_code, price, original_price, stock, is_available) VALUES
+(1, 'NIKE-AM-42-BLK', 2500000.00, 3000000.00, 10, true),
+(1, 'NIKE-AM-42-WHT', 2500000.00, 3000000.00, 5, true),
+(1, 'NIKE-AM-43-BLK', 2500000.00, 3000000.00, 8, true);
+
+-- SKU Attributes
+INSERT INTO sku_attributes (sku_id, attribute_name, attribute_value) VALUES
+(1, 'size', '42'), (1, 'color', 'Đen'), (1, 'gender', 'Nam'), (1, 'type', 'Thể thao'),
+(2, 'size', '42'), (2, 'color', 'Trắng'), (2, 'gender', 'Nam'), (2, 'type', 'Thể thao'),
+(3, 'size', '43'), (3, 'color', 'Đen'), (3, 'gender', 'Nam'), (3, 'type', 'Thể thao');
+
+-- Sample Product 2: Laptop Dell XPS
+INSERT INTO products (category_id, title, brand, description, product_url, thumbnail, source, is_active) VALUES
+(3, 'Dell XPS 13 Plus', 'Dell', 'Laptop Dell XPS 13 Plus mỏng nhẹ, màn hình 13.3 inch OLED', 'https://lazada.vn/dell-xps', 'dell_xps.jpg', 'lazada', true);
+
+-- SKUs for Dell XPS
+INSERT INTO skus (product_id, sku_code, price, original_price, stock, is_available) VALUES
+(2, 'DELL-XPS-I5-256G', 24000000.00, 30000000.00, 3, true),
+(2, 'DELL-XPS-I7-512G', 32000000.00, 40000000.00, 2, true);
+
+-- SKU Attributes
+INSERT INTO sku_attributes (sku_id, attribute_name, attribute_value) VALUES
+(4, 'brand', 'Dell'), (4, 'cpu', 'Intel i5'), (4, 'ram', '16GB'), (4, 'storage', '256GB'), (4, 'screen_size', '13 inch'),
+(5, 'brand', 'Dell'), (5, 'cpu', 'Intel i7'), (5, 'ram', '16GB'), (5, 'storage', '512GB'), (5, 'screen_size', '13 inch');
+
+-- Sample Product 3: Smartwatch
+INSERT INTO products (category_id, title, brand, description, product_url, thumbnail, source, is_active) VALUES
+(2, 'Apple Watch Series 9', 'Apple', 'Smartwatch Apple Watch Series 9, 45mm', 'https://shopee.vn/apple-watch', 'apple_watch.jpg', 'shopee', true);
+
+-- SKUs for Apple Watch
+INSERT INTO skus (product_id, sku_code, price, original_price, stock, is_available) VALUES
+(3, 'APPLE-WATCH-BLK-45', 11000000.00, 13000000.00, 5, true),
+(3, 'APPLE-WATCH-SLV-45', 11000000.00, 13000000.00, 4, true);
+
+-- SKU Attributes
+INSERT INTO sku_attributes (sku_id, attribute_name, attribute_value) VALUES
+(6, 'brand', 'Apple'), (6, 'style', 'Smartwatch'), (6, 'waterproof', 'Có'),
+(7, 'brand', 'Apple'), (7, 'style', 'Smartwatch'), (7, 'waterproof', 'Có');
+
+-- ============================================================================
+-- SEED DATA - USERS
+-- ============================================================================
 
 -- Create admin user (password: admin123)
--- Hash was generated with: bcrypt.hash('admin123', 10)
 INSERT INTO users (email, password_hash, full_name, role, is_verified, is_active) VALUES
 ('admin@kltn.com', '$2b$10$3vFzpM7RxF0Y0YR7DqM5beLj7zL7P8Nz4K6Q2M9V1X5Z2W3A4B5C6', 'Admin User', 'admin', true, true);
 
--- Create demo user (password: demo123)
--- Hash was generated with: bcrypt.hash('demo123', 10)
+-- Create demo users
 INSERT INTO users (email, password_hash, full_name, role, is_verified, is_active) VALUES
-('demo@example.com', '$2b$10$5sL6P9D2Q1R8E7T4Y3K0vOM5N1B9V7Z4X2C6M8W1A3F5S7D9E0K1', 'Demo User', 'user', true, true);
+('demo@example.com', '$2b$10$5sL6P9D2Q1R8E7T4Y3K0vOM5N1B9V7Z4X2C6M8W1A3F5S7D9E0K1', 'Demo User', 'user', true, true),
+('user1@example.com', '$2b$10$7tN1M8K3Q4R5S6T7U8V9W0X1Y2Z3A4B5C6D7E8F9G0H1I2J3K4L5M', 'Nguyễn Văn A', 'user', true, true);
+
+-- ============================================================================
+-- SEED DATA - USER PREFERENCES
+-- ============================================================================
+
+-- Admin preferences
+INSERT INTO user_preferences (user_id, preferred_categories, preferred_brands, price_range_min, price_range_max, notification_enabled) VALUES
+(1, ARRAY[1, 2, 3], ARRAY['Nike', 'Apple', 'Dell'], 1000000.00, 50000000.00, true);
+
+-- Demo user preferences
+INSERT INTO user_preferences (user_id, preferred_categories, preferred_brands, price_range_min, price_range_max, notification_enabled) VALUES
+(2, ARRAY[1, 4], ARRAY['Nike', 'Sony', 'JBL'], 500000.00, 10000000.00, true);
+
+-- User1 preferences
+INSERT INTO user_preferences (user_id, preferred_categories, preferred_brands, price_range_min, price_range_max, notification_enabled) VALUES
+(3, ARRAY[3], ARRAY['Apple', 'Dell', 'HP'], 20000000.00, 50000000.00, true);
+
+-- ============================================================================
+-- SEED DATA - SAMPLE ALERTS
+-- ============================================================================
+
+-- Alert: Price drop for Nike Air Max Size 42 Black
+INSERT INTO alerts (user_id, sku_id, alert_type, target_price, is_triggered) VALUES
+(2, 1, 'price_drop', 2200000.00, false);
+
+-- Alert: Back in stock for Dell XPS
+INSERT INTO alerts (user_id, sku_id, alert_type, is_triggered) VALUES
+(3, 4, 'back_in_stock', false);
+
+-- ============================================================================
+-- VERIFICATION
+-- ============================================================================
+SELECT 'Categories' as table_name, COUNT(*) as count FROM categories
+UNION ALL
+SELECT 'Category Attributes', COUNT(*) FROM category_attributes
+UNION ALL
+SELECT 'Products', COUNT(*) FROM products
+UNION ALL
+SELECT 'SKUs', COUNT(*) FROM skus
+UNION ALL
+SELECT 'SKU Attributes', COUNT(*) FROM sku_attributes
+UNION ALL
+SELECT 'Users', COUNT(*) FROM users
+UNION ALL
+SELECT 'User Preferences', COUNT(*) FROM user_preferences
+UNION ALL
+SELECT 'Alerts', COUNT(*) FROM alerts;
 
 -- Insert Sample Products
 INSERT INTO products (name, slug, category_id, brand, description, price, original_price, discount_percent, stock, sku, attributes, popularity_score, is_featured) VALUES

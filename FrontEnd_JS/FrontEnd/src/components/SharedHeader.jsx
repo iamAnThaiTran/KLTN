@@ -1,63 +1,58 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ShoppingBag, ChevronDown, LogOut, Heart, Clock, Tag, User, Lock, Eye, EyeOff, AlertCircle, X } from 'lucide-react';
+import { ShoppingBag, ChevronDown, LogOut, Heart, Clock, Tag, User, AlertCircle, X, Loader } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { GoogleLogin } from '@react-oauth/google';
 
-// ─── LOGIN MODAL ─────────────────────────────────────────────────────────────
 export const LoginModal = ({ isOpen, onClose }) => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
-  const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState('login');
-  const { login, register } = useAuth();
+  const { googleLogin } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!isOpen) {
       setError('');
-      setEmail('');
-      setPassword('');
-      setName('');
-      setShowPw(false);
     }
   }, [isOpen]);
 
-  const handleSubmit = async () => {
-    if (tab === 'login') {
-      if (!email || !password) {
-        setError('Vui lòng điền đầy đủ thông tin');
-        return;
-      }
-    } else {
-      if (!name || !email || !password) {
-        setError('Vui lòng điền đầy đủ thông tin');
-        return;
-      }
-    }
-    
-    setLoading(true);
+  const handleGoogleSuccess = async (credentialResponse) => {
     setError('');
-    
+    setLoading(true);
+
     try {
-      let result;
-      if (tab === 'login') {
-        result = await login(email, password);
-      } else {
-        result = await register(email, password, name);
-      }
+      console.log('🔐 Handling Google success...');
+      const result = await googleLogin(credentialResponse.credential);
       
-      setLoading(false);
+      console.log('📊 Result:', result);
+      
       if (result.success) {
+        console.log('✅ Login successful, closing modal...');
         onClose();
+        console.log('⏳ Navigating...', result.user?.role === 'admin' ? '/admin/dashboard' : '/');
+        
+        // Add small delay to ensure state updates
+        setTimeout(() => {
+          if (result.user?.role === 'admin') {
+            navigate('/admin/dashboard');
+          } else {
+            navigate('/');
+          }
+        }, 100);
       } else {
-        setError(result.message || 'Thao tác thất bại');
+        console.error('❌ Login failed:', result.message);
+        setError(result.message || 'Đăng nhập thất bại');
       }
     } catch (err) {
-      setLoading(false);
+      console.error('❌ Error:', err);
       setError('Lỗi: ' + err.message);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const handleGoogleError = () => {
+    setError('Google login failed. Vui lòng thử lại.');
   };
 
   if (!isOpen) return null;
@@ -67,9 +62,6 @@ export const LoginModal = ({ isOpen, onClose }) => {
       onClick={e => e.target === e.currentTarget && onClose()}>
       <style>{`
         @keyframes modalSlide { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
-        .login-inp { width:100%; padding:11px 14px 11px 40px; border:1.5px solid #e2e8f0; border-radius:10px; font-size:14px; color:#1e293b; outline:none; transition:all 0.2s; box-sizing:border-box; background:#f8fafc; font-family:inherit; }
-        .login-inp:focus { border-color:#6366f1; background:#fff; box-shadow:0 0 0 3px rgba(99,102,241,0.12); }
-        .login-inp::placeholder { color:#94a3b8; }
       `}</style>
       <div style={{ background:'#fff', borderRadius:20, width:'100%', maxWidth:380, boxShadow:'0 24px 64px rgba(0,0,0,0.18)', animation:'modalSlide 0.25s ease', overflow:'hidden' }}>
         <div style={{ background:'linear-gradient(135deg,#6366f1,#8b5cf6)', padding:'22px 24px 0', position:'relative' }}>
@@ -85,41 +77,38 @@ export const LoginModal = ({ isOpen, onClose }) => {
               <div style={{ color:'rgba(255,255,255,0.7)', fontSize:12 }}>Lưu yêu thích & nhận gợi ý cá nhân</div>
             </div>
           </div>
-          <div style={{ display:'flex' }}>
-            {['login','register'].map(t => (
-              <button key={t} onClick={() => setTab(t)} style={{ flex:1, padding:'10px', border:'none', background:'none', cursor:'pointer', color:tab===t?'#fff':'rgba(255,255,255,0.55)', fontWeight:tab===t?700:500, fontSize:14, borderBottom:tab===t?'2px solid #fff':'2px solid transparent', transition:'all 0.2s', fontFamily:'inherit' }}>
-                {t==='login'?'Đăng nhập':'Đăng ký'}
-              </button>
-            ))}
-          </div>
         </div>
         <div style={{ padding:'24px' }}>
           <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-            {tab==='register' && (
-              <div style={{ position:'relative' }}>
-                <User size={15} color="#94a3b8" style={{ position:'absolute', left:13, top:'50%', transform:'translateY(-50%)' }} />
-                <input className="login-inp" type="text" placeholder="Họ và tên" value={name} onChange={e=>setName(e.target.value)} />
+            {error && <div style={{ padding:'9px 13px', background:'#fef2f2', border:'1px solid #fecaca', borderRadius:8, color:'#dc2626', fontSize:13, display:'flex', alignItems:'center', gap:7 }}><AlertCircle size={14}/>{error}</div>}
+            
+            {loading ? (
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8, padding:'16px' }}>
+                <Loader size={18} style={{ animation:'spin 1s linear infinite' }} color="#6366f1" />
+                <span style={{ color:'#6366f1', fontWeight:500 }}>Đang xác thực...</span>
+              </div>
+            ) : (
+              <div style={{ display:'flex', justifyContent:'center' }}>
+                <GoogleLogin
+                  onSuccess={handleGoogleSuccess}
+                  onError={handleGoogleError}
+                  text="signin_with"
+                />
               </div>
             )}
-            <div style={{ position:'relative' }}>
-              <svg style={{ position:'absolute', left:13, top:'50%', transform:'translateY(-50%)' }} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-              <input className="login-inp" type="email" placeholder="Email của bạn" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSubmit()} />
+            
+            <div style={{ textAlign:'center', fontSize:12, color:'#94a3b8', marginTop:8 }}>
+              Chúng tôi chỉ sử dụng Google để xác thực
             </div>
-            <div style={{ position:'relative' }}>
-              <Lock size={15} color="#94a3b8" style={{ position:'absolute', left:13, top:'50%', transform:'translateY(-50%)' }} />
-              <input className="login-inp" style={{ paddingRight:40 }} type={showPw?'text':'password'} placeholder="Mật khẩu" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSubmit()} />
-              <button onClick={()=>setShowPw(!showPw)} style={{ position:'absolute', right:12, top:'50%', transform:'translateY(-50%)', background:'none', border:'none', cursor:'pointer', padding:0, display:'flex' }}>
-                {showPw?<EyeOff size={15} color="#94a3b8"/>:<Eye size={15} color="#94a3b8"/>}
-              </button>
-            </div>
-            {error && <div style={{ padding:'9px 13px', background:'#fef2f2', border:'1px solid #fecaca', borderRadius:8, color:'#dc2626', fontSize:13, display:'flex', alignItems:'center', gap:7 }}><AlertCircle size={14}/>{error}</div>}
-            <button onClick={handleSubmit} disabled={loading} style={{ width:'100%', padding:'12px', borderRadius:10, border:'none', cursor:'pointer', background:'linear-gradient(135deg,#6366f1,#8b5cf6)', color:'#fff', fontSize:14, fontWeight:700, transition:'all 0.2s', marginTop:4, fontFamily:'inherit', opacity:loading?0.7:1 }}>
-              {loading ? 'Đang xử lý...' : tab==='login'?'Đăng nhập':'Tạo tài khoản'}
-            </button>
-            {tab==='login'&&<div style={{ textAlign:'center', fontSize:13, color:'#6366f1', cursor:'pointer', fontWeight:500 }}>Quên mật khẩu?</div>}
           </div>
         </div>
       </div>
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 };

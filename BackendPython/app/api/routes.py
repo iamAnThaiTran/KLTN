@@ -5,18 +5,25 @@ import logging
 import sys
 import uuid
 import traceback
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
+from sqlalchemy.orm import Session
 from app.core.orchestrator import RecommendationOrchestrator
 from app.core.context_analyzer import get_context_analyzer
 from app.api.sku_routes import router as sku_router
 from app.api.progressive_search_routes import router as progressive_search_router
 from app.api.product_automation_routes import router as product_automation_router
+from app.api.auth_routes import router as auth_router
+from app.api.user_routes import router as user_router
 from app.crawler.crawler import TikiCrawler
 from app.db.sku_repository import SKURepository
 from app.services.session_manager import get_session_manager
+from app.config.database_orm import Base, engine, get_db
+from app.api.auth_middleware import get_current_user_optional
+from app.services.user_service import UserService
+from app.models.user_models import User
 # from app.core.crawler import YourCrawler  # Import your crawler
 
 # Configure logging
@@ -34,6 +41,8 @@ def log_analyze(msg):
 app = FastAPI(title="Smart Product Recommendation API")
 
 # Register routers
+app.include_router(auth_router)  # Auth routes first
+app.include_router(user_router)  # User personalization routes
 app.include_router(sku_router)
 app.include_router(progressive_search_router)
 app.include_router(product_automation_router)  # ✅ NEW: Product automation routes
@@ -46,6 +55,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ===== STARTUP EVENT =====
+@app.on_event("startup")
+async def startup_event():
+    """Create database tables on startup"""
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("✅ Database tables created/verified successfully")
+    except Exception as e:
+        logger.error(f"❌ Error creating database tables: {e}")
+        traceback.print_exc()
 
 # ===== MODELS =====
 
@@ -109,12 +129,49 @@ def _generate_hints_from_filters(category: str, filter_groups: List[Dict]) -> Li
     
     return hints
 
+
+async def _save_search_history_if_user(
+    current_user: Optional[User],
+    db: Session,
+    user_input: str,
+    category_name: Optional[str] = None,
+    result_count: int = 0,
+    session_id: Optional[str] = None
+):
+    """
+    Helper to save search history for authenticated users
+    """
+    if not current_user:
+        return None
+    
+    try:
+        search_record = UserService.save_search_query(
+            db=db,
+            user_id=current_user.id,
+            query=user_input,
+            category_name=category_name,
+            session_id=session_id
+        )
+        
+        if result_count > 0:
+            UserService.update_search_result_count(db, search_record.id, result_count)
+        
+        logger.info(f"✅ Saved search history for user {current_user.id}: '{user_input}'")
+        return search_record.id
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to save search history: {e}")
+        return None
+
 # ===== ENDPOINTS =====
 
 @app.post("/api/query")
-async def process_query(request: QueryRequest):
+async def process_query(
+    request: QueryRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
     """
-    Process user query
+    Process user query with optional authentication for history tracking
     
     Response types:
     1. need_info: Cần hỏi thêm thông tin
@@ -142,6 +199,28 @@ async def process_query(request: QueryRequest):
     
     # Add conversation_id to response
     result["conversation_id"] = conversation_id
+    
+    # ===== SAVE SEARCH HISTORY IF USER IS LOGGED IN =====
+    if current_user:
+        category_name = result.get("state", {}).get("category")
+        try:
+            search_record = UserService.save_search_query(
+                db=db,
+                user_id=current_user.id,
+                query=request.user_input,
+                category_name=category_name,
+                session_id=conversation_id
+            )
+            
+            # Update result count in the search record
+            if result.get("status") == "results":
+                result_count = len(result.get("results", []))
+                UserService.update_search_result_count(db, search_record.id, result_count)
+            
+            logger.info(f"✅ Saved search history for user {current_user.id}: {request.user_input}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to save search history: {e}")
+            # Don't fail the request if history saving fails
     
     # NEW: If we have results and a category, fetch filters from DB
     if result.get("status") == "results" and result.get("state", {}).get("category"):
@@ -187,7 +266,11 @@ async def process_query(request: QueryRequest):
     return result
 
 @app.post("/api/analyze")
-async def analyze_query(request: QueryRequest):
+async def analyze_query(
+    request: QueryRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
     try:
         # Validation
         if not request.user_input or request.user_input.strip() == "":
@@ -296,6 +379,18 @@ async def analyze_query(request: QueryRequest):
         session_manager.set_session(conversation_id, conversation_state)
         
         # ========================================================================
+        # STEP 4.5: Save search history to DB if user is authenticated
+        # ========================================================================
+        category_for_db = conversation_state.get("category")
+        search_history_id = await _save_search_history_if_user(
+            current_user=current_user,
+            db=db,
+            user_input=request.user_input,
+            category_name=category_for_db,
+            result_count=0,  # Will update after we know result count
+        )
+        
+        # ========================================================================
         # STEP 5: Build response
         # ========================================================================
         products = orch_result.get("products", [])
@@ -387,6 +482,15 @@ async def analyze_query(request: QueryRequest):
         logger.info(f"Filters: {len(filter_groups)}")
         logger.info(f"Search History: {conversation_state.get('search_history', [])}")
         logger.info(f"{'='*80}\n")
+        
+        # ========================================================================
+        # Update search history with result count if user is authenticated
+        # ========================================================================
+        if search_history_id and len(products) > 0:
+            try:
+                UserService.update_search_result_count(db, search_history_id, len(products))
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to update search result count: {e}")
         
         return {
             "success": True,

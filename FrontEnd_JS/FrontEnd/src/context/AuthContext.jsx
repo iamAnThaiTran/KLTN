@@ -81,6 +81,37 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
+    const googleLogin = async (googleToken) => {
+        try {
+            console.log('🔍 Starting Google login...');
+            const response = await fetch('http://localhost:8000/api/auth/google', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ idToken: googleToken })
+            });
+
+            console.log('📡 Response status:', response.status);
+            const data = await response.json();
+            console.log('📦 Response data:', data);
+
+            if (response.ok && data.access_token) {
+                console.log('✅ Login successful, setting state...');
+                setToken(data.access_token);
+                setUser(data.user);
+                StorageService.setToken(data.access_token);
+                StorageService.setUser(data.user);
+                console.log('✅ State updated, user:', data.user);
+                return { success: true, user: data.user };
+            } else {
+                console.error('❌ Login failed:', data);
+                return { success: false, message: data.detail || 'Google login failed' };
+            }
+        } catch (error) {
+            console.error('❌ Error:', error);
+            return { success: false, message: 'Connection error: ' + error.message };
+        }
+    };
+
     const logout = () => {
         setUser(null);
         setToken(null);
@@ -98,6 +129,7 @@ export const AuthProvider = ({ children }) => {
             isAuthenticated: !!user && !!token,
             login,
             register,
+            googleLogin,
             logout
         }}>
             {children}
