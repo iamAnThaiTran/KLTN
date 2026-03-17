@@ -194,6 +194,68 @@ class UserService:
         return db.query(UserPreferences).filter(UserPreferences.user_id == user_id).first()
 
     @staticmethod
+    def update_preferences_from_search(
+        db: Session,
+        user_id: int,
+        search_query: str,
+        category_name: Optional[str] = None,
+        extracted_brands: Optional[List[str]] = None
+    ) -> UserPreferences:
+        """
+        Update user preferences realtime after each search.
+        Called every time user performs a search.
+        
+        Args:
+            db: Database session
+            user_id: User ID
+            search_query: The search query (to extract brands/keywords)
+            category_name: Detected category from query
+            extracted_brands: Already extracted brands (optional)
+        
+        Returns:
+            Updated UserPreferences
+        """
+        from app.db.sku_repository import SKURepository
+        from app.models.user_models import Category
+        
+        # Get/create user preferences
+        prefs = db.query(UserPreferences).filter(UserPreferences.user_id == user_id).first()
+        if not prefs:
+            prefs = UserPreferences(user_id=user_id)
+            db.add(prefs)
+        
+        # 1. Update preferred categories
+        if category_name:
+            # Get category ID from name
+            sku_repo = SKURepository()
+            category_slug = sku_repo.get_category_slug_from_name(category_name)
+            if category_slug:
+                category_obj = db.query(Category).filter(Category.slug == category_slug).first()
+                if category_obj:
+                    if not prefs.preferred_categories:
+                        prefs.preferred_categories = []
+                    # Add if not already there, keep top 5
+                    if category_obj.id not in prefs.preferred_categories:
+                        prefs.preferred_categories = [category_obj.id] + prefs.preferred_categories
+                        prefs.preferred_categories = prefs.preferred_categories[:5]
+        
+        # 2. Update preferred brands
+        if extracted_brands:
+            if not prefs.preferred_brands:
+                prefs.preferred_brands = []
+            # Add brands and keep top 10
+            for brand in extracted_brands:
+                if brand.lower() not in [b.lower() for b in prefs.preferred_brands]:
+                    prefs.preferred_brands.append(brand)
+            prefs.preferred_brands = prefs.preferred_brands[:10]
+        
+        prefs.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(prefs)
+        
+        return prefs
+
+    @staticmethod
     def get_personalized_recommendations(
         db: Session,
         user_id: int,
@@ -221,3 +283,96 @@ class UserService:
                 "popular_keywords": keywords
             }
         }
+    
+    @staticmethod
+    def get_recommended_products_for_homepage(
+        db: Session,
+        user_id: int,
+        limit: int = 20,
+        days: int = 90
+    ) -> List[Dict[str, Any]]:
+        """
+        Get recommended products for homepage based on user's search history.
+        
+        Strategy:
+        1. Get user's top searched categories
+        2. Get user's preferred brands from search queries
+        3. Get price range from search history
+        4. Query products matching these criteria
+        5. Sort by relevance (recency + popularity)
+        
+        Args:
+            db: Database session
+            user_id: User ID
+            limit: Number of products to return
+            days: Look back period for search history
+        
+        Returns:
+            List of recommended products with SKUs
+        """
+        from app.db.sku_repository import SKURepository
+        from sqlalchemy import and_
+        
+        sku_repo = SKURepository()
+        
+        # 1. Get user's top categories
+        top_categories = UserService.get_user_interested_categories(
+            db, user_id, limit=3, days=days
+        )
+        
+        if not top_categories:
+            return []  # No search history yet
+        
+        # Get first category for initial recommendation
+        primary_category = top_categories[0]["category"]
+        
+        # 2. Extract brands from search history
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        search_queries = db.query(SearchHistory.query).filter(
+            SearchHistory.user_id == user_id,
+            SearchHistory.searched_at >= cutoff_date
+        ).all()
+        
+        # Simple brand extraction from queries
+        brand_keywords = set()
+        popular_brands = ["Nike", "Adidas", "Apple", "Samsung", "Sony", "Puma", 
+                         "Reebok", "Vans", "Converse", "Timberland", "Canon", "LG"]
+        
+        for (query,) in search_queries:
+            query_lower = query.lower()
+            for brand in popular_brands:
+                if brand.lower() in query_lower:
+                    brand_keywords.add(brand)
+        
+        # 3. Get price range from user preferences or search history
+        user_prefs = UserService.get_user_preferences(db, user_id)
+        min_price = user_prefs.price_range_min if user_prefs and user_prefs.price_range_min else 0
+        max_price = user_prefs.price_range_max if user_prefs and user_prefs.price_range_max else 100000000
+        
+        # 4. Search products matching criteria
+        try:
+            # Build filters for SKU repository
+            filters = {}
+            
+            # Add brand filter if brands were detected
+            if brand_keywords:
+                filters['brand'] = list(brand_keywords)
+            
+            # Search with filters
+            category_slug = sku_repo.get_category_slug_from_name(primary_category)
+            if not category_slug:
+                return []
+            
+            products, total = sku_repo.search_products(
+                category_slug=category_slug,
+                filters=filters,
+                min_price=float(min_price),
+                max_price=float(max_price),
+                page=1,
+                page_size=limit
+            )
+            
+            return products
+        except Exception as e:
+            print(f"[get_recommended_products_for_homepage] Error: {e}")
+            return []

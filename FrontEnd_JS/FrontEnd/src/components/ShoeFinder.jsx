@@ -223,7 +223,7 @@ const UserQuickActions = ({ onAction }) => (
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 const ShoeFinder = () => {
   const [searchParams] = useSearchParams();
-  const { user, showLoginModal, setShowLoginModal } = useAuth();
+  const { user, showLoginModal, setShowLoginModal, token } = useAuth();
 
   const [view, setView] = useState('landing');
 
@@ -310,6 +310,11 @@ const ShoeFinder = () => {
       const res = await axios.post(`${API_BASE_URL}/api/analyze`, {
         user_input: userInput,
         conversation_id: conversationState.conversationId,
+      }, {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : undefined,
+          'Content-Type': 'application/json'
+        }
       });
       const d = res.data;
       if (!d.success) { addBot(`❌ ${d.error}`); return; }

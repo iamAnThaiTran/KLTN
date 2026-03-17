@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Search, ChevronDown, Loader2 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import './SuggestionsPopup.css';
 
 /**
@@ -32,6 +33,7 @@ export default function SuggestionsPopup({
   filters: prefetchedFilters = [], // Pre-fetched filters from parent
   hints: prefetchedHints = [] // Pre-fetched hints from parent
 }) {
+  const { token } = useAuth();
   const [filters, setFilters] = useState([]);
   const [hints, setHints] = useState([]);
   const [selectedFilters, setSelectedFilters] = useState({});
@@ -70,7 +72,10 @@ export default function SuggestionsPopup({
     try {
       const response = await fetch(`${API_BASE_URL}/api/analyze`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({
           user_input: category,
           conversation_id: conversationId

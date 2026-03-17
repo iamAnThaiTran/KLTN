@@ -10,6 +10,22 @@ from sqlalchemy.orm import relationship
 from app.config.database_orm import Base
 
 
+class Category(Base):
+    """Product category (ORM model for database categories table)"""
+    __tablename__ = "categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique=True, nullable=False)
+    slug = Column(String(100), unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    icon = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<Category(id={self.id}, name={self.name}, slug={self.slug})>"
+
+
 class User(Base):
     """User model for authentication and personalization"""
     __tablename__ = "users"

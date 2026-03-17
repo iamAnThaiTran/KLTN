@@ -156,7 +156,9 @@ CREATE TABLE search_history (
     user_id INT REFERENCES users(id) ON DELETE CASCADE,
     query VARCHAR(500) NOT NULL,
     category_id INT REFERENCES categories(id) ON DELETE SET NULL,
+    category_name VARCHAR(255),
     result_count INT DEFAULT 0,
+    clicked_product_id INT,
     searched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     session_id VARCHAR(100)
 );

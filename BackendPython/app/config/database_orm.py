@@ -33,7 +33,7 @@ Base = declarative_base()
 
 # Import all models after Base is defined
 # This ensures SQLAlchemy knows about all models for create_all()
-from app.models.user_models import User, SearchHistory, UserPreferences  # noqa: F401, E402
+from app.models.user_models import Category, User, SearchHistory, UserPreferences  # noqa: F401, E402
 
 
 def get_db():

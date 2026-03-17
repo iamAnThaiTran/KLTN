@@ -217,6 +217,23 @@ async def process_query(
                 result_count = len(result.get("results", []))
                 UserService.update_search_result_count(db, search_record.id, result_count)
             
+            # 🔥 UPDATE USER PREFERENCES REALTIME after search
+            # Extract brands from user input if possible
+            extracted_brands = []
+            user_input_lower = request.user_input.lower()
+            popular_brands = ["nike", "adidas", "puma", "apple", "samsung", "sony"]
+            for brand in popular_brands:
+                if brand in user_input_lower:
+                    extracted_brands.append(brand.capitalize())
+            
+            UserService.update_preferences_from_search(
+                db=db,
+                user_id=current_user.id,
+                search_query=request.user_input,
+                category_name=category_name,
+                extracted_brands=extracted_brands if extracted_brands else None
+            )
+            
             logger.info(f"✅ Saved search history for user {current_user.id}: {request.user_input}")
         except Exception as e:
             logger.warning(f"⚠️ Failed to save search history: {e}")
@@ -382,6 +399,7 @@ async def analyze_query(
         # STEP 4.5: Save search history to DB if user is authenticated
         # ========================================================================
         category_for_db = conversation_state.get("category")
+        logger.info(f"[/api/analyze] 💾 Saving search history: user={current_user.id if current_user else None}, category='{category_for_db}', query='{request.user_input}'")
         search_history_id = await _save_search_history_if_user(
             current_user=current_user,
             db=db,
@@ -389,6 +407,7 @@ async def analyze_query(
             category_name=category_for_db,
             result_count=0,  # Will update after we know result count
         )
+        logger.info(f"[/api/analyze] ✅ Search history saved: id={search_history_id}")
         
         # ========================================================================
         # STEP 5: Build response
@@ -569,6 +588,101 @@ async def clear_session(conversation_id: str):
     """Clear session"""
     session_manager.delete_session(conversation_id)
     return {"message": "Session cleared"}
+
+# ===== RECOMMENDATIONS ENDPOINTS =====
+
+@app.get("/api/recommendations/homepage")
+async def get_homepage_recommendations(
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
+    """
+    Get recommended products for homepage based on user's search history.
+    
+    Only available for authenticated users.
+    Returns trending products if no search history yet.
+    
+    Response:
+    {
+        "status": "success",
+        "user_id": 123,
+        "recommended_products": [...],
+        "recommendation_type": "based_on_search_history",
+        "categories": ["Giày Nike", ...],
+        "brands": ["Nike", "Adidas", ...]
+    }
+    """
+    if not current_user:
+        return {
+            "status": "unauthenticated",
+            "message": "Please login to get personalized recommendations"
+        }
+    
+    try:
+        # Get recommended products
+        recommendations = UserService.get_recommended_products_for_homepage(
+            db=db,
+            user_id=current_user.id,
+            limit=20,
+            days=90
+        )
+        
+        # Get user interests for metadata
+        interests = UserService.get_user_interested_categories(
+            db=db,
+            user_id=current_user.id,
+            limit=3
+        )
+        
+        user_prefs = UserService.get_user_preferences(db, current_user.id)
+        
+        return {
+            "status": "success",
+            "user_id": current_user.id,
+            "recommended_products": recommendations,
+            "recommendation_type": "based_on_search_history",
+            "top_categories": [cat["category"] for cat in interests],
+            "top_brands": user_prefs.preferred_brands if user_prefs else [],
+            "total_products": len(recommendations)
+        }
+    except Exception as e:
+        logger.error(f"[get_homepage_recommendations] Error: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "recommended_products": []
+        }
+
+@app.get("/api/recommendations/preferences")
+async def get_user_preferences_info(
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
+    """
+    Get user's preferences and interests derived from search history.
+    
+    Useful for showing "You usually search for..." on dashboard.
+    """
+    if not current_user:
+        return {"status": "unauthenticated"}
+    
+    try:
+        preferences_info = UserService.get_personalized_recommendations(
+            db=db,
+            user_id=current_user.id,
+            days=90
+        )
+        
+        return {
+            "status": "success",
+            **preferences_info
+        }
+    except Exception as e:
+        logger.error(f"[get_user_preferences_info] Error: {e}")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 @app.get("/health")
 async def health_check():

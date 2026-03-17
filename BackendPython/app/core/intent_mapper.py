@@ -23,6 +23,12 @@ class IntentMapper:
     def __init__(self):
         self.intent_patterns = {
             # Pattern: (regex, categories)
+            # ===== DIRECT CATEGORY MENTION (NEW) =====
+            r"\b(giày|shoe|shoes|sneaker|boot|sandal)\b": ["Giày"],
+            r"\b(đồng hồ|watch|watches|smartwatch)\b": ["Đồng hồ"],
+            r"\b(laptop|máy tính|computer|notebook)\b": ["Laptop"],
+            r"\b(tai nghe|headphone|earphone|speaker)\b": ["Tai nghe"],
+            
             # Gift intent (hardcoded)
             r"quà cho bạn gái|tặng bạn gái|mua cho bạn gái": [
                 "quần áo", "giày", "phụ kiện", "mỹ phẩm", "nước hoa", "túi xách", "dây chuyền"

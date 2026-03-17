@@ -209,7 +209,9 @@ export default function LandingPage() {
 
       <div className="landing-root">
         {/* ── Header ── */}
-        <SharedHeader />
+        <SharedHeader 
+        onQuerySelect={(query) => setInput(query)}
+      />
 
         {/* ── Body ── */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 24, maxWidth: 1100, margin: '0 auto', padding: '32px 24px' }}>
