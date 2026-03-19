@@ -154,14 +154,15 @@ class SKURepository:
             # ✅ NORMALIZE: Convert values to lowercase for case-insensitive search
             normalized_values = [str(v).lower() for v in values]
             
-            # ✅ NEW: Fallback logic for brand attribute
-            # If attribute is 'brand', also check products.brand (for data coverage)
+            # ✅ NEW: For brand attribute, search both sku_attributes AND products.brand
+            # Products may have brand in either place, so check both with OR (not conditional fallback)
             if attr_name.lower() == 'brand':
                 brand_param = f'brand_{attr_idx}'
                 params[brand_param] = normalized_values
+                params[param_key] = normalized_values
                 filter_conditions.append(f"""
                     (
-                        -- Try sku_attributes first
+                        -- Check sku_attributes for brand
                         EXISTS (
                             SELECT 1 FROM sku_attributes sa{attr_idx}
                             WHERE sa{attr_idx}.sku_id = s.id
@@ -169,14 +170,10 @@ class SKURepository:
                               AND LOWER(sa{attr_idx}.attribute_value) = ANY(%({param_key})s)
                         )
                         OR
-                        -- Fallback to products.brand if sku_attributes is empty
-                        (
-                            SELECT COUNT(*) FROM sku_attributes WHERE attribute_name = 'brand'
-                        ) = 0
-                        AND LOWER(p.brand) = ANY(%({brand_param})s)
+                        -- Also check products.brand (always, not just as fallback)
+                        LOWER(p.brand) = ANY(%({brand_param})s)
                     )
                 """)
-                params[param_key] = normalized_values
             else:
                 # Normal attribute search
                 filter_conditions.append(f"""

@@ -20,6 +20,8 @@ const CATEGORY_KEYWORDS = {
   'máy tính': 'Laptop',
   'tai nghe': 'Tai nghe',
   'headphone': 'Tai nghe',
+  'bao cao su': 'Bao cao su',  // Add this category
+  'máy cạo râu': 'Máy cạo râu',  // Add this category
 };
 
 const FILLER_WORDS = [
@@ -31,7 +33,7 @@ const FILLER_WORDS = [
   'trong', 'ngoài', 'trên', 'dưới', 'bên', 'cạnh', 'giữa', 'quanh'
 ];
 
-export function normalizeQuery(rawQuery) {
+export function normalizeQuery(rawQuery, isPart = false) {
   if (!rawQuery || typeof rawQuery !== 'string') {
     return '';
   }
@@ -39,12 +41,14 @@ export function normalizeQuery(rawQuery) {
   // Convert to lowercase for processing
   const lower = rawQuery.toLowerCase().trim();
 
-  // Step 1: Extract category
+  // Step 1: Extract category (only if NOT a continuation/part query)
   let detectedCategory = '';
-  for (const [keyword, categoryName] of Object.entries(CATEGORY_KEYWORDS)) {
-    if (lower.includes(keyword)) {
-      detectedCategory = categoryName;
-      break;
+  if (!isPart) {
+    for (const [keyword, categoryName] of Object.entries(CATEGORY_KEYWORDS)) {
+      if (lower.includes(keyword)) {
+        detectedCategory = categoryName;
+        break;
+      }
     }
   }
 
@@ -64,7 +68,7 @@ export function normalizeQuery(rawQuery) {
   // Step 4: Build final result
   let result = '';
   
-  if (detectedCategory) {
+  if (detectedCategory && !isPart) {
     result = detectedCategory;
     
     // Add remaining keywords as details
@@ -74,7 +78,7 @@ export function normalizeQuery(rawQuery) {
       result = `${result} ${details}`;
     }
   } else {
-    // No category detected, just capitalize
+    // No category detected or it's a part query, just capitalize
     result = normalized.charAt(0).toUpperCase() + normalized.slice(1);
   }
 
@@ -87,6 +91,26 @@ export function normalizeQuery(rawQuery) {
 }
 
 /**
+ * Check if a query is a "continuation" of the previous query
+ * (e.g., "màu đỏ" after "giày" is a continuation)
+ * 
+ * Returns: boolean
+ */
+export function isQueryContinuation(currentQuery, previousQuery) {
+  if (!previousQuery) return false;
+  
+  const current = currentQuery.toLowerCase().trim();
+  const previous = previousQuery.toLowerCase().trim();
+  
+  // If current query is very short and previous had a category, it's likely a continuation
+  const hasCategory = Object.keys(CATEGORY_KEYWORDS).some(k => previous.includes(k));
+  const isShort = current.length < 15;
+  const hasNoCategory = !Object.keys(CATEGORY_KEYWORDS).some(k => current.includes(k));
+  
+  return hasCategory && isShort && hasNoCategory;
+}
+
+/**
  * Get icon for category
  */
 export function getCategoryIcon(categoryName) {
@@ -94,7 +118,10 @@ export function getCategoryIcon(categoryName) {
     'Giày': '👟',
     'Đồng hồ': '⌚',
     'Laptop': '💻',
-    'Tai nghe': '🎧'
+    'Tai nghe': '🎧',
+    'Bao cao su': '🔞',
+    'Máy cạo râu': '🪮',
+    'dụng cụ': '🔧'
   };
   return icons[categoryName] || '🔍';
 }

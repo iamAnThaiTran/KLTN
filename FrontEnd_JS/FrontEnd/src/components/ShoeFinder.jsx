@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Send, Sparkles, CheckCircle2, AlertCircle, ShoppingBag, Mic, MicOff, Volume2, User, Lock, Eye, EyeOff, LogOut, Heart, Clock, Tag, Gift, ChevronDown, ChevronRight, X, Search, SlidersHorizontal, Brain, Flame, RotateCcw } from 'lucide-react';
 import axios from 'axios';
-import SuggestionsPopup from './SuggestionsPopup';
+// import SuggestionsPopup from './SuggestionsPopup';  // ← TEMPORARILY DISABLED: Using sidebar filters instead
 import { SharedHeader, LoginModal } from './SharedHeader';
 import { useAuth } from '../context/AuthContext';
 
@@ -243,11 +243,13 @@ const ShoeFinder = () => {
   const [productCount, setProductCount]       = useState(null);
   const [productsLoading, setProductsLoading] = useState(false);
   const [lastCategoryName, setLastCategoryName] = useState('');
+  const [extractedAttributes, setExtractedAttributes] = useState({});  // Attributes extracted from user input (e.g., {brand: ["Nike"]})
+  const [originalUserInput, setOriginalUserInput] = useState('');     // Track original search input
 
-  // ── Suggestions popup ──
-  const [clarifyingHints, setClarifyingHints]             = useState([]);
-  const [showSuggestionsPopup, setShowSuggestionsPopup]   = useState(false);
-  const [suggestionsPopupFilters, setSuggestionsPopupFilters] = useState([]);
+  // ── Suggestions popup ── (TEMPORARILY DISABLED)
+  // const [clarifyingHints, setClarifyingHints]             = useState([]);
+  // const [showSuggestionsPopup, setShowSuggestionsPopup]   = useState(false);
+  // const [suggestionsPopupFilters, setSuggestionsPopupFilters] = useState([]);
 
   const messagesEndRef = useRef(null);
   const recognitionRef = useRef(null);
@@ -292,12 +294,29 @@ const ShoeFinder = () => {
     if (filters?.length) setActiveFilters(filters);
   };
 
+  // Helper: Merge extracted (from search) + selected (from user filters) attributes
+  // extracted: {brand: ["Nike"], color: ["Đen"]}
+  // selected: {size: ["40"]}
+  // result: {brand: ["Nike"], color: ["Đen"], size: ["40"]}
+  const mergeFilters = (extracted = {}, selected = {}) => {
+    const merged = { ...extracted };
+    Object.entries(selected).forEach(([attr, values]) => {
+      if (merged[attr]) {
+        console.warn(`[Filter] Overriding extracted ${attr} with user-selected values`);
+      }
+      merged[attr] = values;
+    });
+    return merged;
+  };
+
   const startSearch = (query) => {
     setView('chat');
     setMessages([]);
     setProducts(null);
     setActiveFilters([]);
     setSelectedFilters({});
+    setExtractedAttributes({});  // Reset extracted attributes for new search
+    setOriginalUserInput(query);
     setProductCount(null);
     setTimeout(() => { addUser(query); analyzeAndSearch(query); }, 50);
   };
@@ -322,16 +341,36 @@ const ShoeFinder = () => {
       setConversationState(p => ({ ...p, conversationId: d.conversation_id }));
       setLastCategoryName(d.category);
       setSelectedFilters({});
-      setClarifyingHints(d.clarifying_hints || []);
-      setSuggestionsPopupFilters(d.filters || []);
+      
+      // Capture extracted attributes from backend (e.g., {brand: "Nike"} from input)
+      // Convert to array format: {brand: ["Nike"]}
+      if (d.selected_attributes && Object.keys(d.selected_attributes).length > 0) {
+        const extracted = {};
+        Object.entries(d.selected_attributes).forEach(([attr, value]) => {
+          if (value === null || value === undefined) return;
+          extracted[attr] = Array.isArray(value) ? value.map(v => String(v)) : [String(value)];
+        });
+        setExtractedAttributes(extracted);
+        console.log('[Filter] Extracted attributes from search:', extracted);
+      } else {
+        setExtractedAttributes({});
+      }
+      
+      // setClarifyingHints(d.clarifying_hints || []);
+      // setSuggestionsPopupFilters(d.filters || []);
 
-      if (d.products?.length) {
+      // Handle question/clarification from backend
+      if (d.status === 'need_info' && d.question) {
+        addBot(d.question, d.options ? d.options.map(o => o.label || o.value || o) : null);
+        setProducts(null);
+        // Don't show popup for clarification questions
+      } else if (d.products?.length) {
         applyProductResults(d.products, d.filters, d.total);
+        // setShowSuggestionsPopup(true);  // ← Disabled: using sidebar instead
       } else {
         setProducts([]);
         addBot(`ℹ️ Hiện tại chưa có sản phẩm "${d.category}" trong kho.\n\nVui lòng thử mô tả khác.`);
       }
-      setShowSuggestionsPopup(true);
     } catch (err) {
       const msg = err.response?.data?.detail || err.message || 'Có lỗi xảy ra';
       addBot(`❌ Lỗi: ${msg}`);
@@ -351,7 +390,7 @@ const ShoeFinder = () => {
       });
       const d = res.data;
       if (d.conversation_id) setConversationState(p => ({ ...p, conversationId: d.conversation_id }));
-      if (d.clarifying_hints) setClarifyingHints(d.clarifying_hints);
+      // if (d.clarifying_hints) setClarifyingHints(d.clarifying_hints);  // Disabled: popup disabled
       if (d.status === 'results' && d.products?.length) {
         applyProductResults(d.products, d.filters, d.total_found);
       } else if (d.question) {
@@ -362,24 +401,30 @@ const ShoeFinder = () => {
     } finally { setIsThinking(false); }
   };
 
-  const searchProductsWithFilters = async (categoryName, filters = {}) => {
+  const searchProductsWithFilters = async (categoryName, filters = {}, extracted = {}) => {
     setProductsLoading(true);
     setProducts(null);
     try {
       // Convert "attr:val" keys → { attr: [val] }
-      let fo = filters;
+      let selectedFilters = filters;
       if (Object.keys(filters).some(k => k.includes(':'))) {
-        fo = {};
+        selectedFilters = {};
         Object.keys(filters).forEach(k => {
           const [a, v] = k.split(':');
-          if (!fo[a]) fo[a] = [];
-          fo[a].push(v);
+          if (!selectedFilters[a]) selectedFilters[a] = [];
+          selectedFilters[a].push(v);
         });
       }
+      
+      // MERGE: extracted attributes (from user input) + user-selected filters
+      const finalFilters = mergeFilters(extracted, selectedFilters);
+      
+      console.log('[Filter] Final merged filters:', finalFilters);
+      
       const res = await fetch(`${API_BASE_URL}/api/v1/crawl-products`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category_name: categoryName, selected_filters: fo, page: 1, page_size: 20 }),
+        body: JSON.stringify({ category_name: categoryName, selected_filters: finalFilters, page: 1, page_size: 20 }),
       });
       if (!res.ok) { const e = await res.json(); throw new Error(e.detail || `HTTP ${res.status}`); }
       const data = await res.json();
@@ -407,12 +452,14 @@ const ShoeFinder = () => {
     setSelectedFilters(p => { const n = { ...p }; if (n[key]) delete n[key]; else n[key] = true; return n; });
 
   const handleFilterApply = () => {
-    if (lastCategoryName) searchProductsWithFilters(lastCategoryName, selectedFilters);
+    if (lastCategoryName) searchProductsWithFilters(lastCategoryName, selectedFilters, extractedAttributes);
   };
 
   const handleFilterReset = () => {
     setSelectedFilters({});
-    if (lastCategoryName) searchProductsWithFilters(lastCategoryName, {});
+    // Keep extractedAttributes when resetting user-selected filters
+    // This preserves the original search context (e.g., brand Nike)
+    if (lastCategoryName) searchProductsWithFilters(lastCategoryName, {}, extractedAttributes);
   };
 
   // Show sidebar when we have filter definitions
@@ -654,6 +701,7 @@ const ShoeFinder = () => {
           )}
         </div>
 
+        {/* TEMPORARILY DISABLED: Using sidebar filters instead of popup
         <SuggestionsPopup
           isOpen={showSuggestionsPopup}
           onClose={() => setShowSuggestionsPopup(false)}
@@ -663,6 +711,7 @@ const ShoeFinder = () => {
           onConfirm={f => { setShowSuggestionsPopup(false); searchProductsWithFilters(lastCategoryName, f); }}
           conversationId={conversationState.conversationId}
         />
+        */}
       </>
 
       <LoginModal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} />

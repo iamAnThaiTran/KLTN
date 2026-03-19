@@ -1049,11 +1049,19 @@ Format:
         
         products = [self._normalize_product(p) for p in products]
         
-        matched_products = self.product_matcher.match_products(
-            products,
-            conversation_state["category"],
-            conversation_state["extracted"]
-        )
+        # 🎯 CRITICAL FIX: Skip matcher for DB products - they're already validated by category_id
+        # Only match crawled products (they need validation)
+        if source == "db":
+            # DB products are pre-filtered by category_id → no need to re-validate
+            matched_products = products
+            logger.info(f"[_process_crawl_results] ✅ Using {len(products)} DB products (no re-validation needed)")
+        else:
+            # Crawled products need to be matched/validated
+            matched_products = self.product_matcher.match_products(
+                products,
+                conversation_state["category"],
+                conversation_state["extracted"]
+            )
         
         if not matched_products:
             return {
