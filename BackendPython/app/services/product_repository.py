@@ -186,18 +186,11 @@ class ProductRepository:
                 return existing[0]
             
             # Save new product
-            try:
-                from slugify import slugify
-            except ImportError:
-                def slugify(text):
-                    return text.lower().replace(" ", "-")
-            
-            slug = slugify(title)
-            
+            # Note: attributes are saved in sku_attributes table (SKU-based model)
             cursor.execute("""
                 INSERT INTO products 
-                (category_id, title, brand, description, product_url, thumbnail, source, attributes, slug)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (category_id, title, brand, description, product_url, thumbnail, source)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, [
                 category_id,
@@ -206,9 +199,7 @@ class ProductRepository:
                 description or "",
                 product_url or "",
                 thumbnail or "",
-                source or "",
-                json.dumps(attributes or {}),
-                slug
+                source or ""
             ])
             
             product_id = cursor.fetchone()[0]

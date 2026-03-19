@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Send, Sparkles, CheckCircle2, AlertCircle, ShoppingBag, Mic, MicOff, Volume2, User, Lock, Eye, EyeOff, LogOut, Heart, Clock, Tag, Gift, ChevronDown, ChevronRight, X, Search, SlidersHorizontal, Brain, Flame, RotateCcw } from 'lucide-react';
 import axios from 'axios';
 // import SuggestionsPopup from './SuggestionsPopup';  // ← TEMPORARILY DISABLED: Using sidebar filters instead
@@ -223,28 +223,62 @@ const UserQuickActions = ({ onAction }) => (
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 const ShoeFinder = () => {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { user, showLoginModal, setShowLoginModal, token } = useAuth();
 
-  const [view, setView] = useState('landing');
+  // ── Helper: Save to sessionStorage ──
+  const saveSearchState = (state) => {
+    try {
+      sessionStorage.setItem('shoeFinderSearchState', JSON.stringify(state));
+    } catch (e) {
+      console.warn('[SessionStorage] Failed to save search state:', e);
+    }
+  };
+
+  const restoreSearchState = () => {
+    try {
+      const saved = sessionStorage.getItem('shoeFinderSearchState');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      console.warn('[SessionStorage] Failed to restore search state:', e);
+      return null;
+    }
+  };
+
+  const clearSearchState = () => {
+    try {
+      sessionStorage.removeItem('shoeFinderSearchState');
+    } catch (e) {
+      console.warn('[SessionStorage] Failed to clear search state:', e);
+    }
+  };
+
+  // ── Restore state from sessionStorage if available ──
+  const currentQuery = searchParams.get('q');
+  const savedState = restoreSearchState();
+  
+  // Only restore if URL query matches saved state (prevents mix-up when searching different terms)
+  const shouldRestore = savedState && currentQuery === savedState.originalUserInput;
+  const lastAutoStartedQueryRef = useRef(null);  // Track which query we've auto-started for
 
   // ── Chat messages (bot/user bubbles only — NO filters/results in messages) ──
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState(shouldRestore ? savedState.messages : []);
   const [currentInput, setCurrentInput] = useState('');
-  const [conversationState, setConversationState] = useState({ conversationId: null, isLoading: false });
+  const [conversationState, setConversationState] = useState(shouldRestore ? savedState.conversationState : { conversationId: null, isLoading: false });
   const [isThinking, setIsThinking] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [isBrowserSupported, setIsBrowserSupported] = useState(true);
 
   // ── Filter & product state (lifted out of messages) ──
-  const [activeFilters, setActiveFilters]     = useState([]);   // filter definitions from API
-  const [selectedFilters, setSelectedFilters] = useState({});   // { "attr:val": true }
-  const [products, setProducts]               = useState(null); // null = not searched yet
-  const [productCount, setProductCount]       = useState(null);
+  const [activeFilters, setActiveFilters]     = useState(shouldRestore ? savedState.activeFilters : []);
+  const [selectedFilters, setSelectedFilters] = useState(shouldRestore ? savedState.selectedFilters : {});
+  const [products, setProducts]               = useState(shouldRestore ? savedState.products : null);
+  const [productCount, setProductCount]       = useState(shouldRestore ? savedState.productCount : null);
   const [productsLoading, setProductsLoading] = useState(false);
-  const [lastCategoryName, setLastCategoryName] = useState('');
-  const [extractedAttributes, setExtractedAttributes] = useState({});  // Attributes extracted from user input (e.g., {brand: ["Nike"]})
-  const [originalUserInput, setOriginalUserInput] = useState('');     // Track original search input
+  const [lastCategoryName, setLastCategoryName] = useState(shouldRestore ? savedState.lastCategoryName : '');
+  const [extractedAttributes, setExtractedAttributes] = useState(shouldRestore ? savedState.extractedAttributes : {});
+  const [originalUserInput, setOriginalUserInput] = useState(shouldRestore ? savedState.originalUserInput : '');
 
   // ── Suggestions popup ── (TEMPORARILY DISABLED)
   // const [clarifyingHints, setClarifyingHints]             = useState([]);
@@ -253,6 +287,28 @@ const ShoeFinder = () => {
 
   const messagesEndRef = useRef(null);
   const recognitionRef = useRef(null);
+
+  // ── Auto-save state to sessionStorage whenever search-related state changes ──
+  useEffect(() => {
+    const stateToSave = {
+      messages,
+      conversationState,
+      activeFilters,
+      selectedFilters,
+      products,
+      productCount,
+      lastCategoryName,
+      extractedAttributes,
+      originalUserInput,
+    };
+    saveSearchState(stateToSave);
+  }, [messages, conversationState, activeFilters, selectedFilters, products, productCount, lastCategoryName, extractedAttributes, originalUserInput]);
+
+  // ── Clear session state when navigating home ──
+  const handleLogoClick = () => {
+    clearSearchState();
+    navigate('/');
+  };
 
   // Speech recognition setup
   useEffect(() => {
@@ -277,12 +333,6 @@ const ShoeFinder = () => {
   }, []);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, products]);
-
-  // Auto-start from URL query param
-  useEffect(() => {
-    const query = searchParams.get('q');
-    if (query) startSearch(query);
-  }, [searchParams]);
 
   // ── Helpers ──
   const addBot  = (text, quickReplies = null) => setMessages(p => [...p, { type:'bot',  text, quickReplies, timestamp: new Date() }]);
@@ -309,20 +359,8 @@ const ShoeFinder = () => {
     return merged;
   };
 
-  const startSearch = (query) => {
-    setView('chat');
-    setMessages([]);
-    setProducts(null);
-    setActiveFilters([]);
-    setSelectedFilters({});
-    setExtractedAttributes({});  // Reset extracted attributes for new search
-    setOriginalUserInput(query);
-    setProductCount(null);
-    setTimeout(() => { addUser(query); analyzeAndSearch(query); }, 50);
-  };
-
-  // ── API calls ──
-  const analyzeAndSearch = async (userInput) => {
+  // ── Memoized API calls and handlers ──
+  const analyzeAndSearch = useCallback(async (userInput) => {
     setIsThinking(true);
     setProductsLoading(true);
     try {
@@ -336,7 +374,10 @@ const ShoeFinder = () => {
         }
       });
       const d = res.data;
-      if (!d.success) { addBot(`❌ ${d.error}`); return; }
+      if (!d.success) { 
+        setMessages(p => [...p, { type:'bot', text:`❌ ${d.error}`, quickReplies: null, timestamp: new Date() }]); 
+        return; 
+      }
 
       setConversationState(p => ({ ...p, conversationId: d.conversation_id }));
       setLastCategoryName(d.category);
@@ -356,30 +397,38 @@ const ShoeFinder = () => {
         setExtractedAttributes({});
       }
       
-      // setClarifyingHints(d.clarifying_hints || []);
-      // setSuggestionsPopupFilters(d.filters || []);
-
       // Handle question/clarification from backend
       if (d.status === 'need_info' && d.question) {
-        addBot(d.question, d.options ? d.options.map(o => o.label || o.value || o) : null);
+        setMessages(p => [...p, { type:'bot', text: d.question, quickReplies: d.options ? d.options.map(o => o.label || o.value || o) : null, timestamp: new Date() }]);
         setProducts(null);
-        // Don't show popup for clarification questions
       } else if (d.products?.length) {
         applyProductResults(d.products, d.filters, d.total);
-        // setShowSuggestionsPopup(true);  // ← Disabled: using sidebar instead
       } else {
         setProducts([]);
-        addBot(`ℹ️ Hiện tại chưa có sản phẩm "${d.category}" trong kho.\n\nVui lòng thử mô tả khác.`);
+        setMessages(p => [...p, { type:'bot', text:`ℹ️ Hiện tại chưa có sản phẩm "${d.category}" trong kho.\n\nVui lòng thử mô tả khác.`, quickReplies: null, timestamp: new Date() }]);
       }
     } catch (err) {
       const msg = err.response?.data?.detail || err.message || 'Có lỗi xảy ra';
-      addBot(`❌ Lỗi: ${msg}`);
-      addBot('Vui lòng chắc chắn backend Python đang chạy trên http://localhost:8000');
+      setMessages(p => [...p, { type:'bot', text:`❌ Lỗi: ${msg}`, quickReplies: null, timestamp: new Date() }, { type:'bot', text:'Vui lòng chắc chắn backend Python đang chạy trên http://localhost:8000', quickReplies: null, timestamp: new Date() }]);
     } finally {
       setIsThinking(false);
       setProductsLoading(false);
     }
-  };
+  }, [conversationState.conversationId, token]);
+
+  const startSearch = useCallback((query) => {
+    setMessages([]);
+    setProducts(null);
+    setActiveFilters([]);
+    setSelectedFilters({});
+    setExtractedAttributes({});
+    setOriginalUserInput(query);
+    setProductCount(null);
+    setTimeout(() => { 
+      setMessages(p => [...p, { type:'user', text: query, timestamp: new Date() }]);
+      analyzeAndSearch(query); 
+    }, 50);
+  }, [analyzeAndSearch]);
 
   const sendToBackend = async (userInput) => {
     setIsThinking(true);
@@ -465,6 +514,18 @@ const ShoeFinder = () => {
   // Show sidebar when we have filter definitions
   const showSidebar = activeFilters.length > 0 && products !== null;
 
+  // Auto-start from URL query param (only if NOT restored from session)
+  // Use ref to track which query we've auto-started for, preventing duplicate API calls
+  useEffect(() => {
+    const shouldAutoStart = currentQuery && 
+                          currentQuery !== lastAutoStartedQueryRef.current && 
+                          !shouldRestore;  // Don't auto-start if restoring from cache
+    if (shouldAutoStart) {
+      lastAutoStartedQueryRef.current = currentQuery;
+      startSearch(currentQuery);
+    }
+  }, [currentQuery, shouldRestore, startSearch]);
+
   return (
     <div style={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <style>{`
@@ -475,7 +536,7 @@ const ShoeFinder = () => {
         .product-card:hover { border-color:#6366f1; transform:translateY(-3px); box-shadow:0 8px 24px rgba(99,102,241,0.16); }
       `}</style>
 
-      <SharedHeader onLogoClick={() => setView('landing')} />
+      <SharedHeader onLogoClick={handleLogoClick} />
 
       <>
         {/* ════ BODY: sidebar + main ════ */}
@@ -500,7 +561,7 @@ const ShoeFinder = () => {
             {/* Back link */}
             <div style={{ padding: '12px 20px 0', flexShrink: 0 }}>
               <button
-                onClick={() => setView('landing')}
+                onClick={handleLogoClick}
                 style={{ display:'flex', alignItems:'center', gap:5, color:'#6366f1', fontSize:13, fontWeight:600, background:'none', border:'none', cursor:'pointer', padding:0, fontFamily:'inherit' }}
               >
                 ← Về trang chủ

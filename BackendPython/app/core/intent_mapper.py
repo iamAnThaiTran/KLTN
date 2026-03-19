@@ -81,6 +81,7 @@ class IntentMapper:
                 "intent": str (usage intent, e.g., "gift for girlfriend"),
                 "intent_type": str (specific | abstract | comparison | none),
                 "categories": [cat1, cat2, ...],
+                "product_name": str (original user input - e.g., "sagami", "bột giặt"),
                 "confidence": float,
                 "method": "pattern" | "llm" | "none"
             }
@@ -102,6 +103,7 @@ class IntentMapper:
                     "intent": intent,
                     "intent_type": intent_type,
                     "categories": categories,
+                    "product_name": user_input,  # ← NEW: Track original user input
                     "confidence": 0.9,
                     "method": "pattern"
                 }
@@ -123,6 +125,7 @@ class IntentMapper:
             "intent": None,
             "intent_type": "none",
             "categories": [],
+            "product_name": user_input,  # ← NEW: Still track original input
             "confidence": 0.0,
             "method": "none"
         }
@@ -167,10 +170,10 @@ class IntentMapper:
         """
         Use LLM (OpenAI) để semantic understand intent + map categories
         
-        NEW: LLM can now suggest NEW categories if user input doesn't match available ones
-        
-        Example: "bột giặt" → LLM suggests creating new category "bột giặt" with attributes
-                 instead of forcing to "dụng cụ"
+        KEY: LLM can suggest ANY category (brand, product, or new categories)
+        - NOT constrained to available_categories list
+        - If "sagami" → suggest "bao cao su" (correct), NOT "dụng cụ"
+        - If "bột giặt" → suggest "bột giặt" (exact), NOT forcing to available list
         """
         # Get available category names
         categories_str = ", ".join(self.available_categories)
@@ -179,37 +182,39 @@ class IntentMapper:
 
 User input: "{user_input}"
 
-Available categories: {categories_str}
+Available categories (for reference, NOT a hard constraint): {categories_str}
 
 CLASSIFICATION RULES:
 ===================
 
 **CLEAR REQUEST (Specific):**
-- User mentions EXACTLY 1 product category (e.g., "giày", "áo", "nước hoa")
+- User mentions EXACTLY 1 product/brand/category (e.g., "giày", "áo", "nước hoa", "sagami", "bột giặt")
 - User input is SHORT and DIRECT (1-3 words)
 - Action: Return ONLY 1 category with HIGH confidence (0.9-0.95)
-- NOTE: If no available category matches, CREATE a NEW category specific to user needs!
+- NOTE: Return the EXACT product/brand name, even if NOT in available categories!
+  Example: "sagami" → category should be "bao cao su" (MORE SPECIFIC than "dụng cụ")
+  Example: "bột giặt" → category should be "bột giặt" (NOT force to "dụng cụ")
 
 **ABSTRACT REQUEST (Vague purpose):**
 - User describes a PURPOSE/FEELING/NEED but NOT specific product (e.g., "tôi cần thứ ấm áp", "để tặng bạn gái")
 - User input is LONG and DESCRIPTIVE (4+ words)
 - User uses words like: "để", "cần", "muốn", "gì đó", "thứ"
 - Action: Return MULTIPLE related categories (3-5) with MEDIUM confidence (0.6-0.7)
+- Can use available categories OR suggest specific new ones
 
 IMPORTANT RULES:
 ================
-1. If user input EXACTLY MATCHES an available category → Use it
-2. If user input is a SPECIFIC product NOT in available categories → CREATE NEW category!
-   Example: "bột giặt" → NOT in available, so create category "bột giặt" (NEW)
-   Example: "nước lau nhà" → NOT in available, so create category "nước lau nhà" (NEW)
-3. If user input contains VAGUE keywords → Map to multiple available categories
-4. OUTPUT ONLY valid JSON, nothing else
+1. User input is ALWAYS THE SOURCE OF TRUTH - suggest what matches their intent best
+2. If available categories match perfectly → use them
+3. If user mentions SPECIFIC product/brand NOT in available → SUGGEST THAT specific category!
+4. DO NOT force user input to fit available categories - that causes wrong mappings
+5. OUTPUT ONLY valid JSON, nothing else
 
 FORMAT:
 {{
   "intent": "short description",
-  "categories": ["cat1", "cat2"],  // Can be NEW categories!
-  "is_new_category": false,        // NEW field: True if category was created, not from available list
+  "product_name": "original user input or brand name (e.g., 'sagami', 'bột giặt')",  // ← NEW
+  "categories": ["cat1", "cat2"],  // Any categories - exact, brand, or new ones
   "clarity": "clear|abstract",
   "confidence": 0.9,
   "reasoning": "brief explanation"
@@ -218,58 +223,68 @@ FORMAT:
 EXAMPLES:
 =========
 User: "giày" 
-→ EXISTS in available categories
 → {{
     "intent": "purchase shoes",
+    "product_name": "giày",
     "categories": ["giày"],
-    "is_new_category": false,
     "clarity": "clear",
     "confidence": 0.95,
     "reasoning": "Exact match with available 'giày'"
   }}
 
-User: "bột giặt"
-→ NOT in available categories, CREATE NEW
+User: "sagami"
+→ Brand/product not in available list, BUT be SPECIFIC!
 → {{
-    "intent": "purchase laundry detergent",
-    "categories": ["bột giặt"],
-    "is_new_category": true,
+    "intent": "purchase condoms",
+    "product_name": "sagami",
+    "categories": ["bao cao su"],
     "clarity": "clear",
     "confidence": 0.95,
-    "reasoning": "User wants specific product 'bột giặt' (not in available), create new category"
+    "reasoning": "Sagami is a condom brand, suggest 'bao cao su' category (more specific than 'dụng cụ')"
+  }}
+
+User: "bột giặt"
+→ Product not in available list
+→ {{
+    "intent": "purchase laundry detergent",
+    "product_name": "bột giặt",
+    "categories": ["bột giặt"],
+    "clarity": "clear",
+    "confidence": 0.95,
+    "reasoning": "User wants 'bột giặt', suggest exact category (NOT forcing to available list)"
   }}
 
 User: "nước lau nhà"
-→ NOT in available, CREATE NEW
+→ Product not in available
 → {{
     "intent": "purchase floor cleaner",
+    "product_name": "nước lau nhà",
     "categories": ["nước lau nhà"],
-    "is_new_category": true,
     "clarity": "clear",
     "confidence": 0.90,
-    "reasoning": "Specific product 'nước lau nhà' not in system, create new"
+    "reasoning": "User wants 'nước lau nhà', suggest exact product category"
   }}
 
 User: "tôi muốn gì đó ấm áp"
-→ ABSTRACT, use available categories
+→ ABSTRACT, suggest related categories
 → {{
     "intent": "warmth/comfort",
+    "product_name": "thứ ấm áp",
     "categories": ["quần áo", "áo khoác", "nệm", "gối", "chăn"],
-    "is_new_category": false,
     "clarity": "abstract",
     "confidence": 0.65,
-    "reasoning": "Purpose-driven, map to existing categories"
+    "reasoning": "Purpose-driven, suggest relevant categories"
   }}
 
 User: "để tặng bạn gái"
-→ ABSTRACT, use available categories
+→ ABSTRACT, suggest gift-related categories
 → {{
     "intent": "gift for girlfriend",
+    "product_name": "quà tặng bạn gái",
     "categories": ["quần áo", "phụ kiện", "mỹ phẩm", "nước hoa"],
-    "is_new_category": false,
     "clarity": "abstract",
     "confidence": 0.65,
-    "reasoning": "Gift purpose, map to existing categories"
+    "reasoning": "Gift purpose, suggest appropriate categories"
   }}
 """
         
@@ -298,26 +313,24 @@ User: "để tặng bạn gái"
                     return {
                         "intent": None,
                         "categories": [],
+                        "product_name": user_input,
                         "confidence": 0.0,
-                        "method": "llm_failed",
-                        "is_new_category": False
+                        "method": "llm_failed"
                     }
             
-            # Check if LLM suggests a NEW category
-            is_new_category = result.get("is_new_category", False)
+            # ===== KEY CHANGE: ALWAYS use LLM categories (NO filtering!) =====
+            # This allows LLM to suggest "bao cao su" for "sagami" instead of being forced to "dụng cụ"
+            valid_categories = result.get("categories", [])
             
-            # Validate categories based on is_new_category flag
+            # If LLM suggest categories NOT in available list, flag them for system awareness
+            unknown_categories = [
+                cat for cat in valid_categories
+                if cat.lower() not in [c.lower() for c in self.available_categories]
+            ]
+            is_new_category = len(unknown_categories) > 0
+            
             if is_new_category:
-                # Allow new categories! Don't filter against available_categories
-                valid_categories = result.get("categories", [])
-                logger.info(f"[LLM RESPONSE] NEW CATEGORY detected: {valid_categories}")
-            else:
-                # Only use existing/available categories
-                valid_categories = [
-                    cat for cat in result.get("categories", [])
-                    if cat.lower() in [c.lower() for c in self.available_categories]
-                ]
-                logger.info(f"[LLM RESPONSE] Using available categories: {valid_categories}")
+                logger.info(f"[LLM] Suggested NEW categories not in available list: {unknown_categories}")
             
             # Get clarity from LLM response (clear or abstract)
             clarity = result.get("clarity", "abstract").lower()  # default to abstract if missing
@@ -328,15 +341,19 @@ User: "để tặng bạn gái"
             # Use confidence from LLM response
             confidence = result.get("confidence", 0.65)  # default to 0.65
             
-            logger.info(f"[LLM RESPONSE] clarity='{clarity}' → intent_type='{intent_type}', confidence={confidence}, is_new={is_new_category}")
+            # Get product_name from LLM (or fallback to user_input)
+            product_name = result.get("product_name", user_input)
+            
+            logger.info(f"[LLM] intent='{result.get('intent')}', product_name='{product_name}', categories={valid_categories}, clarity='{clarity}', confidence={confidence}, has_new_categories={is_new_category}")
             
             return {
                 "intent": result.get("intent", ""),
                 "intent_type": intent_type,
-                "categories": valid_categories,
+                "categories": valid_categories,  # ← ALWAYS use, no filtering
+                "product_name": product_name,  # ← NEW: Include product name
                 "confidence": confidence,
                 "method": "llm",
-                "is_new_category": is_new_category  # ← NEW: Pass through flag
+                "is_new_category": is_new_category  # ← Flag for system to handle
             }
             
         except Exception as e:
@@ -345,6 +362,7 @@ User: "để tặng bạn gái"
                 "intent": None,
                 "intent_type": "none",
                 "categories": [],
+                "product_name": user_input,
                 "confidence": 0.0,
                 "method": "llm_error"
             }

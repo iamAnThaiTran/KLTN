@@ -335,11 +335,20 @@ class RecommendationOrchestrator:
         
         logger.info(f"[CASE 1] Extracted attributes: {extract_result['extracted']}")
         
-        # NEW: Query DB first before crawling
+        # ⭐ FALLBACK: If attributes empty, use product_name from IntentMapper as search hint
+        attributes_for_search = extract_result["extracted"].copy()
+        if not attributes_for_search or len(attributes_for_search) == 0:
+            product_name = conversation_state.get("detected_intent", {}).get("product_name", "").strip()
+            if product_name and product_name.lower() != validated_category.lower():
+                # Use product_name as "loai" (type) for better search
+                attributes_for_search["loai"] = product_name
+                logger.info(f"[CASE 1] 💡 No attributes extracted → Using product_name as search hint: '{product_name}'")
+        
+        # Query DB first before crawling
         logger.info(f"[CASE 1] 🔍 Querying database for products...")
         db_products = self.product_repository.query_by_category_and_attributes(
             category_id=category_id,
-            attributes=extract_result["extracted"],
+            attributes=attributes_for_search,
             limit=50
         )
         
@@ -350,7 +359,7 @@ class RecommendationOrchestrator:
         
         # DB MISS: Products not in DB, crawl from external sources
         logger.info(f"[CASE 1] ❌ DB MISS! Crawling from external sources (Lazada/Tiki/Shopee)...")
-        crawled_products = await self.crawler.crawl(validated_category, extract_result["extracted"])
+        crawled_products = await self.crawler.crawl(validated_category, attributes_for_search)
         
         if not crawled_products:
             return {
@@ -364,7 +373,22 @@ class RecommendationOrchestrator:
         logger.info(f"[CASE 1] 💾 Saving {len(crawled_products)} crawled products to database...")
         self.product_repository.save_products_batch(category_id, crawled_products)
         
-        # Process and return results
+        # ⭐ FIX: Query lại từ DB thay vì return crawled_products directly
+        # Vì DB products đã normalized + category_id validated → matcher sẽ bypass
+        # Crawled products từ crawler có thể raw data + missing fields → matcher reject tất cả!
+        logger.info(f"[CASE 1] 🔄 Querying saved products from DB (to bypass matcher validation)...")
+        saved_products = self.product_repository.query_by_category_and_attributes(
+            category_id=category_id,
+            attributes=attributes_for_search,
+            limit=50
+        )
+        
+        if saved_products:
+            logger.info(f"[CASE 1] ✅ Retrieved {len(saved_products)} products from DB after save")
+            return await self._process_crawl_results(saved_products, conversation_state, case=1, source="db")
+        
+        # Fallback: If query fails, return crawled products (old behavior)
+        logger.info(f"[CASE 1] ⚠️  DB query failed, falling back to crawled products")
         return await self._process_crawl_results(crawled_products, conversation_state, case=1, source="crawl")
     
     def _ensure_state_structure(self, conversation_state: Dict[str, Any]):
@@ -513,6 +537,20 @@ class RecommendationOrchestrator:
             logger.info(f"[CASE 2] 💾 Saving crawled products to database...")
             self.product_repository.save_products_batch(category_id, crawled_products)
             
+            # ⭐ FIX: Query lại từ DB thay vì return crawled_products directly
+            logger.info(f"[CASE 2] 🔄 Querying saved products from DB (to bypass matcher validation)...")
+            saved_products = self.product_repository.query_by_category_and_attributes(
+                category_id=category_id,
+                attributes=conversation_state["extracted"],
+                limit=50
+            )
+            
+            if saved_products:
+                logger.info(f"[CASE 2] ✅ Retrieved {len(saved_products)} products from DB after save")
+                return await self._process_crawl_results(saved_products, conversation_state, case=2, source="db")
+            
+            # Fallback
+            logger.info(f"[CASE 2] ⚠️  DB query failed, falling back to crawled products")
             return await self._process_crawl_results(crawled_products, conversation_state, case=2, source="crawl")
         
         # Ask for next missing attribute
@@ -757,6 +795,21 @@ Be practical and culturally relevant for Vietnamese shopping."""
             
             # Save to DB
             self.product_repository.save_products_batch(category_id, crawled_products)
+            
+            # ⭐ FIX: Query lại từ DB thay vì return crawled_products directly
+            logger.info(f"[CASE 5] 🔄 Querying saved products from DB (to bypass matcher validation)...")
+            saved_products = self.product_repository.query_by_category_and_attributes(
+                category_id=category_id,
+                attributes=conversation_state["extracted"],
+                limit=50
+            )
+            
+            if saved_products:
+                logger.info(f"[CASE 5] ✅ Retrieved {len(saved_products)} products from DB after save")
+                return await self._process_crawl_results(saved_products, conversation_state, case=5, source="db")
+            
+            # Fallback
+            logger.info(f"[CASE 5] ⚠️  DB query failed, falling back to crawled products")
             return await self._process_crawl_results(crawled_products, conversation_state, case=5, source="crawl")
         
         else:
@@ -813,9 +866,19 @@ Be practical and culturally relevant for Vietnamese shopping."""
                     logger.info(f"[CASE 6] Adding {attr}: '{value}'")
         
         # Use smart crawl with caching
+        # Track cache state before crawl
+        initial_cache_hits = conversation_state.get("cache_hits", 0)
+        initial_cache_misses = conversation_state.get("cache_misses", 0)
+        
         products = await self._smart_crawl(category, conversation_state["extracted"], conversation_state)
         
-        return await self._process_crawl_results(products, conversation_state, case=6)
+        # Determine if products came from DB cache or crawl
+        db_hit = conversation_state.get("cache_hits", 0) > initial_cache_hits
+        source = "db" if db_hit else "crawl"
+        
+        logger.info(f"[CASE 6] Source: {source} (db_hit={db_hit}, cache_hits={conversation_state.get('cache_hits')})")
+        
+        return await self._process_crawl_results(products, conversation_state, case=6, source=source)
     
     async def handle_case_7_comparison_advisory(
         self,
@@ -1013,13 +1076,29 @@ Format:
         conversation_state["category_id"] = category_id if 'category_id' in locals() else None
         conversation_state["extracted"] = {}  # No attributes extracted yet
         
-        # ===== STEP 6: Process and return results =====
-        logger.info(f"[CASE 8] Processing crawled results...")
+        # ===== STEP 6: Query saved products from DB =====
+        # ⭐ FIX: Query lại từ DB thay vì return crawled_products directly
+        # Vì DB products đã validated by category_id → matcher sẽ bypass
+        logger.info(f"[CASE 8] 🔄 Querying saved products from DB (to bypass matcher validation)...")
+        
+        if 'category_id' in locals() and category_id:
+            saved_products = self.product_repository.query_by_category_and_attributes(
+                category_id=category_id,
+                attributes={},  # No attributes filter for new category
+                limit=50
+            )
+            
+            if saved_products:
+                logger.info(f"[CASE 8] ✅ Retrieved {len(saved_products)} products from DB")
+                return await self._process_crawl_results(saved_products, conversation_state, case=8, source="db")
+        
+        # Fallback: If DB query fails, return crawled products (old behavior)
+        logger.info(f"[CASE 8] ⚠️  DB query failed, falling back to crawled products")
         return await self._process_crawl_results(
             crawled_products, 
             conversation_state, 
             case=8, 
-            source="crawl_dynamic"
+            source="crawl"
         )
     
     async def _process_crawl_results(
@@ -1327,13 +1406,20 @@ Be concise. Attributes should be practical filtering criteria."""
         logger.info(f"  - Intent: {intent_result['intent']}")
         logger.info(f"  - Intent Type: {intent_result['intent_type']}")
         logger.info(f"  - Categories: {intent_result['categories']}")
+        logger.info(f"  - Product Name: {intent_result.get('product_name', 'N/A')}")
         logger.info(f"  - Confidence: {intent_result['confidence']:.2f}")
         logger.info(f"  - Method: {intent_result['method']}")
         
         # Store intent analysis in conversation_state (for classify_request_case to use)
-        # IMPORTANT: Always update if detected_intent is None (when category was reset)
-        if not conversation_state.get("detected_intent") or not conversation_state.get("has_category"):
-            if not conversation_state.get("detected_intent"):
+        # IMPORTANT: Always update if detected_intent is None (when category was reset) OR user input changed
+        last_input = conversation_state.get("last_user_input", "").strip().lower()
+        current_input = user_input.strip().lower()
+        input_changed = last_input != current_input and last_input != ""  # Only if both non-empty
+        
+        if not conversation_state.get("detected_intent") or not conversation_state.get("has_category") or input_changed:
+            if input_changed:
+                logger.info(f"[Orchestrator] 🔄 User input changed ('{last_input}' → '{current_input}') → Re-analyzing intent")
+            elif not conversation_state.get("detected_intent"):
                 logger.info(f"[Orchestrator] 🔄 Detected intent was None → Updating with new analysis")
             conversation_state["detected_intent"] = intent_result
             conversation_state["last_user_input"] = user_input  # Track for intent shift detection

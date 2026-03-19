@@ -181,9 +181,19 @@ class ContextAnalyzer:
         # 🎯 Case 2: Known color/size/price (simple refinement)
         category_type = self._classify_input(user_input)
         if category_type in ['color', 'size', 'price'] and current_category:
-            # Simple append
-            intent = f"{current_category} {user_input}".strip()
-            logger.info(f"[Rule] ✅ {category_type.upper()} refinement: '{intent}'")
+            # Build intent: category + previously extracted attributes + current input
+            # Example: "Giày" + {brand: "nike"} + "màu đỏ thôi" → "Giày nike màu đỏ thôi"
+            parts = [current_category]
+            
+            # 1. Add previously extracted brand (if exists)
+            if current_extracted.get('brand'):
+                parts.append(current_extracted['brand'])
+            
+            # 2. Add new attribute (color/size/price)
+            parts.append(user_input)
+            
+            intent = " ".join(parts).strip()
+            logger.info(f"[Rule] ✅ {category_type.upper()} refinement: Category='{current_category}' + Brand='{current_extracted.get('brand')}' + Input='{user_input}' → '{intent}'")
             return {
                 "intent": intent,
                 "category_changed": False,
@@ -474,16 +484,16 @@ GUIDELINES (prioritize certainty):
    - Don't force incompatible merges
 
 RESPONSE FORMAT: Return ONLY valid JSON, no other text:
-{
+{{
   "intent": "reconstructed user intent string",
   "category_changed": true or false,
   "new_category": "new category if changed, else null"
-}
+}}
 
 Examples:
-{"intent": "giày nike màu đen size 42", "category_changed": false, "new_category": null}
-{"intent": "samsung", "category_changed": true, "new_category": "samsung"}
-{"intent": "bột giặt", "category_changed": true, "new_category": "bột giặt"}
+{{"intent": "giày nike màu đen size 42", "category_changed": false, "new_category": null}}
+{{"intent": "samsung", "category_changed": true, "new_category": "samsung"}}
+{{"intent": "bột giặt", "category_changed": true, "new_category": "bột giặt"}}
 
 ✅ Default to safety: when uncertain → category_changed=true
 """

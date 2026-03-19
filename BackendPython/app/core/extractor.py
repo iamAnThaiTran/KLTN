@@ -24,6 +24,9 @@ class AttributeExtractor:
         
         Sử dụng dynamic extraction - works for ANY category!
         
+        Smart fallback: Nếu rule-based không tìm được attributes → auto LLM
+        (không phụ thuộc vào use_llm parameter)
+        
         Returns:
             {
                 "extracted": {attr: value},
@@ -32,15 +35,29 @@ class AttributeExtractor:
                 "method": "rule-based" | "llm"
             }
         """
-        # Try dynamic extraction first (works for any category)
+        # Step 1: Try dynamic extraction (rule-based first)
         result = self.dynamic_extractor.extract(
             user_input, 
             category,
-            use_llm=use_llm
+            use_llm=False  # ← Always start with rule-based
         )
         
-        # If very low confidence or missing required, try LLM
-        if (result["confidence"] < 0.5 or len(result["missing_required"]) > 0) and use_llm:
+        # Step 2: Smart fallback - Nếu rule-based không tìm được gì → gọi LLM
+        # Input quá short (e.g., "sagami") → rule-based fail → auto LLM
+        if not result["extracted"] or len(result["extracted"]) == 0:
+            # ✨ AUTO-FALLBACK: Rule-based found nothing, try LLM
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"[AttributeExtractor] Rule-based extraction returned empty for '{user_input}' → Trying LLM fallback...")
+            
+            result = self.dynamic_extractor.extract(
+                user_input, 
+                category,
+                use_llm=True  # ← Switch to LLM
+            )
+        
+        # Step 3: Additional check - if still very low confidence + existing use_llm flag
+        elif (result["confidence"] < 0.5 or len(result["missing_required"]) > 0) and use_llm:
             result = self.dynamic_extractor.extract(
                 user_input, 
                 category,

@@ -60,6 +60,7 @@ class SearchProgressService:
             category_name = intent_result["categories"][0]
             session.detected_category = category_name
             session.category_slug = self._category_to_slug(category_name)
+            session.product_name = intent_result.get("product_name")  # ← NEW: Store brand/product name
             session.intent_confidence = intent_result["confidence"]
             session.intent_method = intent_result.get("method", "unknown")
         

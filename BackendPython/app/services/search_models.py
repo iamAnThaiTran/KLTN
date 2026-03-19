@@ -36,6 +36,7 @@ class SearchSession:
         # Detected intent
         self.detected_category = None
         self.category_slug = None
+        self.product_name = None  # ← NEW: Brand or product name from intent mapping (e.g., "sagami", "bột giặt")
         self.intent_confidence = 0.0
         self.intent_method = None  # "pattern" or "llm"
         
@@ -65,6 +66,7 @@ class SearchSession:
             "original_query": self.original_query,
             "detected_category": self.detected_category,
             "category_slug": self.category_slug,
+            "product_name": self.product_name,  # ← NEW
             "intent_confidence": self.intent_confidence,
             "intent_method": self.intent_method,
             "suggested_filters": {
@@ -97,6 +99,7 @@ class SearchSession:
         session.original_query = data["original_query"]
         session.detected_category = data["detected_category"]
         session.category_slug = data["category_slug"]
+        session.product_name = data.get("product_name")  # ← NEW
         session.intent_confidence = data["intent_confidence"]
         session.intent_method = data["intent_method"]
         session.suggested_filters = data.get("suggested_filters", {})
