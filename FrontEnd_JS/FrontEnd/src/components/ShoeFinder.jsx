@@ -5,6 +5,8 @@ import axios from 'axios';
 // import SuggestionsPopup from './SuggestionsPopup';  // ← TEMPORARILY DISABLED: Using sidebar filters instead
 import { SharedHeader, LoginModal } from './SharedHeader';
 import { useAuth } from '../context/AuthContext';
+import FavoritesList from './FavoritesList';
+import { addToFavorites, removeFromFavorites } from '../utils/favoritesApi';
 
 const API_BASE_URL = 'http://localhost:8000';
 
@@ -203,15 +205,15 @@ const FilterSidebar = ({ filters, selectedFilters, onToggle, onApply, onReset, r
 };
 
 // ─── USER QUICK ACTIONS ───────────────────────────────────────────────────────
-const UserQuickActions = ({ onAction }) => (
+const UserQuickActions = ({ onAction, onFavoritesClick }) => (
   <div style={{ display: 'flex', gap: 8, paddingBottom: 10, flexWrap: 'wrap' }}>
     {[
-      { icon: <Heart size={14} />, label: 'Sản phẩm yêu thích', color: '#e11d48', bg: '#fff1f2', border: '#fecdd3' },
-      { icon: <Clock size={14} />, label: 'Tìm kiếm gần đây',   color: '#6366f1', bg: '#eef2ff', border: '#c7d2fe' },
-      { icon: <Tag  size={14} />, label: 'Ưu đãi hôm nay',      color: '#d97706', bg: '#fffbeb', border: '#fde68a' },
-      { icon: <Gift size={14} />, label: 'Gợi ý cho bạn',       color: '#059669', bg: '#ecfdf5', border: '#a7f3d0' },
+      { icon: <Heart size={14} />, label: 'Sản phẩm yêu thích', color: '#e11d48', bg: '#fff1f2', border: '#fecdd3', onClick: onFavoritesClick },
+      { icon: <Clock size={14} />, label: 'Tìm kiếm gần đây',   color: '#6366f1', bg: '#eef2ff', border: '#c7d2fe', onClick: () => onAction('Tìm kiếm gần đây') },
+      { icon: <Tag  size={14} />, label: 'Ưu đãi hôm nay',      color: '#d97706', bg: '#fffbeb', border: '#fde68a', onClick: () => onAction('Ưu đãi hôm nay') },
+      { icon: <Gift size={14} />, label: 'Gợi ý cho bạn',       color: '#059669', bg: '#ecfdf5', border: '#a7f3d0', onClick: () => onAction('Gợi ý cho bạn') },
     ].map((a, i) => (
-      <button key={i} onClick={() => onAction(a.label)}
+      <button key={i} onClick={a.onClick}
         style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 14px', borderRadius:20, border:`1.5px solid ${a.border}`, background:a.bg, color:a.color, fontSize:13, fontWeight:600, cursor:'pointer', transition:'all 0.15s', fontFamily:'inherit' }}
         onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = `0 3px 10px ${a.border}`; }}
         onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none'; }}
@@ -276,6 +278,10 @@ const ShoeFinder = () => {
   const [products, setProducts]               = useState(shouldRestore ? savedState.products : null);
   const [productCount, setProductCount]       = useState(shouldRestore ? savedState.productCount : null);
   const [productsLoading, setProductsLoading] = useState(false);
+  
+  // ── Favorites state ──
+  const [showFavoritesList, setShowFavoritesList] = useState(false);
+  const [favoriteProductIds, setFavoriteProductIds] = useState(new Set());
   const [lastCategoryName, setLastCategoryName] = useState(shouldRestore ? savedState.lastCategoryName : '');
   const [extractedAttributes, setExtractedAttributes] = useState(shouldRestore ? savedState.extractedAttributes : {});
   const [originalUserInput, setOriginalUserInput] = useState(shouldRestore ? savedState.originalUserInput : '');
@@ -339,9 +345,19 @@ const ShoeFinder = () => {
   const addUser = (text)                      => setMessages(p => [...p, { type:'user', text, timestamp: new Date() }]);
 
   const applyProductResults = (prods, filters, total) => {
+    // Add products as a message in the chat stream so they become part of conversation history
+    setMessages(p => [...p, { 
+      type: 'products', 
+      products: prods ?? [], 
+      productCount: total ?? prods?.length ?? 0,
+      filters: filters,
+      timestamp: new Date() 
+    }]);
+    // Also update sidebar filter state
+    if (filters?.length) setActiveFilters(filters);
+    // Keep products in state for sidebar to reference
     setProducts(prods ?? []);
     setProductCount(total ?? prods?.length ?? 0);
-    if (filters?.length) setActiveFilters(filters);
   };
 
   // Helper: Merge extracted (from search) + selected (from user filters) attributes
@@ -404,8 +420,8 @@ const ShoeFinder = () => {
       } else if (d.products?.length) {
         applyProductResults(d.products, d.filters, d.total);
       } else {
-        setProducts([]);
         setMessages(p => [...p, { type:'bot', text:`ℹ️ Hiện tại chưa có sản phẩm "${d.category}" trong kho.\n\nVui lòng thử mô tả khác.`, quickReplies: null, timestamp: new Date() }]);
+        // Keep previous products visible - don't clear them when backend has no results
       }
     } catch (err) {
       const msg = err.response?.data?.detail || err.message || 'Có lỗi xảy ra';
@@ -419,7 +435,7 @@ const ShoeFinder = () => {
   const startSearch = useCallback((query) => {
     // Keep previous messages - just append the new search query to continue conversation
     setMessages(p => [...p, { type:'user', text: query, timestamp: new Date() }]);
-    setProducts(null);
+    // Don't clear products - keep them visible while loading new results for conversation feel
     setActiveFilters([]);
     setSelectedFilters({});
     setExtractedAttributes({});
@@ -452,7 +468,7 @@ const ShoeFinder = () => {
 
   const searchProductsWithFilters = async (categoryName, filters = {}, extracted = {}) => {
     setProductsLoading(true);
-    setProducts(null);
+    // Don't clear products - keep them visible while loading new results for conversation feel
     try {
       // Convert "attr:val" keys → { attr: [val] }
       let selectedFilters = filters;
@@ -479,13 +495,13 @@ const ShoeFinder = () => {
       const data = await res.json();
       if (!data.products?.length) {
         addBot('🔍 Không tìm thấy sản phẩm nào phù hợp với bộ lọc này.');
-        setProducts([]);
+        // Keep previous products visible - don't clear them
         return;
       }
       applyProductResults(data.products, data.filters, data.total);
     } catch (err) {
       addBot(`❌ Lỗi: ${err.message}`);
-      setProducts([]);
+      // Keep previous products visible on error
     } finally { setProductsLoading(false); }
   };
 
@@ -539,23 +555,44 @@ const ShoeFinder = () => {
       <SharedHeader onLogoClick={handleLogoClick} />
 
       <>
-        {/* ════ BODY: sidebar + main ════ */}
-        <div style={{ flex: 1, display: 'flex', overflow: 'hidden', background: 'linear-gradient(160deg,#f5f7ff,#f0f4ff)' }}>
-
-          {/* ── Filter sidebar (only when results available) ── */}
-          {showSidebar && (
-            <FilterSidebar
-              filters={activeFilters}
-              selectedFilters={selectedFilters}
-              onToggle={handleFilterToggle}
-              onApply={handleFilterApply}
-              onReset={handleFilterReset}
-              resultCount={productCount}
-              isLoading={productsLoading}
+        {/* ════ FAVORITES LIST VIEW ════ */}
+        {showFavoritesList ? (
+          <div style={{ flex: 1, overflow: 'hidden', background: 'linear-gradient(160deg,#f5f7ff,#f0f4ff)', padding: 16 }}>
+            <FavoritesList 
+              token={token}
+              user={user}
+              onBack={() => setShowFavoritesList(false)}
+              onProductClick={(url) => {
+                if (url) {
+                  fetch('http://localhost:8000/api/open-product', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ product_url: url }),
+                  })
+                    .then(r => r.json())
+                    .then(d => { if (!d.success) window.open(url, '_blank'); })
+                    .catch(() => window.open(url, '_blank'));
+                }
+              }}
             />
-          )}
+          </div>
+        ) : (
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden', background: 'linear-gradient(160deg,#f5f7ff,#f0f4ff)' }}>
 
-          {/* ── Main column ── */}
+            {/* ── Filter sidebar (only when results available) ── */}
+            {showSidebar && (
+              <FilterSidebar
+                filters={activeFilters}
+                selectedFilters={selectedFilters}
+                onToggle={handleFilterToggle}
+                onApply={handleFilterApply}
+                onReset={handleFilterReset}
+                resultCount={productCount}
+                isLoading={productsLoading}
+              />
+            )}
+
+            {/* ── Main column ── */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
             {/* Back link */}
@@ -569,7 +606,8 @@ const ShoeFinder = () => {
             </div>
 
             {/* Scrollable area: chat bubbles + products */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '14px 20px 20px' }}>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '14px 40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <div style={{ width: '100%', maxWidth: 680 }}>
 
               {/* ── Chat bubbles (bot / user only) ── */}
               {messages.length > 0 && (
@@ -629,11 +667,18 @@ const ShoeFinder = () => {
                 </div>
               )}
 
-              {/* ── Product grid / skeleton ── */}
+              {/* ── Product grid (always show if products exist, even while loading) ── */}
+              {/* Show skeleton while loading NEW results */}
               {productsLoading && (
-                <div style={{ animation:'fadeIn 0.2s ease' }}>
+                <div style={{ animation:'fadeIn 0.2s ease', marginBottom: 20, opacity: 0.6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                    <div style={{ width: 15, height: 15, borderRadius: '50%', background: '#a5b4fc', animation: 'bounce 1.2s ease-in-out infinite' }} />
+                    <span style={{ fontWeight: 700, fontSize: 14, color: '#1e1b4b' }}>
+                      Đang tìm kết quả mới...
+                    </span>
+                  </div>
                   <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(148px,1fr))', gap:12 }}>
-                    {[...Array(12)].map((_, i) => (
+                    {[...Array(6)].map((_, i) => (
                       <div key={i} style={{ background:'#fff', border:'1.5px solid #f0f0f8', borderRadius:14, overflow:'hidden' }}>
                         <div style={{ height:128, background:'linear-gradient(90deg,#f1f5f9 25%,#e2e8f0 50%,#f1f5f9 75%)', backgroundSize:'200% 100%', animation:'shimmer 1.5s infinite' }} />
                         <div style={{ padding:'9px 11px' }}>
@@ -646,7 +691,8 @@ const ShoeFinder = () => {
                 </div>
               )}
 
-              {!productsLoading && products && products.length > 0 && (
+              {/* Show existing/new products */}
+              {products && products.length > 0 && (
                 <div style={{ animation:'fadeIn 0.3s ease' }}>
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:14 }}>
                     <CheckCircle2 size={15} color="#10b981" />
@@ -660,6 +706,32 @@ const ShoeFinder = () => {
                       const productUrl = product.product_url || product.link;
                       const productImage = product.thumbnail || product.image;
                       const productPrice = product.price || product.skus?.[0]?.price;
+                      const isFavorited = favoriteProductIds.has(product.id);
+                      
+                      const toggleFavorite = async (e) => {
+                        e.stopPropagation();
+                        if (!user || !token) {
+                          alert('Vui lòng đăng nhập để sử dụng tính năng này');
+                          return;
+                        }
+                        
+                        try {
+                          if (isFavorited) {
+                            await removeFromFavorites(product.id, token);
+                            setFavoriteProductIds(prev => {
+                              const newSet = new Set(prev);
+                              newSet.delete(product.id);
+                              return newSet;
+                            });
+                          } else {
+                            await addToFavorites(product.id, token);
+                            setFavoriteProductIds(prev => new Set(prev).add(product.id));
+                          }
+                        } catch (err) {
+                          console.error('Error toggling favorite:', err);
+                          alert('Lỗi: ' + err.message);
+                        }
+                      };
                       
                       return (
                         <div
@@ -686,6 +758,35 @@ const ShoeFinder = () => {
                                   TOP
                                 </div>
                               )}
+                              {/* Favorite Button */}
+                              <button
+                                onClick={toggleFavorite}
+                                style={{
+                                  position: 'absolute',
+                                  bottom: 6,
+                                  right: 6,
+                                  background: isFavorited ? '#e11d48' : 'rgba(255,255,255,0.9)',
+                                  border: isFavorited ? 'none' : '1.5px solid #e2e8f0',
+                                  color: isFavorited ? '#fff' : '#e11d48',
+                                  borderRadius: '50%',
+                                  width: 32,
+                                  height: 32,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s',
+                                  boxShadow: isFavorited ? '0 2px 8px rgba(225,29,72,0.3)' : '0 2px 4px rgba(0,0,0,0.1)',
+                                }}
+                                onMouseEnter={e => {
+                                  e.currentTarget.style.transform = 'scale(1.15)';
+                                }}
+                                onMouseLeave={e => {
+                                  e.currentTarget.style.transform = 'scale(1)';
+                                }}
+                              >
+                                <Heart size={16} fill={isFavorited ? '#fff' : 'none'} />
+                              </button>
                             </div>
                           )}
                           <div style={{ padding:'9px 11px' }}>
@@ -709,12 +810,12 @@ const ShoeFinder = () => {
               )}
 
               <div ref={messagesEndRef} />
+              </div>
             </div>
-          </div>
-        </div>
 
-        {/* ════ INPUT BAR ════ */}
-        <div style={{ borderTop:'1px solid #eff0f8', background:'#fff', padding:'14px 20px', flexShrink:0, boxShadow:'0 -4px 20px rgba(99,102,241,0.07)' }}>
+            {/* ════ INPUT BAR ════ */}
+        <div style={{ borderTop:'1px solid #eff0f8', background:'#fff', padding:'14px 40px', flexShrink:0, boxShadow:'0 -4px 20px rgba(99,102,241,0.07)', display: 'flex', justifyContent: 'center' }}>
+          <div style={{ width: '100%' }}>
           {isListening && transcript && (
             <div style={{ marginBottom:10, padding:'10px 14px', background:'#eef2ff', border:'1px solid #c7d2fe', borderRadius:10, display:'flex', alignItems:'center', gap:8 }}>
               <Volume2 size={14} color="#6366f1" />
@@ -723,7 +824,10 @@ const ShoeFinder = () => {
           )}
 
           {user && (
-            <UserQuickActions onAction={a => { addUser(`📌 ${a}`); addBot(`Tính năng "${a}" đang được phát triển. Bạn muốn tìm kiếm sản phẩm gì?`); }} />
+            <UserQuickActions 
+              onAction={a => { addUser(`📌 ${a}`); addBot(`Tính năng "${a}" đang được phát triển. Bạn muốn tìm kiếm sản phẩm gì?`); }} 
+              onFavoritesClick={() => setShowFavoritesList(true)}
+            />
           )}
 
           <div style={{ display:'flex', gap:10, alignItems:'center' }}>
@@ -767,9 +871,16 @@ const ShoeFinder = () => {
               {' '}để lưu yêu thích & nhận gợi ý cá nhân hoá
             </p>
           )}
+          </div>
         </div>
+          </div>
 
-        {/* TEMPORARILY DISABLED: Using sidebar filters instead of popup
+          
+          </div>
+        )}
+      </>
+
+      {/* TEMPORARILY DISABLED: Using sidebar filters instead of popup
         <SuggestionsPopup
           isOpen={showSuggestionsPopup}
           onClose={() => setShowSuggestionsPopup(false)}
@@ -780,7 +891,7 @@ const ShoeFinder = () => {
           conversationId={conversationState.conversationId}
         />
         */}
-      </>
+
 
       <LoginModal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} />
     </div>

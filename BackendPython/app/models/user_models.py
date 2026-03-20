@@ -45,6 +45,7 @@ class User(Base):
     # Relationships
     search_history = relationship("SearchHistory", back_populates="user", cascade="all, delete-orphan")
     user_preferences = relationship("UserPreferences", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    favorites = relationship("Favorite", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, email={self.email}, full_name={self.full_name})>"
@@ -91,3 +92,19 @@ class UserPreferences(Base):
 
     def __repr__(self):
         return f"<UserPreferences(user_id={self.user_id}, categories={self.preferred_categories})>"
+
+
+class Favorite(Base):
+    """User favorite products (wishlist)"""
+    __tablename__ = "favorites"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    product_id = Column(Integer, nullable=False, index=True)
+    added_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    # Relationships
+    user = relationship("User", back_populates="favorites")
+
+    def __repr__(self):
+        return f"<Favorite(user_id={self.user_id}, product_id={self.product_id}, added_at={self.added_at})>"

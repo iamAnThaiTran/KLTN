@@ -98,6 +98,48 @@ class ProductSearchRequest(BaseModel):
     # filters = {"size": ["42", "43"], "color": ["Đen"]}
     min_price: Optional[float] = None
     max_price: Optional[float] = None
+
+
+class FavoriteBase(BaseModel):
+    """Base favorite model"""
+    product_id: int
+
+
+class FavoriteCreate(FavoriteBase):
+    """Create favorite request"""
+    pass
+
+
+class FavoriteResponse(FavoriteBase):
+    """Favorite response"""
+    id: int
+    user_id: int
+    added_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class FavoriteProductResponse(BaseModel):
+    """Favorite with product details"""
+    id: int
+    user_id: int
+    product_id: int
+    added_at: datetime
+    product: Optional["ProductWithSKUs"] = None
+
+    class Config:
+        from_attributes = True
+
+
+class UserFavoritesResponse(BaseModel):
+    """User favorites list response"""
+    user_id: int
+    count: int
+    favorites: List[FavoriteProductResponse]
+
+    class Config:
+        from_attributes = True
     page: int = 1
     page_size: int = 20
 

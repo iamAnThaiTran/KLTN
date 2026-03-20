@@ -376,3 +376,154 @@ class UserService:
         except Exception as e:
             print(f"[get_recommended_products_for_homepage] Error: {e}")
             return []
+
+    # ─────── FAVORITES MANAGEMENT ───────
+    @staticmethod
+    def add_to_favorites(db: Session, user_id: int, product_id: int) -> Any:
+        """
+        Add a product to user's favorites
+        
+        Args:
+            db: Database session
+            user_id: User ID
+            product_id: Product ID
+        
+        Returns:
+            Favorite object or None if product doesn't exist
+        """
+        from app.models.user_models import Favorite
+        from app.db.sku_repository import SKURepository
+        
+        # Check if product exists
+        sku_repo = SKURepository()
+        product = sku_repo.get_product_by_id(product_id)
+        if not product:
+            return None
+        
+        # Check if already favorited
+        existing = db.query(Favorite).filter(
+            Favorite.user_id == user_id,
+            Favorite.product_id == product_id
+        ).first()
+        
+        if existing:
+            return existing
+        
+        # Create new favorite
+        favorite = Favorite(
+            user_id=user_id,
+            product_id=product_id,
+            added_at=datetime.utcnow()
+        )
+        db.add(favorite)
+        db.commit()
+        db.refresh(favorite)
+        return favorite
+
+    @staticmethod
+    def remove_from_favorites(db: Session, user_id: int, product_id: int) -> bool:
+        """
+        Remove a product from user's favorites
+        
+        Args:
+            db: Database session
+            user_id: User ID
+            product_id: Product ID
+        
+        Returns:
+            True if removed, False if not found
+        """
+        from app.models.user_models import Favorite
+        
+        favorite = db.query(Favorite).filter(
+            Favorite.user_id == user_id,
+            Favorite.product_id == product_id
+        ).first()
+        
+        if favorite:
+            db.delete(favorite)
+            db.commit()
+            return True
+        return False
+
+    @staticmethod
+    def get_user_favorites(db: Session, user_id: int, limit: int = 50, offset: int = 0) -> tuple:
+        """
+        Get user's favorite products
+        
+        Args:
+            db: Database session
+            user_id: User ID
+            limit: Number of results
+            offset: Pagination offset
+        
+        Returns:
+            Tuple of (favorites list, total count)
+        """
+        from app.models.user_models import Favorite
+        from app.db.sku_repository import SKURepository
+        
+        # Get favorites with pagination
+        favorites_query = db.query(Favorite).filter(
+            Favorite.user_id == user_id
+        ).order_by(Favorite.added_at.desc())
+        
+        total = favorites_query.count()
+        favorites_list = favorites_query.offset(offset).limit(limit).all()
+        
+        # Fetch product details for each favorite
+        sku_repo = SKURepository()
+        favorites_with_products = []
+        
+        for fav in favorites_list:
+            product = sku_repo.get_product_by_id(fav.product_id)
+            if product:
+                favorites_with_products.append({
+                    "id": fav.id,
+                    "user_id": fav.user_id,
+                    "product_id": fav.product_id,
+                    "added_at": fav.added_at,
+                    "product": product
+                })
+        
+        return favorites_with_products, total
+
+    @staticmethod
+    def is_favorite(db: Session, user_id: int, product_id: int) -> bool:
+        """
+        Check if a product is in user's favorites
+        
+        Args:
+            db: Database session
+            user_id: User ID
+            product_id: Product ID
+        
+        Returns:
+            True if favorited, False otherwise
+        """
+        from app.models.user_models import Favorite
+        
+        favorite = db.query(Favorite).filter(
+            Favorite.user_id == user_id,
+            Favorite.product_id == product_id
+        ).first()
+        
+        return favorite is not None
+
+    @staticmethod
+    def clear_user_favorites(db: Session, user_id: int) -> int:
+        """
+        Clear all favorites for a user
+        
+        Args:
+            db: Database session
+            user_id: User ID
+        
+        Returns:
+            Number of favorites deleted
+        """
+        from app.models.user_models import Favorite
+        
+        result = db.query(Favorite).filter(Favorite.user_id == user_id).delete()
+        db.commit()
+        return result

@@ -228,6 +228,23 @@ CREATE INDEX idx_reviews_rating ON reviews(rating);
 COMMENT ON TABLE reviews IS 'User reviews and ratings for products';
 
 -- ============================================================================
+-- 12. FAVORITES TABLE
+-- ============================================================================
+CREATE TABLE favorites (
+    id SERIAL PRIMARY KEY,
+    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    product_id INT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, product_id)
+);
+
+CREATE INDEX idx_favorites_user ON favorites(user_id);
+CREATE INDEX idx_favorites_product ON favorites(product_id);
+CREATE INDEX idx_favorites_user_added ON favorites(user_id, added_at);
+
+COMMENT ON TABLE favorites IS 'User favorite products (wishlist)';
+
+-- ============================================================================
 -- UPDATED_AT TRIGGERS
 -- ============================================================================
 CREATE OR REPLACE FUNCTION update_updated_at_column()

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 from app.config.database_orm import get_db
 from app.models.user_models import User, SearchHistory
+from app.models.sku_models import FavoriteResponse, FavoriteProductResponse, UserFavoritesResponse
 from app.api.auth_middleware import get_current_user
 from app.services.user_service import UserService
 
@@ -154,4 +155,128 @@ async def update_user_preferences(
             "min": float(prefs.price_range_min) if prefs.price_range_min else None,
             "max": float(prefs.price_range_max) if prefs.price_range_max else None
         }
+    }
+
+
+# ─────── FAVORITES ENDPOINTS ───────
+@router.get("/favorites")
+async def get_user_favorites(
+    limit: int = 50,
+    offset: int = 0,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Get user's favorite products
+    
+    - **limit**: Number of results (default 50)
+    - **offset**: Pagination offset (default 0)
+    """
+    favorites, total = UserService.get_user_favorites(db, current_user.id, limit=limit, offset=offset)
+    
+    return {
+        "user_id": current_user.id,
+        "total": total,
+        "count": len(favorites),
+        "limit": limit,
+        "offset": offset,
+        "favorites": favorites
+    }
+
+
+@router.post("/favorites/{product_id}")
+async def add_to_favorites(
+    product_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Add a product to user's favorites
+    
+    - **product_id**: ID of the product to favorite
+    """
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    
+    favorite = UserService.add_to_favorites(db, current_user.id, product_id)
+    
+    if not favorite:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    
+    return {
+        "success": True,
+        "user_id": current_user.id,
+        "product_id": product_id,
+        "is_favorite": True,
+        "added_at": favorite.added_at
+    }
+
+
+@router.delete("/favorites/{product_id}")
+async def remove_from_favorites(
+    product_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Remove a product from user's favorites
+    
+    - **product_id**: ID of the product to remove from favorites
+    """
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    
+    removed = UserService.remove_from_favorites(db, current_user.id, product_id)
+    
+    if not removed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Favorite not found")
+    
+    return {
+        "success": True,
+        "user_id": current_user.id,
+        "product_id": product_id,
+        "is_favorite": False
+    }
+
+
+@router.get("/favorites/{product_id}/status")
+async def check_favorite_status(
+    product_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Check if a product is in user's favorites
+    
+    - **product_id**: ID of the product to check
+    """
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    
+    is_favorite = UserService.is_favorite(db, current_user.id, product_id)
+    
+    return {
+        "user_id": current_user.id,
+        "product_id": product_id,
+        "is_favorite": is_favorite
+    }
+
+
+@router.delete("/favorites")
+async def clear_favorites(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Clear all favorites for the user
+    """
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    
+    deleted_count = UserService.clear_user_favorites(db, current_user.id)
+    
+    return {
+        "success": True,
+        "user_id": current_user.id,
+        "deleted_count": deleted_count
     }
