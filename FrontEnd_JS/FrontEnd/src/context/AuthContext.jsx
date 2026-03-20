@@ -29,7 +29,7 @@ export const AuthProvider = ({ children }) => {
             const emailStr = String(email || '').trim();
             const passwordStr = String(password || '').trim();
 
-            const response = await fetch('http://localhost:3000/api/v1/auth/login', {
+            const response = await fetch('http://localhost:8000/api/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: emailStr, password: passwordStr })
@@ -37,14 +37,14 @@ export const AuthProvider = ({ children }) => {
 
             const data = await response.json();
 
-            if (data.success) {
-                setToken(data.token);
+            if (data.access_token) {
+                setToken(data.access_token);
                 setUser(data.user);
-                StorageService.setToken(data.token);
+                StorageService.setToken(data.access_token);
                 StorageService.setUser(data.user);
                 return { success: true, user: data.user };
             } else {
-                return { success: false, message: data.message };
+                return { success: false, message: data.detail || 'Login failed' };
             }
         } catch (error) {
             return { success: false, message: error.message };
@@ -59,22 +59,22 @@ export const AuthProvider = ({ children }) => {
             const passwordStr = String(password || '').trim();
             const nameStr = String(name || '').trim();
 
-            const response = await fetch('http://localhost:3000/api/v1/auth/register', {
+            const response = await fetch('http://localhost:8000/api/auth/register', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: emailStr, password: passwordStr, name: nameStr })
+                body: JSON.stringify({ email: emailStr, password: passwordStr, full_name: nameStr })
             });
 
             const data = await response.json();
 
-            if (data.success) {
-                setToken(data.token);
+            if (data.access_token) {
+                setToken(data.access_token);
                 setUser(data.user);
-                StorageService.setToken(data.token);
+                StorageService.setToken(data.access_token);
                 StorageService.setUser(data.user);
                 return { success: true, user: data.user };
             } else {
-                return { success: false, message: data.message };
+                return { success: false, message: data.detail || 'Registration failed' };
             }
         } catch (error) {
             return { success: false, message: error.message };

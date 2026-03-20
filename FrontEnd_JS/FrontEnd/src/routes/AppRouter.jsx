@@ -2,9 +2,6 @@ import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import ShoeFinder from "../components/ShoeFinder";
 import Home from "../components/Home";
 import ProductDetailPage from "../common/ProductPageDetail";
-import LoginPage from "../pages/LoginPage";
-import RegisterPage from "../pages/RegisterPage";
-import AdminDashboard from "../pages/AdminDashboard";
 import ProductSearchPage from "../pages/ProductSearchPage";
 import { useAuth } from "../context/AuthContext";
 

@@ -16,21 +16,21 @@ export default function FavoritesList({ token, user, onBack, onProductClick }) {
 
   // Fetch favorites on mount
   useEffect(() => {
-    if (token && user) {
-      fetchFavorites();
-    }
+    fetchFavorites();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, user]);
+  }, []);
 
   const fetchFavorites = async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await getUserFavorites(token, { limit: 100, offset: 0 });
+      console.log('📥 Fetching favorites...');
+      const response = await getUserFavorites({ limit: 100, offset: 0 });
+      console.log('✅ Favorites fetched:', response);
       setFavorites(response.favorites || []);
       setTotalCount(response.total || 0);
     } catch (err) {
-      console.error('Error fetching favorites:', err);
+      console.error('❌ Error fetching favorites:', err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -40,7 +40,7 @@ export default function FavoritesList({ token, user, onBack, onProductClick }) {
   const handleRemove = async (productId) => {
     try {
       setDeletingId(productId);
-      await removeFromFavorites(productId, token);
+      await removeFromFavorites(productId);
       setFavorites(favorites.filter(fav => fav.product_id !== productId));
       setTotalCount(totalCount - 1);
     } catch (err) {
@@ -55,7 +55,7 @@ export default function FavoritesList({ token, user, onBack, onProductClick }) {
 
     try {
       setIsClearing(true);
-      await clearAllFavorites(token);
+      await clearAllFavorites();
       setFavorites([]);
       setTotalCount(0);
     } catch (err) {
