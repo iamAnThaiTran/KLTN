@@ -155,7 +155,7 @@ const UserMenu = ({ user, onLogout, onSearchHistoryClick }) => {
             <div style={{ fontWeight:700, fontSize:14, color:'#1e1b4b' }}>{getUserName()}</div>
             <div style={{ fontSize:12, color:'#94a3b8', marginTop:2 }}>{user?.email}</div>
           </div>
-          {[{icon:<Heart size={15}/>,label:'Sản phẩm yêu thích',color:'#e11d48',action:'favorites'},{icon:<Clock size={15}/>,label:'Lịch sử tìm kiếm',color:'#6366f1',action:'history'},{icon:<Tag size={15}/>,label:'Ưu đãi của tôi',color:'#f59e0b',action:'offers'}].map((item,i)=>(
+          {[{icon:<Heart size={15}/>,label:'Sản phẩm yêu thích',color:'#e11d48',action:'favorites'},{icon:<Clock size={15}/>,label:'Lịch sử tìm kiếm',color:'#6366f1',action:'history'},{icon:<Tag size={15}/>,label:'So sánh sản phẩm',color:'#f59e0b',action:'offers'}].map((item,i)=>(
             <button key={i} onClick={()=>{
               setOpen(false);
               if(item.action === 'history') {
