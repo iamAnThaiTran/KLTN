@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Mic, MicOff, ChevronRight, Search, Flame, Grid3X3, Lightbulb, SlidersHorizontal, Brain, ShoppingBag, Star } from 'lucide-react';
 import { SharedHeader, LoginModal } from './SharedHeader';
 import { useAuth } from '../context/AuthContext';
+import { formatTopics, PERSONALIZED_DATA } from '../config';
 
 const CATEGORIES = [
   { icon: '👟', label: 'Giày đẹp' },
@@ -273,6 +274,91 @@ export default function LandingPage() {
                 </div>
               )}
             </div>
+
+            {/* Personalized recommendation */}
+            <div className="stagger-3" style={{ marginBottom: 32 }}>
+  <div style={{
+    fontWeight: 800,
+    fontSize: 16,
+    color: '#1e1b4b',
+    marginBottom: 10,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8
+  }}>
+    <Brain size={18} color="#8b5cf6" />
+    Gợi ý dành riêng cho bạn
+  </div>
+
+  <div style={{
+    background: '#fff',
+    borderRadius: 16,
+    border: '1.5px solid #ede9fe',
+    padding: 16
+  }}>
+    {/* TEXT */}
+    <div style={{
+      fontSize: 13,
+      color: '#64748b',
+      marginBottom: 14,
+      lineHeight: 1.5
+    }}>
+      Có vẻ dạo gần đây bạn đang quan tâm đến{' '}
+      <span style={{ fontWeight: 700, color: '#4f46e5' }}>
+        {formatTopics(PERSONALIZED_DATA.topics)}
+      </span>.
+      Dưới đây là một vài gợi ý phù hợp 👇
+    </div>
+
+    {/* GRID / LIST */}
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+      gap: 12
+    }}>
+      {PERSONALIZED_DATA.products.map((p, i) => (
+        <div
+          key={i}
+          className="product-card"
+          onClick={() => handleQuick(p.name)}
+        >
+          <div style={{
+            background: '#f8f9ff',
+            borderRadius: 10,
+            height: 90,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 10
+          }}>
+            <img
+              src={p.img}
+              alt={p.name}
+              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+            />
+          </div>
+
+          <div style={{
+            fontSize: 12,
+            fontWeight: 700,
+            color: '#1e1b4b',
+            marginBottom: 4
+          }}>
+            {p.name}
+          </div>
+
+          <div style={{
+            fontSize: 12,
+            fontWeight: 700,
+            color: '#f59e0b'
+          }}>
+            {p.price}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</div>
 
             {/* Quick chips */}
             <div className="stagger-2" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 36 }}>

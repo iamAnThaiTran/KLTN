@@ -8,9 +8,12 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from typing import List, Dict, Any, Optional, Tuple
 import os
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class SKURepository:
@@ -198,10 +201,10 @@ class SKURepository:
         where_clause = " AND ".join(filter_conditions) if filter_conditions else "TRUE"
         
         # Log for debugging
-        print(f"[SKURepository.search_products] DEBUG:")
-        print(f"  category_slug: '{category_slug}'")
-        print(f"  filters: {filters}")
-        print(f"  where_clause: {where_clause}")
+        logger.info(f"[SKURepository.search_products] DEBUG:")
+        logger.info(f"  category_slug: '{category_slug}'")
+        logger.info(f"  filters: {filters}")
+        logger.info(f"  where_clause: {where_clause}")
         
         # DEBUG: Check data in DB for this category
         if filters:  # Only debug when filters exist
@@ -215,16 +218,16 @@ class SKURepository:
                 WHERE c.slug = %s AND p.is_active = true
             """, (category_slug,))
             total_in_cat = debug_cursor.fetchone()['count']
-            print(f"  [DEBUG] Total products in '{category_slug}': {total_in_cat}")
+            logger.info(f"  [DEBUG] Total products in '{category_slug}': {total_in_cat}")
             
             # Check 2: SKUs with attributes
-            debug_cursor.execute("""
+            debug_cursor.execute("""    
                 SELECT COUNT(DISTINCT sku_id) as count
                 FROM sku_attributes
                 WHERE attribute_name = %s
             """, (list(filters.keys())[0],))
             skus_with_attr = debug_cursor.fetchone()['count']
-            print(f"  [DEBUG] SKUs with attribute '{list(filters.keys())[0]}': {skus_with_attr}")
+            logger.info(f"  [DEBUG] SKUs with attribute '{list(filters.keys())[0]}': {skus_with_attr}")
             
             # Check 3: Actual values for this attribute
             debug_cursor.execute("""
@@ -234,7 +237,7 @@ class SKURepository:
                 LIMIT 10
             """, (list(filters.keys())[0],))
             values = debug_cursor.fetchall()
-            print(f"  [DEBUG] Sample values for '{list(filters.keys())[0]}': {[v['attribute_value'] for v in values]}")
+            logger.info(f"  [DEBUG] Sample values for '{list(filters.keys())[0]}': {[v['attribute_value'] for v in values]}")
             
             # Check 4: Check if filter value exists
             for filter_name, filter_values in filters.items():
@@ -244,7 +247,7 @@ class SKURepository:
                     WHERE attribute_name = %s AND attribute_value = ANY(%s)
                 """, (filter_name, filter_values))
                 match_count = debug_cursor.fetchone()['count']
-                print(f"  [DEBUG] Matches for {filter_name}={filter_values}: {match_count}")
+                logger.info(f"  [DEBUG] Matches for {filter_name}={filter_values}: {match_count}")
             
             debug_cursor.close()
         
