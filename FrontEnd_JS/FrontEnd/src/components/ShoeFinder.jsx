@@ -400,7 +400,7 @@ const ShoeFinder = () => {
       // Handle question/clarification from backend
       if (d.status === 'need_info' && d.question) {
         setMessages(p => [...p, { type:'bot', text: d.question, quickReplies: d.options ? d.options.map(o => o.label || o.value || o) : null, timestamp: new Date() }]);
-        setProducts(null);
+        // Keep previous products/results visible - don't clear them when asking clarifying questions
       } else if (d.products?.length) {
         applyProductResults(d.products, d.filters, d.total);
       } else {
@@ -417,7 +417,8 @@ const ShoeFinder = () => {
   }, [conversationState.conversationId, token]);
 
   const startSearch = useCallback((query) => {
-    setMessages([]);
+    // Keep previous messages - just append the new search query to continue conversation
+    setMessages(p => [...p, { type:'user', text: query, timestamp: new Date() }]);
     setProducts(null);
     setActiveFilters([]);
     setSelectedFilters({});
@@ -425,7 +426,6 @@ const ShoeFinder = () => {
     setOriginalUserInput(query);
     setProductCount(null);
     setTimeout(() => { 
-      setMessages(p => [...p, { type:'user', text: query, timestamp: new Date() }]);
       analyzeAndSearch(query); 
     }, 50);
   }, [analyzeAndSearch]);
@@ -655,48 +655,55 @@ const ShoeFinder = () => {
                     </span>
                   </div>
                   <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(148px,1fr))', gap:12 }}>
-                    {products.map((product, i) => (
-                      <div
-                        key={product.id || i}
-                        className="product-card"
-                        onClick={() => {
-                          if (product.product_url) {
-                            fetch('http://localhost:8000/api/open-product', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ product_url: product.product_url }),
-                            })
-                              .then(r => r.json())
-                              .then(d => { if (d.success) addBot('🎬 Đang mở sản phẩm trong Chrome...'); else window.open(product.product_url, '_blank'); })
-                              .catch(() => window.open(product.product_url, '_blank'));
-                          }
-                        }}
-                      >
-                        {product.thumbnail && (
-                          <div style={{ background:'#f8f9ff', height:128, display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', position:'relative' }}>
-                            <img src={product.thumbnail} alt={product.title} style={{ maxWidth:'100%', maxHeight:'100%', objectFit:'contain' }} />
-                            {i === 0 && (
-                              <div style={{ position:'absolute', top:7, right:7, background:'linear-gradient(135deg,#f59e0b,#d97706)', color:'#fff', fontSize:9.5, fontWeight:700, padding:'2px 7px', borderRadius:7 }}>
-                                TOP
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        <div style={{ padding:'9px 11px' }}>
-                          <div style={{ fontSize:11.5, fontWeight:600, color:'#1e1b4b', lineHeight:1.4, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden', marginBottom:5 }}>
-                            {product.title}
-                          </div>
-                          {product.min_price && (
-                            <div style={{ fontSize:13, fontWeight:700, color:'#e11d48' }}>
-                              {(product.min_price / 1000000).toFixed(1)}tr
+                    {products.map((product, i) => {
+                      // Handle both backend response formats
+                      const productUrl = product.product_url || product.link;
+                      const productImage = product.thumbnail || product.image;
+                      const productPrice = product.price || product.skus?.[0]?.price;
+                      
+                      return (
+                        <div
+                          key={product.id || i}
+                          className="product-card"
+                          onClick={() => {
+                            if (productUrl) {
+                              fetch('http://localhost:8000/api/open-product', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ product_url: productUrl }),
+                              })
+                                .then(r => r.json())
+                                .then(d => { if (d.success) addBot('🎬 Đang mở sản phẩm trong Chrome...'); else window.open(productUrl, '_blank'); })
+                                .catch(() => window.open(productUrl, '_blank'));
+                            }
+                          }}
+                        >
+                          {productImage && (
+                            <div style={{ background:'#f8f9ff', height:128, display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', position:'relative' }}>
+                              <img src={productImage} alt={product.title} style={{ maxWidth:'100%', maxHeight:'100%', objectFit:'contain' }} />
+                              {i === 0 && (
+                                <div style={{ position:'absolute', top:7, right:7, background:'linear-gradient(135deg,#f59e0b,#d97706)', color:'#fff', fontSize:9.5, fontWeight:700, padding:'2px 7px', borderRadius:7 }}>
+                                  TOP
+                                </div>
+                              )}
                             </div>
                           )}
-                          {product.brand && (
-                            <div style={{ fontSize:11, color:'#94a3b8', marginTop:2 }}>{product.brand}</div>
-                          )}
+                          <div style={{ padding:'9px 11px' }}>
+                            <div style={{ fontSize:11.5, fontWeight:600, color:'#1e1b4b', lineHeight:1.4, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden', marginBottom:5 }}>
+                              {product.title}
+                            </div>
+                            {productPrice && (
+                              <div style={{ fontSize:13, fontWeight:700, color:'#e11d48' }}>
+                                {(productPrice / 1000000).toFixed(1)}tr
+                              </div>
+                            )}
+                            {product.brand && (
+                              <div style={{ fontSize:11, color:'#94a3b8', marginTop:2 }}>{product.brand}</div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
