@@ -349,6 +349,68 @@ class RuleBasedExtractor:
                     return match.group().strip()
         
         return None
+    
+    def extract_material(self, text: str) -> Optional[str]:
+        """Extract chất liệu (material)
+        Examples: "chất liệu da", "bằng da", "da thật", "da nhân tạo", "cotton", "polyester"
+        """
+        # Material aliases
+        material_keywords = [
+            "da thật", "da", "leather",
+            "cotton", "cotton 100%", "100% cotton",
+            "polyester", "vải",
+            "da nhân tạo", "da cao su",
+            "len", "lụa", "silk",
+            "nylon", "mesh",
+            "thun", "jersey"
+        ]
+        
+        text_lower = text.lower()
+        
+        # Pattern 1: "chất liệu da", "chất liệu cotton", etc.
+        pattern1 = r'(?:chất liệu|bằng)\s+([a-z\s]{2,20}?)(?:\s+|$)'
+        match1 = re.search(pattern1, text_lower)
+        if match1:
+            material = match1.group(1).strip()
+            return material
+        
+        # Pattern 2: Check for common material keywords
+        for material in material_keywords:
+            if material in text_lower:
+                return material
+        
+        return None
+    
+    def extract_material(self, text: str) -> Optional[str]:
+        """Extract chất liệu (material)
+        Examples: "chất liệu da", "bằng da", "da thật", "da nhân tạo", "cotton", "polyester"
+        """
+        # Material aliases
+        material_keywords = [
+            "da thật", "da", "leather",
+            "cotton", "cotton 100%", "100% cotton",
+            "polyester", "vải",
+            "da nhân tạo", "da cao su",
+            "len", "lụa", "silk",
+            "nylon", "mesh",
+            "thun", "jersey"
+        ]
+        
+        text_lower = text.lower()
+        
+        # Pattern 1: "chất liệu da", "chất liệu cotton", etc.
+        pattern1 = r'(?:chất liệu|bằng)\s+([a-zàáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ\s]+?)(?:\s+|$)'
+        match1 = re.search(pattern1, text_lower)
+        if match1:
+            material = match1.group(1).strip()
+            return material
+        
+        # Pattern 2: Check for common material keywords
+        for material in material_keywords:
+            if material in text_lower:
+                return material
+        
+        return None
 
 
 class DynamicAttributeExtractor:
@@ -388,15 +450,27 @@ class DynamicAttributeExtractor:
         # Step 1: Rule-based extraction (áp dụng cho universal attributes)
         extracted.update(self._rule_extract(user_input, attrs_schema))
         
-        # Step 2: Qwen LLM fallback nếu rule-based không đủ
-        if use_llm and len(extracted) < 2:
-            llm_extracted = self._qwen_extract(user_input, category, attrs_schema)
-            extracted.update(llm_extracted)
-            method = "qwen"
-        else:
-            method = "rule-based"
+        # Step 2: Find missing required attributes
+        missing_required = [
+            attr for attr, constraint in attrs_schema.items()
+            if constraint.required and attr not in extracted
+        ]
         
-        # Step 3: Find missing required attributes
+        # Step 3: Qwen LLM fallback - trigger if:
+        # - use_llm=True AND (rule-based found nothing OR missing required attributes)
+        # - OR rule-based found very few attributes (< 2) but attributes exist in schema
+        method = "rule-based"
+        if use_llm or (len(extracted) < 2 and len(extracted) >= 0):
+            # Have more attributes in schema that could be extracted
+            if len(attrs_schema) > len(extracted):
+                llm_extracted = self._qwen_extract(user_input, category, attrs_schema)
+                # Only merge if LLM found something new
+                before_count = len(extracted)
+                extracted.update(llm_extracted)
+                if len(extracted) > before_count:
+                    method = "qwen"
+        
+        # Re-calculate missing after LLM
         missing_required = [
             attr for attr, constraint in attrs_schema.items()
             if constraint.required and attr not in extracted
@@ -411,6 +485,15 @@ class DynamicAttributeExtractor:
             "method": method,
             "schema": attrs_schema
         }
+    
+    def _extract_quality(self, text: str) -> Optional[str]:
+        """Extract chất lượng (quality) attribute"""
+        text_lower = text.lower()
+        qualities = ["cao cấp", "bình thường", "rẻ tiền", "tốt", "kém", "premium", "standard"]
+        for q in qualities:
+            if q in text_lower:
+                return q
+        return None
     
     def _rule_extract(
         self, 
@@ -456,6 +539,16 @@ class DynamicAttributeExtractor:
             processor = self.rule_extractor.extract_processor(text)
             if processor:
                 extracted["processor"] = processor
+        
+        if "material" in attrs_schema:
+            material = self.rule_extractor.extract_material(text)
+            if material:
+                extracted["material"] = material
+        
+        if "quality" in attrs_schema:
+            quality = self._extract_quality(text)
+            if quality:
+                extracted["quality"] = quality
         
         return extracted
     
