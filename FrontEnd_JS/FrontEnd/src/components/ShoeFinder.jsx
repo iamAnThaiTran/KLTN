@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
 import { SharedHeader, LoginModal } from './SharedHeader';
+import ProductComparison from './ProductComparison';
 import { useAuth } from '../context/AuthContext';
 import { addToFavorites, removeFromFavorites } from '../utils/favoritesApi';
 
@@ -46,6 +47,7 @@ const ShoeFinder = () => {
   // ── Favorites ──
   const [showFavoritesList,  setShowFavoritesList]  = useState(false);
   const [favoriteProductIds, setFavoriteProductIds] = useState(new Set());
+  const [showComparison, setShowComparison] = useState(false);
  
   const messagesEndRef = useRef(null);
  
@@ -141,7 +143,7 @@ const ShoeFinder = () => {
   return (
     <div style={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <style>{GLOBAL_STYLES}</style>
-      <SharedHeader onLogoClick={handleLogoClick} />
+      <SharedHeader onLogoClick={handleLogoClick} onCompareClick={() => setShowComparison(true)} />
  
       {showFavoritesList ? (
         <div style={{ flex: 1, overflow: 'hidden', background: 'linear-gradient(160deg,#f5f7ff,#f0f4ff)', padding: 16 }}>
@@ -227,6 +229,13 @@ const ShoeFinder = () => {
       )}
  
       <LoginModal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} />
+
+
+
+
+
+
+      {showComparison && <ProductComparison onClose={() => setShowComparison(false)} />}
     </div>
   );
 };

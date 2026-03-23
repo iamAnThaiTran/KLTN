@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { GoogleLogin } from '@react-oauth/google';
 import { SearchHistoryModal } from './SearchHistoryModal';
+import FavoritesList from './FavoritesList';
+import CompareProducts from './CompareProducts';
 
 export const LoginModal = ({ isOpen, onClose }) => {
   const [loading, setLoading] = useState(false);
@@ -115,7 +117,7 @@ export const LoginModal = ({ isOpen, onClose }) => {
 };
 
 // ─── USER DROPDOWN ────────────────────────────────────────────────────────────
-const UserMenu = ({ user, onLogout, onSearchHistoryClick }) => {
+const UserMenu = ({ user, onLogout, onSearchHistoryClick, onCompareClick, onFavoritesClick }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -155,11 +157,19 @@ const UserMenu = ({ user, onLogout, onSearchHistoryClick }) => {
             <div style={{ fontWeight:700, fontSize:14, color:'#1e1b4b' }}>{getUserName()}</div>
             <div style={{ fontSize:12, color:'#94a3b8', marginTop:2 }}>{user?.email}</div>
           </div>
-          {[{icon:<Heart size={15}/>,label:'Sản phẩm yêu thích',color:'#e11d48',action:'favorites'},{icon:<Clock size={15}/>,label:'Lịch sử tìm kiếm',color:'#6366f1',action:'history'},{icon:<Tag size={15}/>,label:'So sánh sản phẩm',color:'#f59e0b',action:'offers'}].map((item,i)=>(
+          {[{icon:<Heart size={15}/>,label:'Sản phẩm yêu thích',color:'#e11d48',action:'favorites'},{icon:<Clock size={15}/>,label:'Lịch sử tìm kiếm',color:'#6366f1',action:'history'},{icon:<Tag size={15}/>,label:'So sánh sản phẩm',color:'#f59e0b',action:'compare'}].map((item,i)=>(
             <button key={i} onClick={()=>{
+              console.log('🔍 Menu item clicked:', item.action);
               setOpen(false);
-              if(item.action === 'history') {
+              if(item.action === 'favorites') {
+                console.log('❤️ Opening favorites');
+                onFavoritesClick();
+              } else if(item.action === 'history') {
+                console.log('🕐 Opening history');
                 onSearchHistoryClick();
+              } else if(item.action === 'compare') {
+                console.log('🏷️ Opening compare');
+                onCompareClick();
               }
             }} style={{ width:'100%', padding:'10px 16px', border:'none', background:'none', display:'flex', alignItems:'center', gap:10, cursor:'pointer', color:'#374151', fontSize:14, textAlign:'left', fontFamily:'inherit' }}
               onMouseEnter={e=>e.currentTarget.style.background='#f8f9ff'}
@@ -179,10 +189,28 @@ const UserMenu = ({ user, onLogout, onSearchHistoryClick }) => {
 };
 
 // ─── SHARED HEADER ────────────────────────────────────────────────────────────
-export const SharedHeader = ({ onLogoClick, onQuerySelect }) => {
+export const SharedHeader = ({ onLogoClick, onQuerySelect, onCompareClick }) => {
   const { user, setShowLoginModal, logout, token } = useAuth();
   const navigate = useNavigate();
   const [showSearchHistoryModal, setShowSearchHistoryModal] = useState(false);
+  const [showFavoritesList, setShowFavoritesList] = useState(false);
+  const [showCompareModal, setShowCompareModal] = useState(false);
+
+  console.log('📋 SharedHeader render - showFavoritesList:', showFavoritesList);
+
+  // Disable body scroll when modal is open
+  useEffect(() => {
+    const isModalOpen = showFavoritesList || showCompareModal;
+    if (isModalOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showFavoritesList, showCompareModal]);
 
   const handleLogoClick = () => {
     navigate('/');
@@ -201,7 +229,7 @@ export const SharedHeader = ({ onLogoClick, onQuerySelect }) => {
             <div style={{ color:'rgba(255,255,255,0.65)', fontSize:11 }}>Trợ lý tìm sản phẩm</div>
           </div>
         </div>
-        {user ? <UserMenu user={user} onLogout={logout} onSearchHistoryClick={() => setShowSearchHistoryModal(true)} /> : (
+        {user ? <UserMenu user={user} onLogout={logout} onSearchHistoryClick={() => setShowSearchHistoryModal(true)} onCompareClick={() => setShowCompareModal(true)} onFavoritesClick={() => setShowFavoritesList(true)} /> : (
           <button onClick={() => setShowLoginModal(true)} style={{ display:'flex', alignItems:'center', gap:7, padding:'7px 18px', borderRadius:20, border:'1.5px solid rgba(255,255,255,0.4)', background:'rgba(255,255,255,0.12)', color:'#fff', fontSize:13, fontWeight:600, cursor:'pointer', transition:'all 0.2s', fontFamily:'inherit' }}
             onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.22)'}
             onMouseLeave={e=>e.currentTarget.style.background='rgba(255,255,255,0.12)'}
@@ -216,6 +244,85 @@ export const SharedHeader = ({ onLogoClick, onQuerySelect }) => {
         token={token}
         onQuerySelect={onQuerySelect}
       />
+
+      {/* Favorites List Modal */}
+      {showFavoritesList && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'rgba(15, 23, 42, 0.55)',
+          backdropFilter: 'blur(6px)',
+        }}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            setShowFavoritesList(false);
+          }
+        }}>
+          <div style={{
+            width: '90%',
+            maxWidth: 900,
+            height: '85vh',
+            borderRadius: 16,
+            background: '#fff',
+            boxShadow: '0 24px 64px rgba(0,0,0,0.18)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+          }}>
+            <FavoritesList
+              token={token}
+              user={user}
+              onBack={() => setShowFavoritesList(false)}
+              onProductClick={(productUrl) => {
+                window.open(productUrl, '_blank');
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Compare Products Modal */}
+      {showCompareModal && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'rgba(15, 23, 42, 0.55)',
+          backdropFilter: 'blur(6px)',
+        }}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            setShowCompareModal(false);
+          }
+        }}>
+          <div style={{
+            width: '90%',
+            maxWidth: 900,
+            height: '85vh',
+            borderRadius: 16,
+            background: '#fff',
+            boxShadow: '0 24px 64px rgba(0,0,0,0.18)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+          }}>
+            <CompareProducts
+              token={token}
+              user={user}
+              onBack={() => setShowCompareModal(false)}
+            />
+          </div>
+        </div>
+      )}
     </>
   );
 };

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Mic, MicOff, ChevronRight, Search, Flame, Grid3X3, Lightbulb, SlidersHorizontal, Brain, ShoppingBag, Star } from 'lucide-react';
 import { SharedHeader, LoginModal } from './SharedHeader';
+import ProductComparison from './ProductComparison';
 import { useAuth } from '../context/AuthContext';
 import { formatTopics, PERSONALIZED_DATA } from '../config';
 
@@ -48,6 +49,7 @@ export default function LandingPage() {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [isBrowserSupported, setIsBrowserSupported] = useState(true);
+  const [showComparison, setShowComparison] = useState(false);
   const inputRef = useRef(null);
   const recognitionRef = useRef(null);
 
@@ -211,8 +213,9 @@ export default function LandingPage() {
       <div className="landing-root">
         {/* ── Header ── */}
         <SharedHeader 
-        onQuerySelect={(query) => setInput(query)}
-      />
+          onQuerySelect={(query) => setInput(query)}
+          onCompareClick={() => setShowComparison(true)}
+        />
 
         {/* ── Body ── */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 24, maxWidth: 1100, margin: '0 auto', padding: '32px 24px' }}>
@@ -464,6 +467,7 @@ export default function LandingPage() {
       </div>
 
       <LoginModal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} />
+      {showComparison && <ProductComparison onClose={() => setShowComparison(false)} />}
     </div>
   );
 }
