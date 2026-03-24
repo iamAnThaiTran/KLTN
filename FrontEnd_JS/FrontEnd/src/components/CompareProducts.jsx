@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Trash2, Loader, Check } from 'lucide-react';
-import { getUserFavorites } from '../utils/favoritesApi';
+import { getUserFavorites, compareProducts } from '../utils/favoritesApi';
 
 /**
  * CompareProducts Component
@@ -55,8 +55,32 @@ export default function CompareProducts({ token, user, onBack }) {
       return;
     }
     console.log('🔍 Comparing products:', Array.from(selected));
-    // TODO: Implement comparison logic
-    alert(`Đang so sánh ${selected.size} sản phẩm...`);
+    
+    // Convert Set to Array and send to server
+    const productIds = Array.from(selected);
+    
+    try {
+      setLoading(true);
+      setError(null);
+      compareProducts(productIds)
+        .then(response => {
+          console.log('✅ Comparison response:', response);
+          alert(`✅ ${response.message || 'So sánh thành công!'}`);
+          setSelected(new Set()); // Clear selection
+        })
+        .catch(err => {
+          console.error('❌ Comparison error:', err);
+          setError(err.message);
+          alert(`❌ Lỗi: ${err.message}`);
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    } catch (err) {
+      console.error('❌ Error in handleCompare:', err);
+      setError(err.message);
+      setLoading(false);
+    }
   };
 
   const isSelected = (productId) => selected.has(productId);

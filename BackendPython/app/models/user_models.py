@@ -32,13 +32,19 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
-    password_hash = Column(String(255), nullable=False)
+    password_hash = Column(String(255), nullable=True)  # NULL for OAuth users
     full_name = Column(String(255), nullable=True)
     phone = Column(String(20), nullable=True)
-    role = Column(String(50), default="user", nullable=False)  # Fixed: 20 → 50 to match SQL
+    role = Column(String(50), default="user", nullable=False)
     is_verified = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     last_login = Column(DateTime, nullable=True)
+    # OAuth fields (for Google, Facebook, etc.)
+    oauth_provider = Column(String(50), nullable=True)  # 'google', 'facebook'
+    oauth_id = Column(String(255), nullable=True, unique=True)  # Provider's user ID
+    oauth_token = Column(String(500), nullable=True)  # Access token
+    oauth_refresh_token = Column(String(500), nullable=True)  # Refresh token
+    oauth_token_expires_at = Column(DateTime, nullable=True)  # Token expiry
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

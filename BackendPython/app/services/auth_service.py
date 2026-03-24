@@ -221,16 +221,22 @@ class AuthService:
                     "token": None
                 }
             
-            # Check if user exists
-            user = db.query(User).filter(User.email == email).first()
+            # Check if user exists by oauth_id first (for returning users)
+            user = db.query(User).filter(User.oauth_id == google_id).first()
+            
+            # If not found by oauth_id, check by email (for existing traditional users)
+            if not user:
+                user = db.query(User).filter(User.email == email).first()
             
             if not user:
                 # Create new user from Google info
-                hashed_google_id = AuthService.hash_password(google_id)
                 user = User(
                     email=email,
                     full_name=full_name,
-                    password_hash=hashed_google_id,
+                    password_hash=None,  # NULL for OAuth users
+                    oauth_provider='google',
+                    oauth_id=google_id,
+                    oauth_token=google_token,
                     is_verified=True,  # Verified since from Google
                     is_active=True
                 )
@@ -244,6 +250,15 @@ class AuthService:
                     preferred_brands=[]
                 )
                 db.add(preferences)
+            else:
+                # Update OAuth info for existing user (in case switching to Google)
+                if not user.oauth_id or user.oauth_id != google_id:
+                    user.oauth_provider = 'google'
+                    user.oauth_id = google_id
+                    user.oauth_token = google_token
+                # Update full name if empty
+                if not user.full_name and full_name:
+                    user.full_name = full_name
             
             # Update last login
             user.last_login = datetime.utcnow()

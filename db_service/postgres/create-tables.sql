@@ -53,6 +53,10 @@ CREATE TABLE products (
     product_url TEXT,
     thumbnail VARCHAR(500),
     source VARCHAR(50),
+    -- External source IDs (for Tiki, etc.)
+    tiki_product_id VARCHAR(100),
+    tiki_spid VARCHAR(100),
+    seller_id VARCHAR(100) DEFAULT '1',
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -62,6 +66,8 @@ CREATE INDEX idx_products_category ON products(category_id);
 CREATE INDEX idx_products_brand ON products(brand);
 CREATE INDEX idx_products_source ON products(source);
 CREATE INDEX idx_products_active ON products(is_active);
+CREATE INDEX idx_products_tiki_id ON products(tiki_product_id);
+CREATE INDEX idx_products_tiki_spid ON products(tiki_spid);
 
 COMMENT ON TABLE products IS 'Generic products without variant attributes';
 

@@ -122,3 +122,37 @@ export async function clearAllFavorites() {
     throw error;
   }
 }
+
+/**
+ * Compare multiple products
+ * @param {number[]} productIds - Array of product IDs to compare
+ * @returns {Promise<Object>} Comparison result
+ */
+export async function compareProducts(productIds) {
+  try {
+    if (!Array.isArray(productIds) || productIds.length < 2) {
+      throw new Error('At least 2 products required for comparison');
+    }
+
+    const response = await apiRequest(`/api/products/compare`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        product_ids: productIds,
+      }),
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) throw new Error('Unauthorized - please login again');
+      if (response.status === 400) throw new Error('Invalid product IDs');
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('[Favorites API] Error comparing products:', error);
+    throw error;
+  }
+}

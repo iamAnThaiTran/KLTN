@@ -63,6 +63,10 @@ CREATE TABLE products (
     product_url TEXT,
     thumbnail VARCHAR(500),
     source VARCHAR(50),
+    -- External source IDs (for Tiki comparison feature)
+    tiki_product_id VARCHAR(100),
+    tiki_spid VARCHAR(100),
+    seller_id VARCHAR(100) DEFAULT '1',
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -72,8 +76,13 @@ CREATE INDEX idx_products_category ON products(category_id);
 CREATE INDEX idx_products_brand ON products(brand);
 CREATE INDEX idx_products_source ON products(source);
 CREATE INDEX idx_products_active ON products(is_active);
+CREATE INDEX idx_products_tiki_id ON products(tiki_product_id);
+CREATE INDEX idx_products_tiki_spid ON products(tiki_spid);
 
 COMMENT ON TABLE products IS 'Generic products without variant attributes';
+COMMENT ON COLUMN products.tiki_product_id IS 'Tiki external product ID for comparison feature';
+COMMENT ON COLUMN products.tiki_spid IS 'Tiki SKU/variant ID for comparison feature';
+COMMENT ON COLUMN products.seller_id IS 'Tiki seller ID (default: 1 for main store)';
 
 -- ============================================================================
 -- 4. SKUS TABLE (Stock Keeping Units)
@@ -123,21 +132,32 @@ COMMENT ON TABLE sku_attributes IS 'Flexible attribute storage for SKU variants'
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255),  -- NULL for OAuth users
     full_name VARCHAR(255),
     phone VARCHAR(20),
     role VARCHAR(50) DEFAULT 'user' CHECK (role IN ('user', 'admin', 'moderator')),
     is_verified BOOLEAN DEFAULT false,
     is_active BOOLEAN DEFAULT true,
     last_login TIMESTAMP,
+    -- OAuth fields (for Google, Facebook, etc.)
+    oauth_provider VARCHAR(50),     -- 'google', 'facebook'
+    oauth_id VARCHAR(255) UNIQUE,  -- Provider's user ID
+    oauth_token VARCHAR(500),      -- Access token
+    oauth_refresh_token VARCHAR(500),  -- Refresh token
+    oauth_token_expires_at TIMESTAMP,  -- Token expiry
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_active ON users(is_active);
+CREATE INDEX idx_users_oauth_id ON users(oauth_id);
+CREATE INDEX idx_users_oauth_provider ON users(oauth_provider);
 
-COMMENT ON TABLE users IS 'User accounts for personalization and authentication';
+COMMENT ON TABLE users IS 'User accounts for authentication (traditional + OAuth)';
+COMMENT ON COLUMN users.password_hash IS 'NULL for OAuth users';
+COMMENT ON COLUMN users.oauth_provider IS 'OAuth provider: google, facebook, etc.';
+COMMENT ON COLUMN users.oauth_id IS 'Provider unique user ID';
 
 -- ============================================================================
 -- 7. USER_PREFERENCES TABLE
@@ -236,6 +256,23 @@ CREATE INDEX idx_reviews_user ON reviews(user_id);
 CREATE INDEX idx_reviews_rating ON reviews(rating);
 
 COMMENT ON TABLE reviews IS 'User reviews and ratings for products';
+
+-- ============================================================================
+-- 12. FAVORITES TABLE
+-- ============================================================================
+CREATE TABLE favorites (
+    id SERIAL PRIMARY KEY,
+    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    product_id INT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, product_id)
+);
+
+CREATE INDEX idx_favorites_user ON favorites(user_id);
+CREATE INDEX idx_favorites_product ON favorites(product_id);
+CREATE INDEX idx_favorites_user_added ON favorites(user_id, added_at);
+
+COMMENT ON TABLE favorites IS 'User favorite products (wishlist)';
 
 -- ============================================================================
 -- 12. UPDATED_AT TRIGGERS
