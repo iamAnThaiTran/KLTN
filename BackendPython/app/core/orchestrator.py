@@ -664,6 +664,14 @@ Be practical and culturally relevant for Vietnamese shopping."""
         
         try:
             response = call_openai(prompt, model="gpt-4o-mini", temperature=0.3, max_tokens=400)
+            if not response:
+                return {
+                    "status": "need_info",
+                    "question": "Tôi chưa hiểu rõ nhu cầu của bạn. Bạn có thể mô tả cụ thể hơn không?",
+                    "case": 4,
+                    "state": conversation_state
+                }
+            
             data = json.loads(response.strip().replace("```json", "").replace("```", ""))
             suggestions = data.get("suggestions", [])
             
@@ -912,6 +920,14 @@ Be concise and helpful."""
         
         try:
             response = call_openai(prompt, model="gpt-4o-mini", temperature=0.5, max_tokens=200)
+            if not response:
+                return {
+                    "status": "error",
+                    "answer": "Tôi xin lỗi, tôi không thể trả lời câu hỏi của bạn lúc này.",
+                    "case": 3,
+                    "state": conversation_state
+                }
+            
             data = json.loads(response.strip().replace("```json", "").replace("```", ""))
             
             return {
@@ -992,6 +1008,10 @@ Format:
                 temperature=0.3, 
                 max_tokens=500
             )
+            if not schema_response:
+                logger.warning(f"[_add_category] OpenAI returned None for schema")
+                return False
+            
             schema_data = json.loads(schema_response.strip().replace("```json", "").replace("```", ""))
             
             category_name = schema_data.get("category_name", new_category)
@@ -1226,6 +1246,10 @@ Return ONLY valid JSON, no markdown."""
             )
             
             # Parse JSON response
+            if not response:
+                logger.warning("[_extract_by_llm] OpenAI returned None")
+                return {}
+            
             data = json.loads(response.strip())
             inferred_cat = data.get("inferred_category", "").lower().strip()
             
@@ -1322,6 +1346,10 @@ Be concise. Attributes should be practical filtering criteria."""
                 temperature=0.0,
                 max_tokens=300
             )
+            
+            if not response:
+                logger.warning("[_suggest_categories_llm] OpenAI returned None")
+                return []
             
             logger.info(f"DEBUG: LLM response:\n{response}")
             

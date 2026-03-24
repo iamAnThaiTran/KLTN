@@ -297,6 +297,10 @@ User: "để tặng bạn gái"
             
             # Parse LLM response
             import json
+            if not response:
+                logger.warning("[_classify_intent_with_llm] OpenAI returned None")
+                return "search"  # Default intent
+            
             response_text = response.strip()
             
             # Extract JSON from response (in case there's extra text)

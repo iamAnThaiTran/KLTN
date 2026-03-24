@@ -126,9 +126,10 @@ class ContextAnalyzer:
             
             # call_openai() already returns the string content directly
             if response is None:
-                raise Exception("OpenAI returned None")
-            
-            response_text = response.strip()
+                logger.warning("[ContextAnalyzer] OpenAI returned None, using fallback")
+                response_text = ""
+            else:
+                response_text = response.strip()
             
             # 🔍 Parse JSON response from LLM
             result = self._parse_llm_response(response_text)

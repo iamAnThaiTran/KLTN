@@ -518,3 +518,60 @@ class SKURepository:
         conn.close()
         
         return product
+    
+    def get_tiki_ids(self, db_product_ids: List[int]) -> Dict[int, Dict[str, str]]:
+        """
+        Get Tiki product_id and spid by DB product IDs.
+        
+        Used for product comparison: frontend sends DB IDs, need to lookup Tiki IDs
+        
+        Args:
+            db_product_ids: List of product IDs from DB [46, 34]
+        
+        Returns:
+            {
+                46: {
+                    "tiki_product_id": "186253037",
+                    "tiki_spid": "276152407",
+                    "title": "...",
+                    "seller_id": "1"
+                },
+                34: {...}
+            }
+        """
+        if not db_product_ids:
+            return {}
+        
+        conn = self._get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        
+        try:
+            placeholders = ', '.join(['%s'] * len(db_product_ids))
+            query = f"""
+                SELECT 
+                    id,
+                    tiki_product_id,
+                    tiki_spid,
+                    title
+                FROM products
+                WHERE id IN ({placeholders})
+            """
+            
+            cursor.execute(query, db_product_ids)
+            rows = cursor.fetchall()
+            
+            result = {}
+            for row in rows:
+                if row['tiki_product_id'] and row['tiki_spid']:
+                    result[row['id']] = {
+                        'tiki_product_id': row['tiki_product_id'],
+                        'tiki_spid': row['tiki_spid'],
+                        'title': row['title'],
+                        'seller_id': '1'  # Default to Tiki official seller
+                    }
+            
+            return result
+        
+        finally:
+            cursor.close()
+            conn.close()

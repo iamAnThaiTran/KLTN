@@ -135,7 +135,11 @@ Be natural and helpful, not salesy.
 
 Explanation:"""
         
-        explanation = call_llm(prompt, max_tokens=100).strip()
+        explanation = call_llm(prompt, max_tokens=100)
+        if explanation:
+            explanation = explanation.strip()
+        else:
+            explanation = "This product matches your requirements."
         
         return explanation
     
@@ -170,6 +174,10 @@ Explanation:"""
         prompt += "- Which product is best for which user\n\n"
         prompt += "Comparison:"
         
-        comparison = call_llm(prompt, max_tokens=200).strip()
+        comparison = call_llm(prompt, max_tokens=200)
+        if comparison:
+            comparison = comparison.strip()
+        else:
+            comparison = "Unable to generate LLM comparison at this time. Please review products manually."
         
         return comparison

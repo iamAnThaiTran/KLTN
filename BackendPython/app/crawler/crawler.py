@@ -450,18 +450,24 @@ class TikiCrawler:
         detail = await self._extract_product_detail(browser, product)
         
         if detail:
-            match_info = self._check_attribute_match(detail, attributes)
+            # detail giờ có: {product_id, spid, attributes}
+            product_attrs = detail.get("attributes", {})
+            match_info = self._check_attribute_match(product_attrs, attributes)
             # logger.info(f"    ✓ {match_info['emoji']} {match_info['summary']}")
             
             return {
                 **product,
-                "attributes": detail,
+                "product_id": detail.get("product_id"),
+                "spid": detail.get("spid"),
+                "attributes": product_attrs,
                 "match_info": match_info
             }
         
         # logger.info(f"    ⚠️  Không lấy được chi tiết")
         return {
             **product,
+            "product_id": None,
+            "spid": None,
             "attributes": None,
             "match_info": {"matched": False, "reason": "No details available"}
         }
@@ -515,9 +521,14 @@ class TikiCrawler:
             raw = await response.text()
             data = json.loads(raw)
             
-            result = self._parse_product_attributes(data)
+            attributes = self._parse_product_attributes(data)
             
-            return result
+            # Trả lại product_id, spid để dùng cho review crawler
+            return {
+                "product_id": product_id,
+                "spid": spid or "",
+                "attributes": attributes
+            }
             
         except Exception as e:
             logger.warning(f"Lỗi extract detail: {str(e)}")
@@ -731,7 +742,11 @@ class TikiCrawler:
                     "image": p.get("image"),
                     "source": "tiki",
                     "discount": p.get("discount", 0),
-                    "sold": p.get("sold", 0)
+                    "sold": p.get("sold", 0),
+                    # Tiki external IDs
+                    "product_id": p.get("product_id", ""),
+                    "spid": p.get("spid", ""),
+                    "seller_id": p.get("seller_id", "1")
                 }
                 
                 # logger.debug(f"     Base info: title={product_dict['title'][:30]}, price={product_dict['price']}, brand={product_dict['brand']}")

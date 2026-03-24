@@ -230,12 +230,18 @@ class CrawlerToSKUAdapter:
                             UPDATE products SET
                                 title = %s,
                                 thumbnail = %s,
+                                tiki_product_id = %s,
+                                tiki_spid = %s,
+                                seller_id = %s,
                                 updated_at = NOW()
                             WHERE id = %s
                             RETURNING id
                         """, (
                             product_data.get('title', 'Unknown Product'),
                             product_data.get('image', ''),
+                            product_data.get('product_id', ''),
+                            product_data.get('spid', ''),
+                            product_data.get('seller_id', '1'),
                             product_id
                         ))
                         result = cursor.fetchone()
@@ -246,9 +252,10 @@ class CrawlerToSKUAdapter:
                         cursor.execute("""
                             INSERT INTO products (
                                 category_id, title, brand, description, 
-                                product_url, source, thumbnail, created_at
+                                product_url, source, thumbnail, 
+                                tiki_product_id, tiki_spid, seller_id, created_at
                             )
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                             RETURNING id
                         """, (
                             category_id,
@@ -257,7 +264,10 @@ class CrawlerToSKUAdapter:
                             product_data.get('description', ''),
                             product_data.get('link', ''),
                             product_data.get('source', 'tiki'),
-                            product_data.get('image', '')
+                            product_data.get('image', ''),
+                            product_data.get('product_id', ''),
+                            product_data.get('spid', ''),
+                            product_data.get('seller_id', '1')
                         ))
                         
                         result = cursor.fetchone()
