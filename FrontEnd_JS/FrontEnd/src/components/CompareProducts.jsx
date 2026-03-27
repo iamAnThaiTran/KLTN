@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Trash2, Loader, Check } from 'lucide-react';
 import { getUserFavorites, compareProducts } from '../utils/favoritesApi';
+import ComparisonResultFromApi from './ComparisonResultFromApi';
+import ComparisonHistoryModal from './ComparisonHistoryModal';
 
 /**
  * CompareProducts Component
@@ -11,6 +13,10 @@ export default function CompareProducts({ token, user, onBack }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(new Set());
+  const [comparing, setComparing] = useState(false);
+  const [comparisonData, setComparisonData] = useState(null);
+  const [showResult, setShowResult] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
 
   // Fetch favorites on mount
   useEffect(() => {
@@ -59,31 +65,62 @@ export default function CompareProducts({ token, user, onBack }) {
     // Convert Set to Array and send to server
     const productIds = Array.from(selected);
     
-    try {
-      setLoading(true);
-      setError(null);
-      compareProducts(productIds)
-        .then(response => {
-          console.log('✅ Comparison response:', response);
-          alert(`✅ ${response.message || 'So sánh thành công!'}`);
-          setSelected(new Set()); // Clear selection
-        })
-        .catch(err => {
-          console.error('❌ Comparison error:', err);
-          setError(err.message);
-          alert(`❌ Lỗi: ${err.message}`);
-        })
-        .finally(() => {
-          setLoading(false);
-        });
-    } catch (err) {
-      console.error('❌ Error in handleCompare:', err);
-      setError(err.message);
-      setLoading(false);
-    }
+    setComparing(true);
+    setError(null);
+    
+    compareProducts(productIds)
+      .then(response => {
+        console.log('✅ Comparison response:', response);
+        setComparisonData(response);
+        setShowResult(true);
+        setSelected(new Set()); // Clear selection
+      })
+      .catch(err => {
+        console.error('❌ Comparison error:', err);
+        setError(err.message);
+        alert(`❌ Lỗi: ${err.message}`);
+      })
+      .finally(() => {
+        setComparing(false);
+      });
+  };
+
+  // Handle back from comparison result
+  const handleBackFromResult = () => {
+    setShowResult(false);
+    setComparisonData(null);
+  };
+
+  // Handle selecting a comparison from history
+  const handleSelectFromHistory = (historicalComparison) => {
+    setComparisonData(historicalComparison);
+    setShowResult(true);
+    setShowHistory(false);
   };
 
   const isSelected = (productId) => selected.has(productId);
+
+  // If showing history, display the history modal
+  if (showHistory) {
+    return (
+      <ComparisonHistoryModal
+        user={user}
+        onBack={() => setShowHistory(false)}
+        onSelectComparison={handleSelectFromHistory}
+      />
+    );
+  }
+
+  // If showing result, display the comparison
+  if (showResult && comparisonData) {
+    return (
+      <ComparisonResultFromApi
+        data={comparisonData}
+        onBack={handleBackFromResult}
+        onOpenHistory={() => setShowHistory(true)}
+      />
+    );
+  }
 
   return (
     <div
@@ -155,24 +192,31 @@ export default function CompareProducts({ token, user, onBack }) {
         {selected.size > 0 && (
           <button
             onClick={handleCompare}
-            disabled={selected.size < 2}
+            disabled={selected.size < 2 || comparing}
             style={{
-              background: selected.size < 2 ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.95)',
+              background: selected.size < 2 || comparing ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.95)',
               border: 'none',
-              color: selected.size < 2 ? 'rgba(255,255,255,0.5)' : '#d97706',
+              color: selected.size < 2 || comparing ? 'rgba(255,255,255,0.5)' : '#d97706',
               padding: '8px 16px',
               borderRadius: 6,
-              cursor: selected.size < 2 ? 'not-allowed' : 'pointer',
+              cursor: selected.size < 2 || comparing ? 'not-allowed' : 'pointer',
               fontSize: 12,
               fontWeight: 600,
               transition: 'all 0.2s',
             }}
             onMouseEnter={(e) =>
-              selected.size >= 2 && (e.currentTarget.style.background = 'rgba(255,255,255,1)')
+              selected.size >= 2 && !comparing && (e.currentTarget.style.background = 'rgba(255,255,255,1)')
             }
             onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.95)')}
           >
-            So sánh ({selected.size})
+            {comparing ? (
+              <>
+                <Loader size={12} style={{ animation: 'spin 1s linear infinite', marginRight: 4, display: 'inline' }} />
+                Đang so sánh...
+              </>
+            ) : (
+              <>So sánh ({selected.size})</>
+            )}
           </button>
         )}
       </div>

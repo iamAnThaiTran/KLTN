@@ -5,21 +5,56 @@
 
 import apiRequest from './apiClient.js';
 
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+
 /**
  * Compare two or three products with a question
  * @param {Array<number>} productIds - Array of 2-3 product IDs
  * @param {string} question - Specific question or comparison criteria
- * @returns {Promise<Object>} Comparison results from LLM
+ * @returns {Promise<Object>} Comparison results from LLM with snapshot_a, snapshot_b, comparison text
  */
 export async function compareProducts(productIds, question = '') {
   try {
-    if (!Array.isArray(productIds) || productIds.length < 2 || productIds.length > 3) {
-      throw new Error('Please select 2-3 products to compare');
+    if (!Array.isArray(productIds) || productIds.length < 2 || productIds.length > 4) {
+      throw new Error('Vui lòng chọn 2-4 sản phẩm để so sánh');
     }
 
-    // For now, return mock data
-    // In production, this would call the backend API
-    return await mockComparisonResponse(productIds, question);
+    console.log('🔍 Đang so sánh sản phẩm:', productIds);
+
+    // Call real backend API
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/compare_products`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          product_ids: productIds,
+          question: question || '',
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      console.log('✅ So sánh thành công:', data);
+
+      // Check if response has the new format from backend
+      if (data.status === 'success' && data.comparison) {
+        return data; // Return full response with snapshot_a, snapshot_b, comparison markdown
+      }
+
+      // Fallback to old mock format if needed
+      return data;
+    } catch (apiError) {
+      console.warn('⚠️ API không khả dụng, sử dụng mock data:', apiError);
+      // Fallback to mock data in development
+      return await mockComparisonResponse(productIds, question);
+    }
   } catch (error) {
     console.error('[Comparison API] Error comparing products:', error);
     throw error;

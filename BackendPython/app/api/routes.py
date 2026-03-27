@@ -16,6 +16,7 @@ from app.api.sku_routes import router as sku_router
 from app.api.progressive_search_routes import router as progressive_search_router
 from app.api.product_automation_routes import router as product_automation_router
 from app.api.product_comparison_routes import router as product_comparison_router
+from app.api.comparison_history_routes import router as comparison_history_router
 from app.api.auth_routes import router as auth_router
 from app.api.user_routes import router as user_router
 from app.crawler.crawler import TikiCrawler
@@ -48,6 +49,7 @@ app.include_router(sku_router)
 app.include_router(progressive_search_router)
 app.include_router(product_automation_router)  # ✅ NEW: Product automation routes
 app.include_router(product_comparison_router)  # ✅ NEW: Product comparison routes
+app.include_router(comparison_history_router)  # ✅ NEW: Comparison history routes
 
 # Enable CORS for frontend communication
 app.add_middleware(
