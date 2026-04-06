@@ -1,0 +1,76 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.0.3 Chrome/140.0.7339.249 Electron/38.7.0 Safari/537.36" version="29.0.3">
+  <diagram name="Page-1" id="uKdMTi41PcIER2NNYek9">
+    <mxGraphModel dx="1296" dy="765" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2339" pageHeight="3300" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="THhChq4iYZZwSDoRxRdq-2" value="" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=default;dashed=1;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="37" y="210" width="240" height="257" as="geometry" />
+        </mxCell>
+        <mxCell id="THhChq4iYZZwSDoRxRdq-3" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=default;" vertex="1" parent="1">
+          <mxGeometry x="60" y="280" width="193" height="132" as="geometry" />
+        </mxCell>
+        <mxCell id="frontend" value="Frontend (React/Vue)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="80" y="310" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="gateway" value="API Gateway" style="rounded=1;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="350" y="308.5" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="search" value="Search Service" style="rounded=1;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="590" y="215" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ai" value="AI Service (OpenAI API)" style="rounded=1;fillColor=default;" vertex="1" parent="1">
+          <mxGeometry x="620" y="110" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="user" value="User Service" style="rounded=1;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="648" y="335" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="crawl" value="Crawl Service" style="rounded=1;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="755" y="455" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="db" value="PostgreSQL" style="shape=cylinder;whiteSpace=wrap;html=1;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="890" y="210" width="120" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="redis" value="Redis Cache" style="shape=cylinder;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="920" y="110" width="120" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="mq" value="RabbitMQ" style="rounded=1;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="910" y="400" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="frontend" target="gateway">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="gateway" target="search">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="search" target="ai">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="search" target="db">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="search" target="redis">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="gateway" target="user">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="user" target="db">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="crawl" target="mq">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="mq" target="search">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="crawl" target="db">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="THhChq4iYZZwSDoRxRdq-4" value="BROWSER" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="80" y="280" width="60" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
