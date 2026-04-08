@@ -78,6 +78,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your_password}
     ports:
       - "8001:8001"
+    volumes:
+      - ../BackendPython/services/product_service:/app
     depends_on:
       postgres:
         condition: service_started
@@ -97,6 +99,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your_password}
     ports:
       - "8002:8002"
+    volumes:
+      - ../BackendPython/services/recommender_service:/app
     depends_on:
       postgres:
         condition: service_started
@@ -120,6 +124,8 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
     ports:
       - "8003:8003"
+    volumes:
+      - ../BackendPython/services/crawl_service:/app
     depends_on:
       postgres:
         condition: service_started
@@ -141,6 +147,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your_password}
     ports:
       - "8004:8004"
+    volumes:
+      - ../BackendPython/services/user_service:/app
     depends_on:
       postgres:
         condition: service_started
