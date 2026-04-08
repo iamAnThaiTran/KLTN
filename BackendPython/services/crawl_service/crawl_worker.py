@@ -96,7 +96,7 @@ def execute_crawler(task_data: Dict[str, Any]) -> Dict[str, Any]:
         task_data: Task configuration with sources, category, attributes
     
     Returns:
-        Dictionary with crawl results
+        Dictionary with crawl results including PRODUCTS LIST
     """
     try:
         category = task_data.get("category", "")
@@ -104,6 +104,7 @@ def execute_crawler(task_data: Dict[str, Any]) -> Dict[str, Any]:
         attributes = task_data.get("attributes", {})
         
         results = {
+            "products": [],  # ✅ NEW: Include products list
             "products_found": 0,
             "products_saved": 0,
             "sources": {},
@@ -132,6 +133,9 @@ def execute_crawler(task_data: Dict[str, Any]) -> Dict[str, Any]:
             loop.close()
             
             logger.info(f"🎯 Crawler found {len(products)} products")
+            
+            # ✅ Save products list
+            results["products"] = products
             
             # Organize by source
             for product in products:

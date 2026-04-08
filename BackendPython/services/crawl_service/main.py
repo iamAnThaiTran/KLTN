@@ -281,7 +281,7 @@ async def get_task_status(task_id: str):
 
 @app.get("/api/crawl/result/{task_id}")
 async def get_task_result(task_id: str):
-    """Get result of a completed crawl task"""
+    """Get result of a completed crawl task - includes products list"""
     db = SessionLocal()
     try:
         task = db.query(CrawlTask).filter(CrawlTask.task_id == task_id).first()
@@ -302,6 +302,7 @@ async def get_task_result(task_id: str):
         
         return {
             "task_id": task_id,
+            "products": result.get("products", []),  # ✅ NEW: Include products list
             "products_found": result.get("products_found", 0),
             "products_saved": result.get("products_saved", 0),
             "sources": result.get("sources", {}),

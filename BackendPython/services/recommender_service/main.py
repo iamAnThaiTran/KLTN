@@ -1,39 +1,43 @@
 """
-RecommendatorService - Microservice for intent detection and product ranking
+RecommendatorService - Microservice for intent analysis and product recommendation
 Port: 8002
 
 Handles:
-- User intent detection
-- Product ranking and scoring
-- Classification (7 cases)
+- User intent detection and analysis via /api/analyze
+- Context management and conversation sessions  
+- Classification into 7 cases
 - Clarification questions
-- Recommendation algorithm configuration
+- Product recommendation orchestration
 """
 
-from fastapi import FastAPI, HTTPException, Body
-from fastapi.middleware.cors import CORSMiddleware
+import asyncio
 import logging
-from typing import Optional, List, Dict, Any
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, Session
-import os
-from datetime import datetime, timedelta
-import hashlib
-import json
+import traceback
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional, Dict, Any, List
+from sqlalchemy.orm import Session
+from datetime import datetime
 
-logger = logging.getLogger(__name__)
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
+logger = logging.getLogger("recommender")
 
 # ============================================================================
-# Environment Configuration
+# Import local modules (independent service)
 # ============================================================================
-
-DB_USER = os.getenv("POSTGRES_USER", "postgres")
-DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "postgres")
-DB_HOST = os.getenv("DB_HOST", "postgres")
-DB_PORT = int(os.getenv("DB_PORT", "5432"))
-DB_NAME = "recommender_db"
-
-DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+from core.orchestrator import RecommendationOrchestrator
+from core.context_analyzer import get_context_analyzer
+from services.session_manager_factory import get_session_manager
+from db.sku_repository import SKURepository
+from config.database_orm import Base, engine, get_db
+from config.auth_middleware import get_current_user_optional
+from services.user_service import UserService
+from models.user_models import User
 
 # ============================================================================
 # FastAPI Setup
@@ -41,8 +45,8 @@ DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NA
 
 app = FastAPI(
     title="RecommendatorService",
-    description="Microservice for intent detection and product ranking",
-    version="1.0.0"
+    description="Microservice for intent analysis and product recommendation",
+    version="2.0.0"
 )
 
 app.add_middleware(
@@ -54,528 +58,360 @@ app.add_middleware(
 )
 
 # ============================================================================
-# Database Setup
-# ============================================================================
-
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20
-)
-
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-# ============================================================================
-# Data Models (SQLAlchemy)
-# ============================================================================
-
-from sqlalchemy import Column, Integer, String, Float, Text, TIMESTAMP, Boolean, JSON, ARRAY, Numeric, DECIMAL
-from sqlalchemy.ext.declarative import declarative_base
-
-Base = declarative_base()
-
-class IntentCache(Base):
-    __tablename__ = "intent_cache"
-    id = Column(Integer, primary_key=True)
-    user_input_hash = Column(String(64), unique=True)
-    intent_type = Column(String(50))
-    confidence = Column(DECIMAL(5, 4))
-    categories = Column(ARRAY(String))
-    intent_data = Column(JSON)
-    created_at = Column(TIMESTAMP, default=datetime.utcnow)
-    expires_at = Column(TIMESTAMP)
-    hit_count = Column(Integer, default=0)
-
-class RankingWeights(Base):
-    __tablename__ = "ranking_weights"
-    id = Column(Integer, primary_key=True)
-    category_id = Column(Integer)
-    attribute_name = Column(String(100))
-    weight = Column(DECIMAL(5, 2))
-    description = Column(Text)
-
-class DialogueTemplate(Base):
-    __tablename__ = "dialogue_templates"
-    id = Column(Integer, primary_key=True)
-    category_id = Column(Integer)
-    attribute_name = Column(String(100))
-    question_text = Column(Text, nullable=False)
-    question_type = Column(String(50))
-    options = Column(JSON)
-    is_active = Column(Boolean, default=True)
-
-class ClassificationCache(Base):
-    __tablename__ = "classification_cache"
-    id = Column(Integer, primary_key=True)
-    input_hash = Column(String(64), unique=True)
-    case_number = Column(Integer)  # 1-7
-    case_name = Column(String(100))
-    confidence = Column(DECIMAL(5, 4))
-    attributes = Column(JSON)
-    created_at = Column(TIMESTAMP, default=datetime.utcnow)
-    expires_at = Column(TIMESTAMP)
-
-class RankingHistory(Base):
-    __tablename__ = "ranking_history"
-    id = Column(Integer, primary_key=True)
-    query_id = Column(String(100))
-    category_id = Column(Integer)
-    ranked_products = Column(JSON)
-    user_selected_product = Column(String(100))
-    ranking_quality = Column(String(50))  # good, fair, poor
-    created_at = Column(TIMESTAMP, default=datetime.utcnow)
-
-# ============================================================================
-# Health Check
-# ============================================================================
-
-@app.get("/api/health")
-async def health_check():
-    """Service health check endpoint"""
-    try:
-        with SessionLocal() as db:
-            db.execute(text("SELECT 1"))
-        return {
-            "status": "healthy",
-            "service": "RecommendatorService",
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        raise HTTPException(status_code=503, detail="Service unavailable")
-
-# ============================================================================
-# Intent Detection
-# ============================================================================
-
-def hash_input(text: str) -> str:
-    """Hash user input for cache lookup"""
-    return hashlib.sha256(text.lower().encode()).hexdigest()
-
-@app.post("/api/intent/detect")
-async def detect_intent(
-    input: str = Body(..., embed=True),
-    context: Optional[Dict[str, Any]] = Body(None, embed=True)
-):
-    """
-    Detect user intent from natural language
-    
-    Example:
-    {
-        "input": "I want a laptop under 500",
-        "context": {"previous_category": "electronics"}
-    }
-    """
-    db = SessionLocal()
-    try:
-        input_hash = hash_input(input)
-        
-        # Check cache first
-        cached = db.query(IntentCache).filter(
-            IntentCache.user_input_hash == input_hash,
-            IntentCache.expires_at > datetime.utcnow()
-        ).first()
-        
-        if cached:
-            cached.hit_count += 1
-            db.commit()
-            return {
-                "intent_type": cached.intent_type,
-                "confidence": float(cached.confidence) if cached.confidence else 0.0,
-                "categories": cached.categories or [],
-                "attributes": cached.intent_data or {},
-                "cached": True
-            }
-        
-        # Simulate intent detection (would use ML model in production)
-        # Extract keywords for "under", "below", "max", etc. → price constraint
-        # Extract keywords for product types → category
-        intent_data = {
-            "price_constraint": "under_500" if "under 500" in input.lower() else None,
-            "product_type": "laptop" if "laptop" in input.lower() else None
-        }
-        
-        intent_type = "purchase_inquiry"
-        confidence = 0.85
-        categories = ["electronics", "computers"]
-        
-        # Cache the result (24 hour TTL)
-        cache_entry = IntentCache(
-            user_input_hash=input_hash,
-            intent_type=intent_type,
-            confidence=confidence,
-            categories=categories,
-            intent_data=intent_data,
-            expires_at=datetime.utcnow() + timedelta(hours=24),
-            hit_count=1
-        )
-        db.add(cache_entry)
-        db.commit()
-        
-        return {
-            "intent_type": intent_type,
-            "confidence": confidence,
-            "categories": categories,
-            "attributes": intent_data,
-            "cached": False
-        }
-    except Exception as e:
-        logger.error(f"Intent detection failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
-
-# ============================================================================
-# Classification (7 Cases)
-# ============================================================================
-
-@app.post("/api/classify")
-async def classify_intent(
-    input: str = Body(..., embed=True),
-    category: Optional[str] = Body(None, embed=True)
-):
-    """
-    Classify user input into 7 cases for routing
-    
-    7 Cases:
-    1. Simple search
-    2. Filter-based search
-    3. Comparison inquiry
-    4. Specification inquiry
-    5. Price inquiry
-    6. Availability inquiry
-    7. Review/feedback inquiry
-    """
-    db = SessionLocal()
-    try:
-        input_hash = hash_input(input)
-        
-        # Check cache
-        cached = db.query(ClassificationCache).filter(
-            ClassificationCache.input_hash == input_hash,
-            ClassificationCache.expires_at > datetime.utcnow()
-        ).first()
-        
-        if cached:
-            return {
-                "case": cached.case_number,
-                "case_name": cached.case_name,
-                "attributes": cached.attributes or {},
-                "confidence": float(cached.confidence) if cached.confidence else 0.0
-            }
-        
-        # Classification logic (rule-based, would use ML in production)
-        case_number = 1  # Default
-        case_name = "simple_search"
-        confidence = 0.8
-        attributes = {}
-        
-        if "compare" in input.lower() or "vs" in input.lower():
-            case_number = 3
-            case_name = "comparison_inquiry"
-        elif "price" in input.lower():
-            case_number = 5
-            case_name = "price_inquiry"
-        elif "available" in input.lower() or "stock" in input.lower():
-            case_number = 6
-            case_name = "availability_inquiry"
-        elif "review" in input.lower() or "rating" in input.lower():
-            case_number = 7
-            case_name = "review_inquiry"
-        elif any(word in input.lower() for word in ["filter", "brand", "color", "size"]):
-            case_number = 2
-            case_name = "filter_based_search"
-        
-        # Cache result
-        cache_entry = ClassificationCache(
-            input_hash=input_hash,
-            case_number=case_number,
-            case_name=case_name,
-            confidence=confidence,
-            attributes=attributes,
-            expires_at=datetime.utcnow() + timedelta(hours=24)
-        )
-        db.add(cache_entry)
-        db.commit()
-        
-        return {
-            "case": case_number,
-            "case_name": case_name,
-            "attributes": attributes,
-            "confidence": confidence
-        }
-    except Exception as e:
-        logger.error(f"Classification failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
-
-# ============================================================================
-# Product Ranking and Scoring
-# ============================================================================
-
-@app.post("/api/rank")
-async def rank_products(
-    products: List[Dict[str, Any]] = Body(..., embed=True),
-    category: str = Body(..., embed=True),
-    user_preferences: Optional[Dict[str, Any]] = Body(None, embed=True),
-    weights: Optional[Dict[str, float]] = Body(None, embed=True)
-):
-    """
-    Rank products by relevance
-    
-    Example:
-    {
-        "products": [
-            {"product_id": "1", "name": "Laptop A", "price": 800},
-            {"product_id": "2", "name": "Laptop B", "price": 1200}
-        ],
-        "category": "electronics",
-        "user_preferences": {"price_sensitivity": 0.8},
-        "weights": {"price": 0.5, "brand": 0.3, "rating": 0.2}
-    }
-    """
-    db = SessionLocal()
-    try:
-        # Get default weights if not provided
-        if not weights:
-            db_weights = db.query(RankingWeights).filter(
-                RankingWeights.category_id == None
-            ).all()
-            weights = {w.attribute_name: float(w.weight) for w in db_weights} if db_weights else {}
-        
-        # Score and rank each product
-        scored_products = []
-        for product in products:
-            # Simple scoring (would be more sophisticated in production)
-            score = 0.0
-            
-            # Price scoring (lower is better, up to a point)
-            if "price" in product and weights.get("price", 0):
-                price_score = 1.0 - (product["price"] / 2000)  # Normalize to max price
-                score += max(0, price_score) * weights.get("price", 0)
-            
-            # Brand scoring (popular brands)
-            if "brand" in product and weights.get("brand", 0):
-                popular_brands = ["Dell", "HP", "Lenovo", "Apple"]
-                brand_score = 1.0 if product.get("brand") in popular_brands else 0.5
-                score += brand_score * weights.get("brand", 0)
-            
-            # Rating scoring
-            if "rating" in product and weights.get("rating", 0):
-                score += (product.get("rating", 0) / 5.0) * weights.get("rating", 0)
-            
-            product["relevance_score"] = min(1.0, score)
-            scored_products.append(product)
-        
-        # Sort by score descending
-        ranked = sorted(scored_products, key=lambda x: x.get("relevance_score", 0), reverse=True)
-        
-        return {
-            "ranked_products": ranked,
-            "category": category,
-            "weights_used": weights
-        }
-    except Exception as e:
-        logger.error(f"Ranking failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
-
-@app.post("/api/score")
-async def score_product(
-    product: Dict[str, Any] = Body(..., embed=True),
-    category: str = Body(..., embed=True),
-    criteria: Optional[Dict[str, Any]] = Body(None, embed=True)
-):
-    """Score a single product"""
-    db = SessionLocal()
-    try:
-        score = 0.8  # Placeholder
-        
-        return {
-            "product_id": product.get("product_id"),
-            "score": score,
-            "component_scores": {
-                "price": 0.7,
-                "quality": 0.85,
-                "availability": 0.9
-            }
-        }
-    except Exception as e:
-        logger.error(f"Scoring failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
-
-# ============================================================================
-# Dialog and Questions
-# ============================================================================
-
-@app.get("/api/questions")
-async def get_clarification_questions(
-    intent: str,
-    category: str,
-    limit: int = 3
-):
-    """Get clarification questions for user"""
-    db = SessionLocal()
-    try:
-        questions = db.query(DialogueTemplate).filter(
-            DialogueTemplate.is_active == True,
-            DialogueTemplate.question_type.ilike(f"%{intent}%")
-        ).limit(limit).all()
-        
-        return {
-            "questions": [
-                {
-                    "id": q.id,
-                    "question": q.question_text,
-                    "question_type": q.question_type,
-                    "options": q.options or []
-                }
-                for q in questions
-            ]
-        }
-    except Exception as e:
-        logger.error(f"Get questions failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
-
-# ============================================================================
-# Ranking Configuration
-# ============================================================================
-
-@app.get("/api/weights/{category}")
-async def get_ranking_weights(category: str):
-    """Get current ranking weights for category"""
-    db = SessionLocal()
-    try:
-        weights = db.query(RankingWeights).filter(
-            RankingWeights.category_id == int(category) if category.isdigit() else True
-        ).all()
-        
-        return {
-            "weights": {w.attribute_name: float(w.weight) for w in weights}
-        }
-    except Exception as e:
-        logger.error(f"Get weights failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
-
-@app.put("/api/weights/{category}")
-async def update_ranking_weights(
-    category: str,
-    weights: Dict[str, float] = Body(..., embed=True)
-):
-    """Update ranking weights (admin operation)"""
-    db = SessionLocal()
-    try:
-        for attr, weight in weights.items():
-            db_weight = db.query(RankingWeights).filter(
-                RankingWeights.attribute_name == attr
-            ).first()
-            
-            if db_weight:
-                db_weight.weight = weight
-            else:
-                db_weight = RankingWeights(
-                    attribute_name=attr,
-                    weight=weight,
-                    category_id=int(category) if category.isdigit() else None
-                )
-                db.add(db_weight)
-        
-        db.commit()
-        return {"status": "updated", "category": category}
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Update weights failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
-
-# ============================================================================
-# Cache Management
-# ============================================================================
-
-@app.get("/api/cache/stats")
-async def get_cache_hit_rate():
-    """Get intent detection cache statistics"""
-    db = SessionLocal()
-    try:
-        total_entries = db.query(IntentCache).count()
-        total_hits = db.query(IntentCache).with_entities(sum(IntentCache.hit_count)).scalar() or 0
-        hit_rate = (total_hits / total_entries * 100) if total_entries > 0 else 0
-        
-        return {
-            "cache_entries": total_entries,
-            "total_hits": total_hits,
-            "hit_rate_percent": hit_rate
-        }
-    except Exception as e:
-        logger.error(f"Cache stats failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
-
-@app.delete("/api/cache/intent")
-async def clear_intent_cache(older_than_hours: int = 24):
-    """Clear expired cache entries"""
-    db = SessionLocal()
-    try:
-        cutoff_time = datetime.utcnow() - timedelta(hours=older_than_hours)
-        deleted = db.query(IntentCache).filter(
-            IntentCache.created_at < cutoff_time
-        ).delete()
-        db.commit()
-        
-        return {"deleted_entries": deleted}
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Clear cache failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
-
-# ============================================================================
-# Startup and Shutdown
+# Startup Event
 # ============================================================================
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize service on startup"""
-    logger.info("RecommendatorService starting up...")
+    """Create database tables on startup"""
     try:
-        with SessionLocal() as db:
-            db.execute(text("SELECT 1"))
-        logger.info("Database connection verified")
+        Base.metadata.create_all(bind=engine)
+        logger.info("✅ Database tables created/verified")
     except Exception as e:
-        logger.error(f"Failed to connect to database: {e}")
-        raise
+        logger.error(f"❌ Error creating database tables: {e}")
+        traceback.print_exc()
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
-    logger.info("RecommendatorService shutting down...")
-    engine.dispose()
+# ============================================================================
+# Initialize Components
+# ============================================================================
+
+session_manager = get_session_manager()
+orchestrator = RecommendationOrchestrator()
+context_analyzer = get_context_analyzer()
+sku_repo = SKURepository()
+
+logger.info(f"[Recommender] Session storage: {session_manager.get_storage_type()}")
+logger.info(f"[Recommender] Orchestrator initialized")
+
+# ============================================================================
+# Models
+# ============================================================================
+
+class QueryRequest(BaseModel):
+    """Query request model"""
+    user_input: str
+    conversation_id: Optional[str] = None
+
+class ResponseUpdate(BaseModel):
+    """User response to clarification question"""
+    conversation_id: str
+    question_type: str
+    value: str
+    attribute_name: Optional[str] = None
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+async def _save_search_history_if_user(
+    current_user: Optional[User],
+    db: Session,
+    user_input: str,
+    category_name: Optional[str] = None,
+    session_id: Optional[str] = None
+):
+    """Save search history if user authenticated"""
+    if not current_user:
+        return None
+    
+    try:
+        search_record = UserService.save_search_query(
+            db=db,
+            user_id=current_user.id,
+            query=user_input,
+            category_name=category_name,
+            session_id=session_id
+        )
+        logger.info(f"✅ Saved search history for user {current_user.id}")
+        return search_record.id
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to save search history: {e}")
+        return None
+
+def _generate_hints_from_filters(category: str, filter_groups: List[Dict]) -> List[str]:
+    """Generate user-friendly filter hints"""
+    hints = []
+    if not filter_groups:
+        return hints
+    
+    enum_filters = [f for f in filter_groups if f.get('data_type') == 'enum']
+    if enum_filters:
+        filter_names = ", ".join([f['display_name'] for f in enum_filters[:3]])
+        hints.append(f"Bạn có thể lọc theo {filter_names}")
+    
+    return hints
+
+def _update_search_history(history: List[str], new_input: str) -> List[str]:
+    """Add to search history, keep last 10"""
+    if new_input not in history:
+        history.append(new_input)
+    return history[-10:]
+
+# ============================================================================
+# Endpoints
+# ============================================================================
+
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "ok",
+        "service": "RecommendatorService",
+        "timestamp": datetime.utcnow().isoformat(),
+        "session_storage": session_manager.get_storage_type()
+    }
+
+@app.post("/api/analyze")
+async def analyze_query(
+    request: QueryRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
+    """
+    Main endpoint: Analyze user intent and retrieve products
+    
+    Flow:
+    1. Create/get session
+    2. Reconstruct intent if follow-up
+    3. Process with orchestrator
+    4. Return results with filters
+    """
+    try:
+        if not request.user_input or not request.user_input.strip():
+            return {"success": False, "error": "user_input required"}
+        
+        is_new_query = not request.conversation_id
+        conversation_id = request.conversation_id
+        
+        # ====== STEP 1: Create or fetch session ======
+        if not conversation_id:
+            conversation_id = session_manager.create_session()
+            conversation_state = None
+            logger.info(f"[/api/analyze] 🆕 NEW CONVERSATION: {conversation_id}")
+        else:
+            if not session_manager.session_exists(conversation_id):
+                return {"success": False, "error": "Session not found"}
+            conversation_state = session_manager.get_session(conversation_id)
+            logger.info(f"[/api/analyze] 📝 EXISTING CONVERSATION: {conversation_id}")
+        
+        # Initialize state if needed
+        if conversation_state is None:
+            conversation_state = {
+                "has_category": False,
+                "category": None,
+                "extracted": {},
+                "missing_required": [],
+                "search_history": [],
+                "attributes_asked": [],
+                "last_crawl_params": None,
+            }
+        
+        # ====== STEP 2: Reconstruct intent if follow-up ======
+        user_input_to_process = request.user_input
+        
+        if not is_new_query and conversation_state.get("search_history"):
+            logger.info("[/api/analyze] 🔄 RECONSTRUCTING INTENT")
+            result_dict = context_analyzer.reconstruct_intent(
+                user_input=request.user_input,
+                conversation_state=conversation_state
+            )
+            user_input_to_process = result_dict["intent"]
+            
+            if result_dict.get("category_changed"):
+                logger.info("[/api/analyze] 🔄 CATEGORY CHANGE DETECTED")
+                conversation_state["search_history"] = [request.user_input]
+                conversation_state["extracted"] = {}
+                conversation_state["category"] = None
+                conversation_state["has_category"] = False
+        
+        # ====== STEP 3: Process with orchestrator ======
+        logger.info(f"[/api/analyze] Processing: '{user_input_to_process}'")
+        
+        orch_result = await orchestrator.process_query(
+            user_input=user_input_to_process,
+            conversation_state=conversation_state
+        )
+        
+        if "state" in orch_result:
+            conversation_state = orch_result["state"]
+            session_manager.set_session(conversation_id, conversation_state)
+        
+        # ====== STEP 4: Update search history ======
+        if "search_history" not in conversation_state:
+            conversation_state["search_history"] = []
+        
+        conversation_state["search_history"] = _update_search_history(
+            conversation_state["search_history"],
+            request.user_input
+        )
+        session_manager.set_session(conversation_id, conversation_state)
+        
+        # ====== STEP 5: Save to DB if authenticated ======
+        category_for_db = conversation_state.get("category")
+        await _save_search_history_if_user(
+            current_user=current_user,
+            db=db,
+            user_input=request.user_input,
+            category_name=category_for_db,
+            session_id=conversation_id
+        )
+        
+        # ====== STEP 6: Handle special status ======
+        products = orch_result.get("products", [])
+        orch_status = orch_result.get("status")
+        
+        if orch_status == "need_info":
+            logger.info("[/api/analyze] 💬 Returning clarification question")
+            return {
+                "success": True,
+                "status": "need_info",
+                "question": orch_result.get("question"),
+                "options": orch_result.get("options", []),
+                "case": orch_result.get("case"),
+                "conversation_id": conversation_id,
+                "search_history": conversation_state.get("search_history", [])
+            }
+        
+        if orch_status == "no_results":
+            logger.info("[/api/analyze] 🔍 No products found")
+            return {
+                "success": True,
+                "status": "no_results",
+                "message": "Không tìm thấy sản phẩm phù hợp",
+                "conversation_id": conversation_id,
+                "search_history": conversation_state.get("search_history", [])
+            }
+        
+        if orch_status == "error":
+            logger.error("[/api/analyze] ❌ Error")
+            return {
+                "success": False,
+                "status": "error",
+                "message": orch_result.get("message", "Lỗi xử lý"),
+                "conversation_id": conversation_id
+            }
+        
+        # ====== STEP 7: Fetch filters ======
+        filter_groups = []
+        category = conversation_state.get("category", "")
+        
+        if category:
+            try:
+                category_slug = sku_repo.get_category_slug_from_name(category)
+                if category_slug:
+                    available_filters = sku_repo.get_available_filters(category_slug)
+                    filter_groups = [
+                        {
+                            "attribute_name": f['attribute_name'],
+                            "display_name": f['display_name'] or f['attribute_name'],
+                            "data_type": f['data_type'],
+                            "options": [
+                                {"attribute_value": opt.get('attribute_value'), "product_count": opt.get('product_count')}
+                                for opt in f['options']
+                                if opt.get('attribute_value') is not None
+                            ]
+                        }
+                        for f in available_filters
+                    ]
+                    logger.info(f"✅ Fetched {len(filter_groups)} filters")
+            except Exception as e:
+                logger.error(f"Error fetching filters: {e}")
+        
+        # ====== Return response ======
+        total_products = orch_result.get("total_found", len(products))
+        
+        return {
+            "success": True,
+            "category": category,
+            "clarifying_hints": _generate_hints_from_filters(category, filter_groups),
+            "filters": filter_groups,
+            "products": products,
+            "total": total_products,
+            "conversation_id": conversation_id,
+            "search_history": conversation_state.get("search_history", [])
+        }
+        
+    except Exception as e:
+        logger.error(f"[/api/analyze] ❌ Error: {e}")
+        logger.exception("Error details")
+        return {
+            "success": False,
+            "error": str(e),
+            "conversation_id": request.conversation_id or "unknown"
+        }
+
+@app.post("/api/query")
+async def process_query(
+    request: QueryRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
+    """Process user query"""
+    logger.info(f"[/api/query] Processing: {request.user_input}")
+    
+    conversation_id = request.conversation_id or session_manager.create_session()
+    conversation_state = session_manager.get_session(conversation_id)
+    
+    result = await orchestrator.process_query(
+        user_input=request.user_input,
+        conversation_state=conversation_state
+    )
+    
+    session_manager.set_session(conversation_id, result.get("state"))
+    result["conversation_id"] = conversation_id
+    
+    return result
+
+@app.post("/api/respond")
+async def respond_to_question(request: ResponseUpdate):
+    """User responds to clarification question"""
+    if not session_manager.session_exists(request.conversation_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    conversation_state = session_manager.get_session(request.conversation_id)
+    
+    updated_state = orchestrator.update_state(
+        conversation_state,
+        {
+            "question_type": request.question_type,
+            "value": request.value,
+            "attribute_name": request.attribute_name
+        }
+    )
+    
+    session_manager.set_session(request.conversation_id, updated_state)
+    
+    result = await orchestrator.process_query(
+        user_input="",
+        conversation_state=updated_state
+    )
+    
+    result["conversation_id"] = request.conversation_id
+    return result
+
+@app.get("/api/session/{conversation_id}")
+async def get_session(conversation_id: str):
+    """Get session state (debug)"""
+    if not session_manager.session_exists(conversation_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    return {
+        "conversation_id": conversation_id,
+        "state": session_manager.get_session(conversation_id)
+    }
+
+@app.delete("/api/session/{conversation_id}")
+async def clear_session(conversation_id: str):
+    """Clear session"""
+    session_manager.delete_session(conversation_id)
+    return {"message": "Session cleared"}
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "main:app",
+        app,
         host="0.0.0.0",
         port=8002,
-        reload=False,
+        reload=True,
         log_level="info"
     )
