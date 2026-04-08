@@ -1,0 +1,766 @@
+{
+  "info": {
+    "_postman_id": "microservices-api-collection",
+    "name": "Microservices API Gateway",
+    "description": "Complete API collection for all microservices through Nginx Gateway",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Gateway Health",
+      "item": [
+        {
+          "name": "Check API Gateway Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "ProductService",
+      "item": [
+        {
+          "name": "Get All Categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/categories",
+              "host": ["{{base_url}}"],
+              "path": ["api", "categories"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Search Products",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"keyword\": \"phone\",\n  \"category_id\": null,\n  \"sort_by\": \"relevance\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/products/search",
+              "host": ["{{base_url}}"],
+              "path": ["api", "products", "search"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Product by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/products/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "products", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Product",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Product\",\n  \"description\": \"Updated description\",\n  \"price\": 999999\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/products/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "products", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get SKU by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/skus/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "skus", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update SKU Price/Stock",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price\": 2999999,\n  \"stock\": 50\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/skus/1/price",
+              "host": ["{{base_url}}"],
+              "path": ["api", "skus", "1", "price"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Batch Save Products",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"products\": [\n    {\n      \"product_id\": \"tiki-123\",\n      \"name\": \"Product 1\",\n      \"price\": 1000000,\n      \"category\": \"Electronics\"\n    },\n    {\n      \"product_id\": \"tiki-456\",\n      \"name\": \"Product 2\",\n      \"price\": 2000000,\n      \"category\": \"Electronics\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/products/batch",
+              "host": ["{{base_url}}"],
+              "path": ["api", "products", "batch"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "RecommendatorService",
+      "item": [
+        {
+          "name": "Detect Intent",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_input\": \"tôi muốn tìm điện thoại giá dưới 5 triệu có wifi\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/intent/detect",
+              "host": ["{{base_url}}"],
+              "path": ["api", "intent", "detect"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Classify Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_input\": \"so sánh iPhone vs Samsung\",\n  \"intent\": \"comparison\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/classify",
+              "host": ["{{base_url}}"],
+              "path": ["api", "classify"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Rank Products",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"products\": [\n    {\"id\": 1, \"name\": \"Product 1\", \"price\": 5000000, \"rating\": 4.5},\n    {\"id\": 2, \"name\": \"Product 2\", \"price\": 3000000, \"rating\": 4.0},\n    {\"id\": 3, \"name\": \"Product 3\", \"price\": 4000000, \"rating\": 4.8}\n  ],\n  \"intent\": \"search_budget_friendly\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/rank",
+              "host": ["{{base_url}}"],
+              "path": ["api", "rank"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Score Product",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": 1,\n  \"user_preferences\": {\n    \"price_max\": 5000000,\n    \"rating_min\": 4.0\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/score",
+              "host": ["{{base_url}}"],
+              "path": ["api", "score"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Questions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/questions",
+              "host": ["{{base_url}}"],
+              "path": ["api", "questions"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Ranking Weights",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/weights/Electronics",
+              "host": ["{{base_url}}"],
+              "path": ["api", "weights", "Electronics"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Ranking Weights",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price_weight\": 0.3,\n  \"rating_weight\": 0.4,\n  \"popularity_weight\": 0.3\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/weights/Electronics",
+              "host": ["{{base_url}}"],
+              "path": ["api", "weights", "Electronics"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Cache Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/cache/stats",
+              "host": ["{{base_url}}"],
+              "path": ["api", "cache", "stats"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "CrawlService",
+      "item": [
+        {
+          "name": "Enqueue Crawl Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://tiki.vn/search?q=iphone\",\n  \"source\": \"tiki\",\n  \"priority\": \"high\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/crawl/enqueue",
+              "host": ["{{base_url}}"],
+              "path": ["api", "crawl", "enqueue"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Crawl Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/crawl/status/task-123",
+              "host": ["{{base_url}}"],
+              "path": ["api", "crawl", "status", "task-123"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Crawl Result",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/crawl/result/task-123",
+              "host": ["{{base_url}}"],
+              "path": ["api", "crawl", "result", "task-123"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Crawl Task",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/crawl/cancel/task-123",
+              "host": ["{{base_url}}"],
+              "path": ["api", "crawl", "cancel", "task-123"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Crawl History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/crawl/history?source=tiki&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "crawl", "history"],
+              "query": [
+                {
+                  "key": "source",
+                  "value": "tiki"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Crawl Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/crawl/statistics",
+              "host": ["{{base_url}}"],
+              "path": ["api", "crawl", "statistics"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get DLQ Messages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/dlq/messages",
+              "host": ["{{base_url}}"],
+              "path": ["api", "dlq", "messages"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Retry Failed Task",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/dlq/retry/task-123",
+              "host": ["{{base_url}}"],
+              "path": ["api", "dlq", "retry", "task-123"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Failed Task",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/dlq/messages/task-123",
+              "host": ["{{base_url}}"],
+              "path": ["api", "dlq", "messages", "task-123"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "UserService",
+      "item": [
+        {
+          "name": "Create User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"testuser123\",\n  \"email\": \"test@example.com\",\n  \"password\": \"securepassword123\",\n  \"full_name\": \"Test User\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/users",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get User Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/users/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update User Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"Updated Name\",\n  \"phone\": \"0987654321\",\n  \"address\": \"123 Main St\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/users/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get User Preferences",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/users/1/preferences",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "1", "preferences"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update User Preferences",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"theme\": \"dark\",\n  \"language\": \"vi\",\n  \"notifications_enabled\": true,\n  \"price_range\": {\n    \"min\": 1000000,\n    \"max\": 10000000\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/users/1/preferences",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "1", "preferences"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Add to Search History",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"iphone 15\",\n  \"category\": \"Electronics\",\n  \"results_count\": 25\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/users/1/search-history",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "1", "search-history"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Search History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/users/1/search-history?limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "1", "search-history"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Add to Favorites",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": 123,\n  \"product_name\": \"iPhone 15 Pro\",\n  \"price\": 25000000\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/users/1/favorites",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "1", "favorites"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Favorites",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/users/1/favorites",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "1", "favorites"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Remove from Favorites",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/users/1/favorites/123",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "1", "favorites", "123"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Price Alert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": 123,\n  \"target_price\": 20000000,\n  \"alert_type\": \"when_below\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/users/1/alerts",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "1", "alerts"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Alerts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/users/1/alerts",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "1", "alerts"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Alert",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/users/1/alerts/alert-123",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "1", "alerts", "alert-123"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Review",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": 123,\n  \"rating\": 5,\n  \"title\": \"Great product!\",\n  \"content\": \"Very satisfied with this purchase\",\n  \"verified_purchase\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/users/1/reviews",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "1", "reviews"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get User Reviews",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/users/1/reviews",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "1", "reviews"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Record Comparison",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_ids\": [123, 456, 789],\n  \"comparison_criteria\": [\"price\", \"rating\", \"specs\"]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/users/1/comparisons",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "1", "comparisons"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Comparisons",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/users/1/comparisons",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "1", "comparisons"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    }
+  ]
+}
