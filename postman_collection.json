@@ -325,7 +325,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"url\": \"https://tiki.vn/search?q=iphone\",\n  \"source\": \"tiki\",\n  \"priority\": \"high\"\n}"
+              "raw": "{\n  \"category\": \"electronics\",\n  \"category_id\": 1,\n  \"sources\": [\"tiki\", \"lazada\"],\n  \"attributes\": {\"brand\": \"Apple\", \"price_range\": \"under_5m\"},\n  \"priority\": \"high\",\n  \"max_retries\": 3\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/crawl/enqueue",

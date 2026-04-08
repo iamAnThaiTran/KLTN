@@ -513,5 +513,3 @@ class CrawlService(BaseService):
         required = ["category", "category_id", "attributes"]
         return all(k in kwargs for k in required)
 
-# Import pika for BasicProperties
-import pika

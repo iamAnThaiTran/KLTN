@@ -135,6 +135,31 @@ services:
       - db_network
     restart: unless-stopped
 
+  crawl-worker:
+    build:
+      context: ../BackendPython/services/crawl_service
+      dockerfile: Dockerfile.worker
+    container_name: crawl-worker
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your_password}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+    volumes:
+      - ../BackendPython/services/crawl_service:/app
+    depends_on:
+      postgres:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - db_network
+    restart: unless-stopped
+
   user-service:
     build:
       context: ../BackendPython/services/user_service

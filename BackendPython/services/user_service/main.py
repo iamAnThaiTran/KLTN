@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Body, Query
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 from typing import Optional, List, Dict, Any
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 import os
 from datetime import datetime
@@ -197,7 +197,7 @@ async def health_check():
     """Service health check endpoint"""
     try:
         with SessionLocal() as db:
-            db.execute("SELECT 1")
+            db.execute(text("SELECT 1"))
         return {
             "status": "healthy",
             "service": "UserService",
@@ -703,7 +703,7 @@ async def startup_event():
     logger.info("UserService starting up...")
     try:
         with SessionLocal() as db:
-            db.execute("SELECT 1")
+            db.execute(text("SELECT 1"))
         logger.info("Database connection verified")
     except Exception as e:
         logger.error(f"Failed to connect to database: {e}")

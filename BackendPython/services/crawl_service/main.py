@@ -13,12 +13,16 @@ from fastapi import FastAPI, HTTPException, Body, Query
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 from typing import Optional, List, Dict, Any
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 import os
 from datetime import datetime, timedelta
 import uuid
 import asyncio
+import json
+
+# Import RabbitMQ client
+from rabbitmq_client import RabbitMQProducer
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +73,24 @@ engine = create_engine(
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Initialize RabbitMQ Producer
+rabbitmq_producer = None
+
+def get_rabbitmq_producer():
+    """Get or create RabbitMQ producer"""
+    global rabbitmq_producer
+    if rabbitmq_producer is None:
+        try:
+            rabbitmq_producer = RabbitMQProducer(
+                host=RABBITMQ_HOST,
+                port=RABBITMQ_PORT,
+                username=RABBITMQ_USER,
+                password=RABBITMQ_PASSWORD
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize RabbitMQ producer: {e}")
+    return rabbitmq_producer
 
 def get_db():
     db = SessionLocal()
@@ -147,7 +169,7 @@ async def health_check():
     """Service health check endpoint"""
     try:
         with SessionLocal() as db:
-            db.execute("SELECT 1")
+            db.execute(text("SELECT 1"))
         return {
             "status": "healthy",
             "service": "CrawlService",
@@ -188,7 +210,7 @@ async def enqueue_crawl(
         # Generate unique task ID
         task_id = f"crawl_{uuid.uuid4().hex[:12]}"
         
-        # Create task record
+        # Create task record in database
         task = CrawlTask(
             task_id=task_id,
             category=category,
@@ -202,9 +224,19 @@ async def enqueue_crawl(
         db.add(task)
         db.commit()
         
-        # TODO: Enqueue to RabbitMQ (would use pika client)
-        # In production: rabbitmq_producer.enqueue_task(task_id, {...})
-        logger.info(f"Task enqueued: {task_id}")
+        # Enqueue to RabbitMQ
+        producer = get_rabbitmq_producer()
+        if producer:
+            task_data = {
+                "category": category,
+                "category_id": category_id,
+                "sources": sources or ["tiki"],
+                "attributes": attributes or {}
+            }
+            producer.enqueue_task(task_id, task_data, priority)
+            logger.info(f"Task enqueued to RabbitMQ: {task_id}")
+        else:
+            logger.warning(f"RabbitMQ producer not available, task saved locally: {task_id}")
         
         return {
             "task_id": task_id,
@@ -259,7 +291,14 @@ async def get_task_result(task_id: str):
         if task.status != "completed":
             raise HTTPException(status_code=400, detail="Task not completed")
         
-        result = task.result or {}
+        # Handle result - could be dict, string, or None
+        import json
+        if isinstance(task.result, str):
+            result = json.loads(task.result) if task.result else {}
+        elif isinstance(task.result, dict):
+            result = task.result
+        else:
+            result = {}
         
         return {
             "task_id": task_id,
@@ -509,16 +548,23 @@ async def startup_event():
     logger.info("CrawlService starting up...")
     try:
         with SessionLocal() as db:
-            db.execute("SELECT 1")
+            db.execute(text("SELECT 1"))
         logger.info("Database connection verified")
+        
+        # Initialize RabbitMQ producer
+        get_rabbitmq_producer()
+        logger.info("RabbitMQ producer initialized")
     except Exception as e:
-        logger.error(f"Failed to connect to database: {e}")
+        logger.error(f"Failed to initialize service: {e}")
         raise
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
     logger.info("CrawlService shutting down...")
+    global rabbitmq_producer
+    if rabbitmq_producer:
+        rabbitmq_producer.close()
     engine.dispose()
 
 if __name__ == "__main__":
