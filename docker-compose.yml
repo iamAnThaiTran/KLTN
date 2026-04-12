@@ -15,11 +15,11 @@ services:
       - ./db_service/postgres/backups:/backups
     networks:
       - db_network
-    # healthcheck:
-    #   test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin}"]
-    #   interval: 10s
-    #   timeout: 5s
-    #   retries: 5
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   redis:
@@ -33,11 +33,11 @@ services:
     command: redis-server /usr/local/etc/redis/redis.conf
     networks:
       - db_network
-    # healthcheck:
-    #   test: ["CMD", "redis-cli", "ping"]
-    #   interval: 10s
-    #   timeout: 3s
-    #   retries: 5
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
 
   rabbitmq:
@@ -80,7 +80,7 @@ services:
       - ./services/product_service:/app
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
     networks:
       - db_network
     restart: unless-stopped
@@ -93,15 +93,20 @@ services:
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
+      DB_NAME: products_db
       POSTGRES_USER: ${POSTGRES_USER:-admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your_password}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     ports:
       - "8002:8002"
     volumes:
       - ./services/recommender_service:/app
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - db_network
     restart: unless-stopped
@@ -126,7 +131,7 @@ services:
       - ./services/crawl_service:/app
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
     networks:
@@ -151,7 +156,7 @@ services:
       - ./services/crawl_service:/app
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
     networks:
@@ -177,7 +182,7 @@ services:
       - ./services/user_service:/app
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
     networks:
       - db_network
     restart: unless-stopped

@@ -8,15 +8,15 @@ from .dialogue import DialogueManager
 from .matcher import ProductMatcher
 from .ranker import ProductRanker
 # 🚀 REMOVED: from app.crawler.multi_crawler import MultiCrawler
-from ..services.crawl_service_client import CrawlServiceClient  # ✅ LOCAL: Use local service module (independent)
+from services.crawl_service_client import CrawlServiceClient  # ✅ Use absolute import
 from .schema import get_schema
 from .intent import EnhancedIntentDetector
 from .intent_mapper import IntentMapper
 from .dynamic_schema import DynamicSchemaManager, AVAILABLE_CATEGORIES
 from .llm_utils import call_openai
 from .category_cache import CategoryCache
-from ..services.category_validator import CategoryValidator  # ✅ LOCAL: Use local service module (independent)
-from ..services.product_repository import ProductRepository  # ✅ LOCAL: Use local service module (independent)
+from services.category_validator import CategoryValidator  # ✅ Use absolute import
+from services.product_repository import ProductRepository  # ✅ Use absolute import
 
 class RecommendationOrchestrator:
     """
@@ -49,9 +49,13 @@ class RecommendationOrchestrator:
         # Category cache - persistent storage for LLM suggestions
         # Dùng PostgreSQL (đã có sẵn DATABASE_URL trong .env)
         import os
+        database_url = os.getenv(
+            "DATABASE_URL",
+            f"postgresql://{os.getenv('POSTGRES_USER', 'user')}:{os.getenv('POSTGRES_PASSWORD', 'password')}@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}/{os.getenv('DB_NAME', 'kltn')}"
+        )
         self.category_cache = CategoryCache(
             backend="postgres",
-            pg_url=os.getenv("DATABASE_URL")
+            pg_url=database_url
         )
         
         # Comparison keywords for Case 7 detection

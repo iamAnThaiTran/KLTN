@@ -39,7 +39,7 @@ except ImportError:
     raise ImportError("Please install: pip install python-dotenv")
 
 import os
-from ..db.sku_repository import SKURepository  # ✅ LOCAL: Use local module (independent)
+from db.sku_repository import SKURepository  # ✅ LOCAL: Use local module (independent)
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -52,7 +52,11 @@ class ProductRepository:
     """
     
     def __init__(self):
-        self.db_url = os.getenv("DATABASE_URL")
+        # Construct DATABASE_URL from environment variables if not already set
+        self.db_url = os.getenv(
+            "DATABASE_URL",
+            f"postgresql://{os.getenv('POSTGRES_USER', 'user')}:{os.getenv('POSTGRES_PASSWORD', 'password')}@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}/{os.getenv('DB_NAME', 'kltn')}"
+        )
         self.sku_repo = SKURepository(self.db_url)
     
     def get_connection(self):

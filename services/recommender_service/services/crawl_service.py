@@ -14,12 +14,12 @@ import uuid
 from typing import Dict, Any, Optional
 from datetime import datetime
 from .base_service import BaseService  # ✅ LOCAL
-from ..config.rabbitmq import (  # ✅ LOCAL
+from config.rabbitmq import (  # ✅ LOCAL
     get_rabbitmq_channel,
     RabbitMQConfig,
     RabbitMQConnection
 )
-from ..config.redis import redis_client  # ✅ LOCAL
+from config.redis import redis_client  # ✅ LOCAL
 
 logger = logging.getLogger(__name__)
 

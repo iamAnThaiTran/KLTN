@@ -425,3 +425,4 @@ CREATE TRIGGER update_reviews_timestamp BEFORE UPDATE ON user_reviews
 SELECT datname FROM pg_database 
 WHERE datname IN ('products_db', 'recommender_db', 'crawl_db', 'user_db')
 ORDER BY datname;
+ 

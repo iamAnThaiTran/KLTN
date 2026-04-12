@@ -19,7 +19,11 @@ class CrawlerToSKUAdapter:
     """Convert crawler data to SKU format and save to database"""
     
     def __init__(self):
-        self.db_url = os.getenv("DATABASE_URL")
+        # Construct DATABASE_URL from environment variables if not already set
+        self.db_url = os.getenv(
+            "DATABASE_URL",
+            f"postgresql://{os.getenv('POSTGRES_USER', 'user')}:{os.getenv('POSTGRES_PASSWORD', 'password')}@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}/{os.getenv('DB_NAME', 'kltn')}"
+        )
         
     def get_connection(self):
         """Get database connection"""
@@ -44,7 +48,7 @@ class CrawlerToSKUAdapter:
             # FALLBACK: Try matching with UNIVERSAL_KEYWORDS
             # This allows "giày thể thao nam" to match to "Giày" category
             try:
-                from ..core.dynamic_schema import UNIVERSAL_KEYWORDS  # ✅ LOCAL: Independent from monolith
+                from core.dynamic_schema import UNIVERSAL_KEYWORDS  # ✅ LOCAL: Independent from monolith
                 category_lower = category_name.lower().strip()
                 
                 # Find base category from UNIVERSAL_KEYWORDS

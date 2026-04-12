@@ -30,7 +30,11 @@ class CategoryValidator:
     """Validate và normalize categories trước khi crawl"""
     
     def __init__(self):
-        self.db_url = os.getenv("DATABASE_URL")
+        # Construct DATABASE_URL from environment variables if not already set
+        self.db_url = os.getenv(
+            "DATABASE_URL",
+            f"postgresql://{os.getenv('POSTGRES_USER', 'user')}:{os.getenv('POSTGRES_PASSWORD', 'password')}@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}/{os.getenv('DB_NAME', 'kltn')}"
+        )
         # Import khi cần để tránh circular import
         self._universal_keywords = None
         self._llm_utils = None
@@ -39,7 +43,7 @@ class CategoryValidator:
     def universal_keywords(self):
         """Lazy load UNIVERSAL_KEYWORDS"""
         if self._universal_keywords is None:
-            from ..core.dynamic_schema import UNIVERSAL_KEYWORDS  # ✅ LOCAL: Use local module (independent)
+            from core.dynamic_schema import UNIVERSAL_KEYWORDS  # ✅ LOCAL: Use local module (independent)
             self._universal_keywords = UNIVERSAL_KEYWORDS
         return self._universal_keywords
     
@@ -47,7 +51,7 @@ class CategoryValidator:
     def llm_utils(self):
         """Lazy load LLM utils"""
         if self._llm_utils is None:
-            from ..core.llm_utils import call_openai  # ✅ LOCAL: Use local module (independent)
+            from core.llm_utils import call_openai  # ✅ LOCAL: Use local module (independent)
             self._llm_utils = call_openai
         return self._llm_utils
     

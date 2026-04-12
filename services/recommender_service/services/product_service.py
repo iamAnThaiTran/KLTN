@@ -15,8 +15,8 @@ from typing import Dict, List, Any, Optional, Tuple
 from .base_service import BaseService  # ✅ LOCAL
 from .product_repository import ProductRepository  # ✅ LOCAL
 from .category_validator import CategoryValidator  # ✅ LOCAL
-from ..core.extractor import AttributeExtractor  # ✅ LOCAL
-from ..db.sku_repository import SKURepository  # ✅ LOCAL
+from core.extractor import AttributeExtractor  # ✅ LOCAL
+from db.sku_repository import SKURepository  # ✅ LOCAL
 
 logger = logging.getLogger(__name__)
 

@@ -33,11 +33,9 @@ logger = logging.getLogger("recommender")
 from core.orchestrator import RecommendationOrchestrator
 from core.context_analyzer import get_context_analyzer
 from services.session_manager_factory import get_session_manager
-from db.sku_repository import SKURepository
+from services.job_manager import get_job_manager
+from services.analyze_processor import get_analyze_processor
 from config.database_orm import Base, engine, get_db
-from config.auth_middleware import get_current_user_optional
-from services.user_service import UserService
-from models.user_models import User
 
 # ============================================================================
 # FastAPI Setup
@@ -76,11 +74,13 @@ async def startup_event():
 # ============================================================================
 
 session_manager = get_session_manager()
+job_manager = get_job_manager()
+processor = get_analyze_processor()
 orchestrator = RecommendationOrchestrator()
 context_analyzer = get_context_analyzer()
-sku_repo = SKURepository()
 
 logger.info(f"[Recommender] Session storage: {session_manager.get_storage_type()}")
+logger.info(f"[Recommender] Job storage: {job_manager.use_redis and 'Redis' or 'In-Memory'}")
 logger.info(f"[Recommender] Orchestrator initialized")
 
 # ============================================================================
@@ -102,31 +102,6 @@ class ResponseUpdate(BaseModel):
 # ============================================================================
 # Helper Functions
 # ============================================================================
-
-async def _save_search_history_if_user(
-    current_user: Optional[User],
-    db: Session,
-    user_input: str,
-    category_name: Optional[str] = None,
-    session_id: Optional[str] = None
-):
-    """Save search history if user authenticated"""
-    if not current_user:
-        return None
-    
-    try:
-        search_record = UserService.save_search_query(
-            db=db,
-            user_id=current_user.id,
-            query=user_input,
-            category_name=category_name,
-            session_id=session_id
-        )
-        logger.info(f"✅ Saved search history for user {current_user.id}")
-        return search_record.id
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to save search history: {e}")
-        return None
 
 def _generate_hints_from_filters(category: str, filter_groups: List[Dict]) -> List[str]:
     """Generate user-friendly filter hints"""
@@ -164,186 +139,101 @@ async def health_check():
 @app.post("/api/analyze")
 async def analyze_query(
     request: QueryRequest,
-    current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
     """
-    Main endpoint: Analyze user intent and retrieve products
+    Async endpoint: Create analyze job and return jobId immediately
     
-    Flow:
-    1. Create/get session
-    2. Reconstruct intent if follow-up
-    3. Process with orchestrator
-    4. Return results with filters
+    Response: { "jobId": "uuid", "status": "pending" }
+    
+    Client should poll GET /api/analyze/:jobId/status to get results
+    
+    NOTE: User auth is handled at API Gateway level
     """
     try:
         if not request.user_input or not request.user_input.strip():
             return {"success": False, "error": "user_input required"}
         
-        is_new_query = not request.conversation_id
-        conversation_id = request.conversation_id
-        
-        # ====== STEP 1: Create or fetch session ======
-        if not conversation_id:
-            conversation_id = session_manager.create_session()
-            conversation_state = None
-            logger.info(f"[/api/analyze] 🆕 NEW CONVERSATION: {conversation_id}")
-        else:
-            if not session_manager.session_exists(conversation_id):
-                return {"success": False, "error": "Session not found"}
-            conversation_state = session_manager.get_session(conversation_id)
-            logger.info(f"[/api/analyze] 📝 EXISTING CONVERSATION: {conversation_id}")
-        
-        # Initialize state if needed
-        if conversation_state is None:
-            conversation_state = {
-                "has_category": False,
-                "category": None,
-                "extracted": {},
-                "missing_required": [],
-                "search_history": [],
-                "attributes_asked": [],
-                "last_crawl_params": None,
-            }
-        
-        # ====== STEP 2: Reconstruct intent if follow-up ======
-        user_input_to_process = request.user_input
-        
-        if not is_new_query and conversation_state.get("search_history"):
-            logger.info("[/api/analyze] 🔄 RECONSTRUCTING INTENT")
-            result_dict = context_analyzer.reconstruct_intent(
-                user_input=request.user_input,
-                conversation_state=conversation_state
-            )
-            user_input_to_process = result_dict["intent"]
-            
-            if result_dict.get("category_changed"):
-                logger.info("[/api/analyze] 🔄 CATEGORY CHANGE DETECTED")
-                conversation_state["search_history"] = [request.user_input]
-                conversation_state["extracted"] = {}
-                conversation_state["category"] = None
-                conversation_state["has_category"] = False
-        
-        # ====== STEP 3: Process with orchestrator ======
-        logger.info(f"[/api/analyze] Processing: '{user_input_to_process}'")
-        
-        orch_result = await orchestrator.process_query(
-            user_input=user_input_to_process,
-            conversation_state=conversation_state
-        )
-        
-        if "state" in orch_result:
-            conversation_state = orch_result["state"]
-            session_manager.set_session(conversation_id, conversation_state)
-        
-        # ====== STEP 4: Update search history ======
-        if "search_history" not in conversation_state:
-            conversation_state["search_history"] = []
-        
-        conversation_state["search_history"] = _update_search_history(
-            conversation_state["search_history"],
-            request.user_input
-        )
-        session_manager.set_session(conversation_id, conversation_state)
-        
-        # ====== STEP 5: Save to DB if authenticated ======
-        category_for_db = conversation_state.get("category")
-        await _save_search_history_if_user(
-            current_user=current_user,
-            db=db,
+        # Create job
+        job_id = job_manager.create_job(
             user_input=request.user_input,
-            category_name=category_for_db,
-            session_id=conversation_id
+            conversation_id=request.conversation_id
         )
         
-        # ====== STEP 6: Handle special status ======
-        products = orch_result.get("products", [])
-        orch_status = orch_result.get("status")
+        # Start background processing (fire and forget)
+        asyncio.create_task(
+            processor.process_analyze_job(
+                job_id=job_id,
+                user_input=request.user_input,
+                conversation_id=request.conversation_id,
+                current_user_id=None
+            )
+        )
         
-        if orch_status == "need_info":
-            logger.info("[/api/analyze] 💬 Returning clarification question")
-            return {
-                "success": True,
-                "status": "need_info",
-                "question": orch_result.get("question"),
-                "options": orch_result.get("options", []),
-                "case": orch_result.get("case"),
-                "conversation_id": conversation_id,
-                "search_history": conversation_state.get("search_history", [])
-            }
-        
-        if orch_status == "no_results":
-            logger.info("[/api/analyze] 🔍 No products found")
-            return {
-                "success": True,
-                "status": "no_results",
-                "message": "Không tìm thấy sản phẩm phù hợp",
-                "conversation_id": conversation_id,
-                "search_history": conversation_state.get("search_history", [])
-            }
-        
-        if orch_status == "error":
-            logger.error("[/api/analyze] ❌ Error")
-            return {
-                "success": False,
-                "status": "error",
-                "message": orch_result.get("message", "Lỗi xử lý"),
-                "conversation_id": conversation_id
-            }
-        
-        # ====== STEP 7: Fetch filters ======
-        filter_groups = []
-        category = conversation_state.get("category", "")
-        
-        if category:
-            try:
-                category_slug = sku_repo.get_category_slug_from_name(category)
-                if category_slug:
-                    available_filters = sku_repo.get_available_filters(category_slug)
-                    filter_groups = [
-                        {
-                            "attribute_name": f['attribute_name'],
-                            "display_name": f['display_name'] or f['attribute_name'],
-                            "data_type": f['data_type'],
-                            "options": [
-                                {"attribute_value": opt.get('attribute_value'), "product_count": opt.get('product_count')}
-                                for opt in f['options']
-                                if opt.get('attribute_value') is not None
-                            ]
-                        }
-                        for f in available_filters
-                    ]
-                    logger.info(f"✅ Fetched {len(filter_groups)} filters")
-            except Exception as e:
-                logger.error(f"Error fetching filters: {e}")
-        
-        # ====== Return response ======
-        total_products = orch_result.get("total_found", len(products))
+        logger.info(f"[/api/analyze] 📤 Created job {job_id}")
         
         return {
             "success": True,
-            "category": category,
-            "clarifying_hints": _generate_hints_from_filters(category, filter_groups),
-            "filters": filter_groups,
-            "products": products,
-            "total": total_products,
-            "conversation_id": conversation_id,
-            "search_history": conversation_state.get("search_history", [])
+            "jobId": job_id,
+            "status": "pending"
         }
         
     except Exception as e:
-        logger.error(f"[/api/analyze] ❌ Error: {e}")
-        logger.exception("Error details")
+        logger.error(f"[/api/analyze] ❌ Error creating job: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/analyze/{job_id}/status")
+async def get_job_status(job_id: str):
+    """
+    Poll job status
+    
+    Returns:
+    {
+      "status": "pending" | "done" | "error",
+      "result": {...} (if done),
+      "error": "..." (if error),
+      "created_at": timestamp
+    }
+    """
+    try:
+        job = job_manager.get_job(job_id)
+        
+        if not job:
+            return {
+                "success": False,
+                "error": "Job not found",
+                "status": "unknown"
+            }
+        
+        response = {
+            "success": True,
+            "jobId": job_id,
+            "status": job["status"],
+            "created_at": job.get("created_at")
+        }
+        
+        if job["status"] == "done":
+            response["result"] = job.get("result")
+        elif job["status"] == "error":
+            response["error"] = job.get("error")
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"[/api/analyze/:status] ❌ Error: {e}")
         return {
             "success": False,
             "error": str(e),
-            "conversation_id": request.conversation_id or "unknown"
+            "status": "unknown"
         }
 
 @app.post("/api/query")
 async def process_query(
     request: QueryRequest,
-    current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
     """Process user query"""

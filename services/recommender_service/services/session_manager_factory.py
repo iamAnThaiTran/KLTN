@@ -11,7 +11,7 @@ from .redis_session_manager import (  # ✅ LOCAL
     InMemorySessionManager,
 )
 from .search_models import SearchSession  # ✅ LOCAL
-from ..config.redis import is_redis_available  # ✅ LOCAL: Use local config
+from config.redis import is_redis_available, RedisConfig  # ✅ LOCAL: Use local config
 
 
 class BaseSessionManager(ABC):
@@ -64,7 +64,7 @@ class SessionManagerFactory:
         if cls._instance is None:
             if is_redis_available():
                 # print("📦 Using Redis Session Manager")
-                cls._instance = RedisSessionManager()
+                cls._instance = RedisSessionManager(redis_url=RedisConfig.get_url())
                 cls._using_redis = True
             else:
                 # print("💾 Using In-Memory Session Manager (Redis not available)")

@@ -6,6 +6,7 @@ Replaces in-memory storage for production.
 
 import redis
 import json
+import uuid
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 
@@ -15,6 +16,7 @@ from .search_models import SearchSession  # ✅ LOCAL
 class RedisSessionManager:
     """
     Manages SearchSession persistence in Redis.
+    Also supports conversation-based sessions using dict storage.
     """
     
     def __init__(self, redis_url: str = "redis://localhost:6379"):
@@ -26,6 +28,7 @@ class RedisSessionManager:
         """
         self.redis_client = redis.from_url(redis_url, decode_responses=True)
         self.key_prefix = "search_session:"
+        self.conversation_prefix = "conversation_session:"
         self.ttl_seconds = 86400  # 24 hours
     
     def save_session(self, session: SearchSession) -> bool:
@@ -149,6 +152,83 @@ class RedisSessionManager:
         except Exception as e:
             print(f"Error cleaning up sessions: {e}")
             return 0
+    
+    def get_storage_type(self) -> str:
+        """Get current storage type for debugging"""
+        return "Redis"
+    
+    # ========== Conversation-based session methods ==========
+    def create_session(self) -> str:
+        """
+        Create a new conversation session and return conversation_id
+        
+        Returns:
+            str: conversation_id (UUID)
+        """
+        conversation_id = str(uuid.uuid4())
+        self.set_session(conversation_id, None)
+        print(f"[SessionManager] Created session: {conversation_id}")
+        return conversation_id
+    
+    def set_session(self, conversation_id: str, state: Optional[Dict[str, Any]]) -> bool:
+        """
+        Save conversation state to Redis
+        
+        Args:
+            conversation_id: Session ID
+            state: Conversation state dict (can be None for init)
+        
+        Returns:
+            bool: Success status
+        """
+        try:
+            key = f"{self.conversation_prefix}{conversation_id}"
+            data = json.dumps(state) if state is not None else json.dumps({})
+            self.redis_client.setex(
+                key,
+                self.ttl_seconds,
+                data
+            )
+            return True
+        except Exception as e:
+            print(f"[SessionManager] ⚠️ Error saving session {conversation_id}: {e}")
+            return False
+    
+    def get_session_dict(self, conversation_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve conversation state from Redis as dict
+        
+        Args:
+            conversation_id: Session ID
+        
+        Returns:
+            Dict or None: Conversation state, or None if not found
+        """
+        try:
+            key = f"{self.conversation_prefix}{conversation_id}"
+            data = self.redis_client.get(key)
+            if data:
+                return json.loads(data)
+            return None
+        except Exception as e:
+            print(f"[SessionManager] ⚠️ Error retrieving session {conversation_id}: {e}")
+            return None
+    
+    def session_exists(self, conversation_id: str) -> bool:
+        """
+        Check if conversation session exists
+        
+        Args:
+            conversation_id: Session ID
+        
+        Returns:
+            bool: True if session exists, False otherwise
+        """
+        try:
+            state = self.get_session_dict(conversation_id)
+            return state is not None
+        except:
+            return False
 
 
 class InMemorySessionManager:
@@ -228,3 +308,7 @@ class InMemorySessionManager:
             del self._created_at[sid]
         
         return len(expired_ids)
+    
+    def get_storage_type(self) -> str:
+        """Get current storage type for debugging"""
+        return "In-Memory"

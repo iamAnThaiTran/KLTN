@@ -11,9 +11,9 @@ Responsibilities:
 import logging
 from typing import Dict, List, Any, Optional, Tuple
 from .base_service import BaseService  # ✅ LOCAL
-from ..core.intent_mapper import IntentMapper  # ✅ LOCAL
-from ..core.dialogue import DialogueManager  # ✅ LOCAL
-from ..core.ranker import ProductRanker  # ✅ LOCAL
+from core.intent_mapper import IntentMapper  # ✅ LOCAL
+from core.dialogue import DialogueManager  # ✅ LOCAL
+from core.ranker import ProductRanker  # ✅ LOCAL
 
 logger = logging.getLogger(__name__)
 

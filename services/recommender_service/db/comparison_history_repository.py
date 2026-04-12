@@ -8,8 +8,8 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, and_
 
-from ..models.comparison_models import ComparisonHistory  # ✅ LOCAL
-from ..models.comparison_schemas import (  # ✅ LOCAL
+from models.comparison_models import ComparisonHistory  # ✅ LOCAL
+from models.comparison_schemas import (  # ✅ LOCAL
     ComparisonHistoryResponse,
     ComparisonHistoryList,
     SaveComparisonRequest,

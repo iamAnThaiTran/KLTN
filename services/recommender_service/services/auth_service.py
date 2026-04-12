@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from ..models.user_models import User, UserPreferences  # ✅ LOCAL
-from ..models.auth_schemas import UserRegister, TokenPayload  # ✅ LOCAL
+from models.user_models import User, UserPreferences  # ✅ LOCAL
+from models.auth_schemas import UserRegister, TokenPayload  # ✅ LOCAL
 from dotenv import load_dotenv
 
 load_dotenv()

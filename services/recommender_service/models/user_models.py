@@ -7,7 +7,7 @@ from datetime import datetime
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, JSON, Numeric, UniqueConstraint, ARRAY
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 from sqlalchemy.orm import relationship
-from ..config.database_orm import Base  # ✅ LOCAL
+from config.database_orm import Base  # ✅ LOCAL
 
 
 class Category(Base):

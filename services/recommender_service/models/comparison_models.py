@@ -5,7 +5,7 @@ SQLAlchemy ORM models for product comparison history
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Text, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from ..config.database_orm import Base  # ✅ LOCAL
+from config.database_orm import Base  # ✅ LOCAL
 
 
 class ComparisonHistory(Base):

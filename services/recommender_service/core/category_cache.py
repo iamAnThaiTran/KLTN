@@ -32,7 +32,11 @@ class CategoryCache:
             self.db_path = db_path or "data/category_cache.db"
             self._init_sqlite()
         elif backend == "postgres":
-            self.pg_url = pg_url or os.getenv("DATABASE_URL")
+            # Construct DATABASE_URL from environment variables if not provided
+            self.pg_url = pg_url or os.getenv(
+                "DATABASE_URL",
+                f"postgresql://{os.getenv('POSTGRES_USER', 'user')}:{os.getenv('POSTGRES_PASSWORD', 'password')}@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}/{os.getenv('DB_NAME', 'kltn')}"
+            )
             self._init_postgres()
         else:  # json
             self.json_path = db_path or "data/category_cache.json"

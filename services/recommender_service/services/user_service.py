@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from sqlalchemy import func
-from ..models.user_models import User, SearchHistory, UserPreferences  # ✅ LOCAL
+from models.user_models import User, SearchHistory, UserPreferences  # ✅ LOCAL
 
 
 class UserService:
@@ -215,8 +215,8 @@ class UserService:
         Returns:
             Updated UserPreferences
         """
-        from ..db.sku_repository import SKURepository  # ✅ LOCAL
-        from ..models.user_models import Category  # ✅ LOCAL
+        from db.sku_repository import SKURepository  # ✅ LOCAL
+        from models.user_models import Category  # ✅ LOCAL
         
         # Get/create user preferences
         prefs = db.query(UserPreferences).filter(UserPreferences.user_id == user_id).first()
@@ -310,7 +310,7 @@ class UserService:
         Returns:
             List of recommended products with SKUs
         """
-        from ..db.sku_repository import SKURepository  # ✅ LOCAL
+        from db.sku_repository import SKURepository  # ✅ LOCAL
         from sqlalchemy import and_
         
         sku_repo = SKURepository()
@@ -391,8 +391,8 @@ class UserService:
         Returns:
             Favorite object or None if product doesn't exist
         """
-        from ..models.user_models import Favorite  # ✅ LOCAL
-        from ..db.sku_repository import SKURepository  # ✅ LOCAL
+        from models.user_models import Favorite  # ✅ LOCAL
+        from db.sku_repository import SKURepository  # ✅ LOCAL
         
         # Check if product exists
         sku_repo = SKURepository()
@@ -433,7 +433,7 @@ class UserService:
         Returns:
             True if removed, False if not found
         """
-        from ..models.user_models import Favorite  # ✅ LOCAL
+        from models.user_models import Favorite  # ✅ LOCAL
         
         favorite = db.query(Favorite).filter(
             Favorite.user_id == user_id,
@@ -460,8 +460,8 @@ class UserService:
         Returns:
             Tuple of (favorites list, total count)
         """
-        from ..models.user_models import Favorite  # ✅ LOCAL
-        from ..db.sku_repository import SKURepository  # ✅ LOCAL
+        from models.user_models import Favorite  # ✅ LOCAL
+        from db.sku_repository import SKURepository  # ✅ LOCAL
         
         # Get favorites with pagination
         favorites_query = db.query(Favorite).filter(
@@ -501,7 +501,7 @@ class UserService:
         Returns:
             True if favorited, False otherwise
         """
-        from ..models.user_models import Favorite  # ✅ LOCAL
+        from models.user_models import Favorite  # ✅ LOCAL
         
         favorite = db.query(Favorite).filter(
             Favorite.user_id == user_id,
@@ -522,7 +522,7 @@ class UserService:
         Returns:
             Number of favorites deleted
         """
-        from ..models.user_models import Favorite  # ✅ LOCAL
+        from models.user_models import Favorite  # ✅ LOCAL
         
         result = db.query(Favorite).filter(Favorite.user_id == user_id).delete()
         db.commit()

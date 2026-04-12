@@ -10,7 +10,7 @@ from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 import redis
 
-from ..config.redis import RedisConnectionManager, is_redis_available  # ✅ LOCAL
+from config.redis import RedisConnectionManager, is_redis_available  # ✅ LOCAL
 
 
 class SessionManager:

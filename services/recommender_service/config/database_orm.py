@@ -11,8 +11,19 @@ from sqlalchemy.pool import NullPool
 
 load_dotenv()
 
-# Get database URL from environment
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/kltn")
+# Construct DATABASE_URL from environment variables
+# Docker Compose provides: DB_HOST, DB_PORT, POSTGRES_USER, POSTGRES_PASSWORD
+# Or single DATABASE_URL can be provided
+db_host = os.getenv("DB_HOST", "localhost")
+db_port = os.getenv("DB_PORT", "5432")
+db_user = os.getenv("POSTGRES_USER", "user")
+db_password = os.getenv("POSTGRES_PASSWORD", "password")
+db_name = os.getenv("DB_NAME", "kltn")
+
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+)
 
 # Create engine
 engine = create_engine(
@@ -33,7 +44,7 @@ Base = declarative_base()
 
 # Import all models after Base is defined
 # This ensures SQLAlchemy knows about all models for create_all()
-from ..models.user_models import Category, User, SearchHistory, UserPreferences  # ✅ LOCAL - noqa: F401, E402
+from models.user_models import Category, User, SearchHistory, UserPreferences  # ✅ LOCAL - noqa: F401, E402
 
 
 def get_db():

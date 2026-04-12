@@ -23,7 +23,11 @@ class SchemaReconciler:
     """Reconcile LLM predicted schema vs actual Tiki schema"""
     
     def __init__(self):
-        self.db_url = os.getenv("DATABASE_URL")
+        # Construct DATABASE_URL from environment variables if not already set
+        self.db_url = os.getenv(
+            "DATABASE_URL",
+            f"postgresql://{os.getenv('POSTGRES_USER', 'user')}:{os.getenv('POSTGRES_PASSWORD', 'password')}@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}/{os.getenv('DB_NAME', 'kltn')}"
+        )
     
     def extract_actual_schema(self, crawled_products: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
