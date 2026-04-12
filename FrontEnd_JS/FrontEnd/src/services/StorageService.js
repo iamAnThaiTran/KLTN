@@ -35,7 +35,15 @@ const StorageService = {
 
   getUser: () => {
     const user = localStorage.getItem('user');
-    return user ? JSON.parse(user) : null;
+    if (!user || user === 'undefined' || user === 'null') {
+      return null;
+    }
+    try {
+      return JSON.parse(user);
+    } catch (e) {
+      console.error('Failed to parse user from storage:', e);
+      return null;
+    }
   },
 
   removeToken: () => {

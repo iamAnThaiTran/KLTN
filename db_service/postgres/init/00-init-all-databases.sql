@@ -284,7 +284,11 @@ CREATE TABLE users (
     phone VARCHAR(20),
     provider VARCHAR(50),
     provider_id VARCHAR(255),
+    oauth_provider VARCHAR(50),
+    oauth_id VARCHAR(255) UNIQUE,
+    oauth_token VARCHAR(2000),
     is_active BOOLEAN DEFAULT TRUE,
+    is_verified BOOLEAN DEFAULT FALSE,
     email_verified BOOLEAN DEFAULT FALSE,
     last_login TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -376,6 +380,7 @@ CREATE TABLE comparison_history (
 
 -- Indexes for user_db
 CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_oauth ON users(oauth_provider, oauth_id);
 CREATE INDEX idx_users_provider ON users(provider, provider_id);
 CREATE INDEX idx_users_username ON users(username);
 CREATE INDEX idx_user_prefs_user ON user_preferences(user_id);

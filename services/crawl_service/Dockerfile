@@ -12,8 +12,11 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy application code and modules
 COPY main.py .
+COPY crawl_worker.py .
+COPY rabbitmq_client.py .
+COPY crawlers/ ./crawlers/
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

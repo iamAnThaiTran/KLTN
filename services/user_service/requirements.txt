@@ -4,11 +4,10 @@ sqlalchemy==2.0.23
 psycopg2-binary==2.9.9
 python-multipart==0.0.6
 pydantic==2.5.0
-pydantic[email]==2.5.0
 httpx==0.25.2
 aiofiles==23.2.1
 passlib[bcrypt]==1.7.4
-PyJWT==2.8.1
+PyJWT==2.12.1
 google-auth==2.25.2
 google-auth-httplib2==0.2.0
 google-auth-oauthlib==1.2.0

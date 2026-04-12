@@ -103,7 +103,7 @@ class User(Base):
     provider_id = Column(String(255))
     oauth_provider = Column(String(50), nullable=True)  # google, facebook, etc.
     oauth_id = Column(String(255), nullable=True, unique=True)
-    oauth_token = Column(String(500), nullable=True)
+    oauth_token = Column(String(2000), nullable=True)  # JWT tokens can be long
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     email_verified = Column(Boolean, default=False)
@@ -190,7 +190,15 @@ class ComparisonHistory(Base):
     comparison_date = Column(TIMESTAMP, default=datetime.utcnow)
     winning_product_id = Column(String(100))
     action = Column(String(50))
-    metadata = Column(JSON)
+    metadata_info = Column(JSON)
+
+# ============================================================================
+# Create all tables
+# ============================================================================
+try:
+    Base.metadata.create_all(engine)
+except Exception as e:
+    logger.error(f"Error creating tables: {e}")
 
 # ============================================================================
 # Health Check
@@ -502,86 +510,6 @@ async def get_favorites(user_id: str, limit: int = 20, offset: int = 0):
         db.close()
 
 # ============================================================================
-# Price Alerts APIs
-# ============================================================================
-
-@app.post("/api/users/{user_id}/alerts")
-async def create_price_alert(
-    user_id: str,
-    product_id: str = Body(..., embed=True),
-    target_price: float = Body(..., embed=True),
-    alert_type: str = Body("price_drop", embed=True)
-):
-    """Create a price alert for a product"""
-    db = SessionLocal()
-    try:
-        alert = PriceAlert(
-            user_id=user_id,
-            product_id=product_id,
-            target_price=target_price,
-            alert_type=alert_type,
-            is_active=True
-        )
-        db.add(alert)
-        db.commit()
-        
-        return {"status": "created", "alert_id": alert.id}
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Create alert failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
-
-@app.get("/api/users/{user_id}/alerts")
-async def get_price_alerts(user_id: str, active_only: bool = True):
-    """Get user's price alerts"""
-    db = SessionLocal()
-    try:
-        query = db.query(PriceAlert).filter(PriceAlert.user_id == user_id)
-        if active_only:
-            query = query.filter(PriceAlert.is_active == True)
-        
-        alerts = query.all()
-        
-        return {
-            "alerts": [
-                {
-                    "id": a.id,
-                    "product_id": a.product_id,
-                    "target_price": a.target_price
-                }
-                for a in alerts
-            ]
-        }
-    except Exception as e:
-        logger.error(f"Get alerts failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
-
-@app.delete("/api/users/{user_id}/alerts/{alert_id}")
-async def delete_price_alert(user_id: str, alert_id: int):
-    """Delete a price alert"""
-    db = SessionLocal()
-    try:
-        alert = db.query(PriceAlert).filter(
-            PriceAlert.id == alert_id,
-            PriceAlert.user_id == user_id
-        ).first()
-        if alert:
-            db.delete(alert)
-            db.commit()
-        
-        return {"status": "deleted"}
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Delete alert failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
-
-# ============================================================================
 # Review APIs
 # ============================================================================
 
@@ -705,13 +633,23 @@ async def get_comparison_history(user_id: str, limit: int = 20, offset: int = 0)
 async def startup_event():
     """Initialize service on startup"""
     logger.info("UserService starting up...")
-    try:
-        with SessionLocal() as db:
-            db.execute(text("SELECT 1"))
-        logger.info("Database connection verified")
-    except Exception as e:
-        logger.error(f"Failed to connect to database: {e}")
-        raise
+    import asyncio
+    max_retries = 10
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            with SessionLocal() as db:
+                db.execute(text("SELECT 1"))
+            logger.info("Database connection verified")
+            return
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Database connection failed (attempt {attempt + 1}/{max_retries}): {e}")
+                await asyncio.sleep(retry_delay)
+            else:
+                logger.error(f"Failed to connect to database after {max_retries} attempts: {e}")
+                raise
 
 @app.on_event("shutdown")
 async def shutdown_event():

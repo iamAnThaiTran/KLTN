@@ -21,9 +21,13 @@ CREATE TABLE users (
     hashed_password VARCHAR(255),
     full_name VARCHAR(255),
     phone VARCHAR(20),
-    provider VARCHAR(50),  -- local, google, facebook
-    provider_id VARCHAR(255),
+    provider VARCHAR(50),  -- local, google, facebook (legacy)
+    provider_id VARCHAR(255),  -- legacy
+    oauth_provider VARCHAR(50),  -- google, facebook, etc
+    oauth_id VARCHAR(255) UNIQUE,  -- third-party user ID
+    oauth_token VARCHAR(500),  -- access/id token
     is_active BOOLEAN DEFAULT TRUE,
+    is_verified BOOLEAN DEFAULT FALSE,  -- email verified or OAuth verified
     email_verified BOOLEAN DEFAULT FALSE,
     last_login TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -31,6 +35,7 @@ CREATE TABLE users (
 );
 
 CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_oauth ON users(oauth_provider, oauth_id);
 CREATE INDEX idx_users_provider ON users(provider, provider_id);
 CREATE INDEX idx_users_username ON users(username);
 

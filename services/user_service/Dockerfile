@@ -14,10 +14,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY main.py .
+COPY auth_routes.py .
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8004/api/health', timeout=5)" || exit 1
+    CMD python -c "import httpx; httpx.get('http://localhost:8000/api/health', timeout=5)" || exit 1
 
 # Run with auto-reload for development (--reload flag)
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8004", "--reload"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

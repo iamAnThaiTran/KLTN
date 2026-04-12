@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 import uuid
 import logging
+from main import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
@@ -107,7 +108,7 @@ def verify_token(token: str) -> Optional[Dict[str, Any]]:
 # ============================================================================
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-async def register(request: UserRegisterRequest, db: Session = Depends()):
+async def register(request: UserRegisterRequest, db: Session = Depends(get_db)):
     """
     Register a new user with email and password
     """
@@ -150,8 +151,16 @@ async def register(request: UserRegisterRequest, db: Session = Depends()):
         # Generate token
         token_data = generate_token(user_id, request.email)
         
+        user_response = {
+            "user_id": user_id,
+            "email": request.email,
+            "full_name": request.full_name or "",
+            "phone": ""
+        }
+        
         return {
             **token_data,
+            "user": user_response,
             "token_type": "bearer",
             "message": "User registered successfully"
         }
@@ -165,7 +174,7 @@ async def register(request: UserRegisterRequest, db: Session = Depends()):
 
 
 @router.post("/login")
-async def login(request: UserLoginRequest, db: Session = Depends()):
+async def login(request: UserLoginRequest, db: Session = Depends(get_db)):
     """
     Login user with email and password
     """
@@ -192,8 +201,16 @@ async def login(request: UserLoginRequest, db: Session = Depends()):
         # Generate token
         token_data = generate_token(user.user_id, user.email)
         
+        user_response = {
+            "user_id": user.user_id,
+            "email": user.email,
+            "full_name": user.full_name or "",
+            "phone": user.phone or ""
+        }
+        
         return {
             **token_data,
+            "user": user_response,
             "token_type": "bearer",
             "message": "Login successful"
         }
@@ -206,7 +223,7 @@ async def login(request: UserLoginRequest, db: Session = Depends()):
 
 
 @router.post("/google")
-async def google_login(request: GoogleLoginRequest, db: Session = Depends()):
+async def google_login(request: GoogleLoginRequest, db: Session = Depends(get_db)):
     """
     Login/Register user with Google OAuth token
     
@@ -253,27 +270,36 @@ async def google_login(request: GoogleLoginRequest, db: Session = Depends()):
         if not user:
             # Create new user from Google info
             user_id = f"user_{uuid.uuid4().hex[:12]}"
-            user = User(
-                user_id=user_id,
-                email=email,
-                full_name=full_name,
-                hashed_password=None,  # NULL for OAuth users
-                provider="google",
-                provider_id=google_id,
-                oauth_provider='google',
-                oauth_id=google_id,
-                oauth_token=request.idToken,
-                is_verified=True,  # Verified since from Google
-                email_verified=True,
-                is_active=True,
-                created_at=datetime.utcnow()
-            )
-            db.add(user)
-            db.flush()
-            
-            # Create default preferences
-            prefs = UserPreference(user_id=user_id)
-            db.add(prefs)
+            try:
+                user = User(
+                    user_id=user_id,
+                    email=email,
+                    full_name=full_name,
+                    hashed_password=None,  # NULL for OAuth users
+                    provider="google",
+                    provider_id=google_id,
+                    oauth_provider='google',
+                    oauth_id=google_id,
+                    oauth_token=request.idToken,
+                    is_verified=True,  # Verified since from Google
+                    email_verified=True,
+                    is_active=True,
+                    created_at=datetime.utcnow()
+                )
+                db.add(user)
+                db.flush()
+                db.commit()
+                
+                # Create default preferences
+                prefs = UserPreference(user_id=user_id)
+                db.add(prefs)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                # User might exist from concurrent request, try to fetch again
+                user = db.query(User).filter(User.oauth_id == google_id).first()
+                if not user:
+                    raise
         else:
             # Update OAuth info for existing user (in case switching to Google)
             if not user.oauth_id or user.oauth_id != google_id:
@@ -285,6 +311,7 @@ async def google_login(request: GoogleLoginRequest, db: Session = Depends()):
             # Update full name if empty
             if not user.full_name and full_name:
                 user.full_name = full_name
+            db.commit()
         
         # Update last login
         user.last_login = datetime.utcnow()
@@ -293,10 +320,20 @@ async def google_login(request: GoogleLoginRequest, db: Session = Depends()):
         # Generate JWT token
         token_data = generate_token(user.user_id, user.email)
         
+        # Build user response
+        user_response = {
+            "user_id": user.user_id,
+            "email": user.email,
+            "full_name": user.full_name or "",
+            "phone": user.phone or "",
+            "oauth_provider": user.oauth_provider
+        }
+        
         logger.info(f"User logged in with Google: {user.email}")
         
         return {
             **token_data,
+            "user": user_response,
             "token_type": "bearer",
             "message": "Google login successful"
         }

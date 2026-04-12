@@ -8,18 +8,17 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy shared app modules from BackendPython
-COPY ../../../app ./app
-
 # Copy requirements and install
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy application code and modules
 COPY main.py .
-
-# Set PYTHONPATH to include app modules
-ENV PYTHONPATH=/app:$PYTHONPATH
+COPY config/ ./config/
+COPY core/ ./core/
+COPY db/ ./db/
+COPY models/ ./models/
+COPY services/ ./services/
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
