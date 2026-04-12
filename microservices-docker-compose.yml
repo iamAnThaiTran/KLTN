@@ -1,0 +1,194 @@
+version: '3.8'
+
+services:
+  # Database & Message Queue
+  postgres:
+    image: postgres:15-alpine
+    container_name: product_postgres
+    environment:
+      POSTGRES_DB: product_db
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: your_password
+    ports:
+      - "15432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - microservices_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: product_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - microservices_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: product_rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - microservices_network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Microservices
+  product-service:
+    build:
+      context: ./BackendPython/services/product_service
+      dockerfile: Dockerfile
+    container_name: product_service
+    ports:
+      - "8001:8000"
+    environment:
+      SERVICE_NAME: product-service
+      DATABASE_URL: postgresql://admin:your_password@postgres:5432/product_db
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - microservices_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  recommender-service:
+    build:
+      context: ./BackendPython/services/recommender_service
+      dockerfile: Dockerfile
+    container_name: recommender_service
+    ports:
+      - "8002:8000"
+    environment:
+      SERVICE_NAME: recommender-service
+      DATABASE_URL: postgresql://admin:your_password@postgres:5432/product_db
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - microservices_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  crawl-service:
+    build:
+      context: ./BackendPython/services/crawl_service
+      dockerfile: Dockerfile
+    container_name: crawl_service
+    ports:
+      - "8003:8000"
+    environment:
+      SERVICE_NAME: crawl-service
+      DATABASE_URL: postgresql://admin:your_password@postgres:5432/product_db
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - microservices_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  user-service:
+    build:
+      context: ./BackendPython/services/user_service
+      dockerfile: Dockerfile
+    container_name: user_service
+    ports:
+      - "8004:8000"
+    environment:
+      SERVICE_NAME: user-service
+      DATABASE_URL: postgresql://admin:your_password@postgres:5432/product_db
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-in-production}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - microservices_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Crawl Worker
+  crawl-worker:
+    build:
+      context: ./BackendPython/services/crawl_service
+      dockerfile: Dockerfile.worker
+    container_name: crawl_worker
+    environment:
+      SERVICE_NAME: crawl-worker
+      DATABASE_URL: postgresql://admin:your_password@postgres:5432/product_db
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - microservices_network
+    command: python crawl_worker.py
+
+networks:
+  microservices_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

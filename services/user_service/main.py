@@ -96,14 +96,18 @@ class User(Base):
     user_id = Column(String(100), unique=True)
     username = Column(String(255), unique=True, nullable=True)
     email = Column(String(255), unique=True)
-    hashed_password = Column(String(255))
+    hashed_password = Column(String(255), nullable=True)
     full_name = Column(String(255))
     phone = Column(String(20))
-    provider = Column(String(50), default="local")
+    provider = Column(String(50), default="local")  # local, google, facebook, etc.
     provider_id = Column(String(255))
+    oauth_provider = Column(String(50), nullable=True)  # google, facebook, etc.
+    oauth_id = Column(String(255), nullable=True, unique=True)
+    oauth_token = Column(String(500), nullable=True)
     is_active = Column(Boolean, default=True)
+    is_verified = Column(Boolean, default=False)
     email_verified = Column(Boolean, default=False)
-    last_login = Column(TIMESTAMP)
+    last_login = Column(TIMESTAMP, nullable=True)
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
     updated_at = Column(TIMESTAMP, default=datetime.utcnow)
 
@@ -714,6 +718,13 @@ async def shutdown_event():
     """Cleanup on shutdown"""
     logger.info("UserService shutting down...")
     engine.dispose()
+
+# ============================================================================
+# Include Auth Routes
+# ============================================================================
+
+from auth_routes import router as auth_router
+app.include_router(auth_router)
 
 if __name__ == "__main__":
     import uvicorn

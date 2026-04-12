@@ -13,8 +13,8 @@ services:
       - "15432:5432"  # Use high port to avoid Windows reserved range
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./postgres/init:/docker-entrypoint-initdb.d
-      - ./postgres/backups:/backups
+      - ./db_service/postgres/init:/docker-entrypoint-initdb.d
+      - ./db_service/postgres/backups:/backups
     networks:
       - db_network
     # healthcheck:
@@ -31,7 +31,7 @@ services:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
-      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
+      - ./db_service/redis/redis.conf:/usr/local/etc/redis/redis.conf
     command: redis-server /usr/local/etc/redis/redis.conf
     networks:
       - db_network
@@ -68,7 +68,7 @@ services:
 
   product-service:
     build:
-      context: ../BackendPython/services/product_service
+      context: ./services/product_service
       dockerfile: Dockerfile
     container_name: product-service
     environment:
@@ -79,7 +79,7 @@ services:
     ports:
       - "8001:8001"
     volumes:
-      - ../BackendPython/services/product_service:/app
+      - ./services/product_service:/app
     depends_on:
       postgres:
         condition: service_started
@@ -89,7 +89,7 @@ services:
 
   recommender-service:
     build:
-      context: ../BackendPython/services/recommender_service
+      context: ./services/recommender_service
       dockerfile: Dockerfile
     container_name: recommender-service
     environment:
@@ -100,7 +100,7 @@ services:
     ports:
       - "8002:8002"
     volumes:
-      - ../BackendPython/services/recommender_service:/app
+      - ./services/recommender_service:/app
     depends_on:
       postgres:
         condition: service_started
@@ -110,7 +110,7 @@ services:
 
   crawl-service:
     build:
-      context: ../BackendPython/services/crawl_service
+      context: ./services/crawl_service
       dockerfile: Dockerfile
     container_name: crawl-service
     environment:
@@ -125,7 +125,7 @@ services:
     ports:
       - "8003:8003"
     volumes:
-      - ../BackendPython/services/crawl_service:/app
+      - ./services/crawl_service:/app
     depends_on:
       postgres:
         condition: service_started
@@ -137,7 +137,7 @@ services:
 
   crawl-worker:
     build:
-      context: ../BackendPython/services/crawl_service
+      context: ./services/crawl_service
       dockerfile: Dockerfile.worker
     container_name: crawl-worker
     environment:
@@ -150,7 +150,7 @@ services:
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
     volumes:
-      - ../BackendPython/services/crawl_service:/app
+      - ./services/crawl_service:/app
     depends_on:
       postgres:
         condition: service_started
@@ -162,7 +162,7 @@ services:
 
   user-service:
     build:
-      context: ../BackendPython/services/user_service
+      context: ./services/user_service
       dockerfile: Dockerfile
     container_name: user-service
     environment:
@@ -176,7 +176,7 @@ services:
     ports:
       - "8004:8000"
     volumes:
-      - ../BackendPython/services/user_service:/app
+      - ./services/user_service:/app
     depends_on:
       postgres:
         condition: service_started
@@ -190,13 +190,13 @@ services:
 
   api-gateway:
     build:
-      context: ../api_gateway
+      context: ./api_gateway
       dockerfile: Dockerfile
     container_name: api-gateway
     ports:
       - "8000:80"  # Single entry point for all APIs
     volumes:
-      - ../api_gateway/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./api_gateway/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - product-service
       - recommender-service
@@ -214,8 +214,6 @@ volumes:
     driver: local
   rabbitmq_data:
     driver: local
-  # pgadmin_data:
-  #   driver: local
 
 networks:
   db_network:
