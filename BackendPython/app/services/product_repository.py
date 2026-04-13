@@ -23,6 +23,7 @@ import logging
 import sys
 from typing import Dict, Any, List, Optional
 import json
+import hashlib
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
@@ -94,7 +95,7 @@ class ProductRepository:
             # Get category slug from ID
             conn = self.get_connection()
             cursor = conn.cursor(cursor_factory=RealDictCursor)
-            cursor.execute("SELECT slug FROM categories WHERE id = %s LIMIT 1", [category_id])
+            cursor.execute("SELECT name FROM categories WHERE id = %s LIMIT 1", [category_id])
             cat_result = cursor.fetchone()
             cursor.close()
             conn.close()

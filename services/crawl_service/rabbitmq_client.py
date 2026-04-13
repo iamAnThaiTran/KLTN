@@ -55,6 +55,19 @@ class RabbitMQProducer:
             logger.error(f"Failed to connect to RabbitMQ: {e}")
             raise
     
+    def _ensure_connected(self):
+        """Ensure connection is alive, reconnect if needed"""
+        try:
+            if self.connection and self.connection.is_open and self.channel and self.channel.is_open:
+                return True
+            # Connection is closed, attempt reconnect
+            logger.warning("RabbitMQ connection closed, attempting reconnect...")
+            self.connect()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to ensure RabbitMQ connection: {e}")
+            return False
+    
     def enqueue_task(self, task_id: str, task_data: Dict[str, Any], priority: str = "normal"):
         """
         Enqueue a crawl task to RabbitMQ
@@ -65,6 +78,11 @@ class RabbitMQProducer:
             priority: Task priority (low, normal, high)
         """
         try:
+            # Ensure connection is alive before publishing
+            if not self._ensure_connected():
+                logger.error(f"Failed to enqueue task {task_id}: Cannot establish RabbitMQ connection")
+                return False
+            
             message = {
                 "task_id": task_id,
                 "timestamp": datetime.utcnow().isoformat(),
@@ -89,7 +107,24 @@ class RabbitMQProducer:
             return True
         except Exception as e:
             logger.error(f"Failed to enqueue task {task_id}: {e}")
-            return False
+            # Try to reconnect and retry once more
+            try:
+                logger.info(f"Retrying enqueue for task {task_id} after reconnect...")
+                self.connect()
+                self.channel.basic_publish(
+                    exchange='',
+                    routing_key=self.queue_name,
+                    body=body,
+                    properties=pika.BasicProperties(
+                        delivery_mode=2,
+                        content_type='application/json'
+                    )
+                )
+                logger.info(f"Task enqueued (retry): {task_id}")
+                return True
+            except Exception as retry_error:
+                logger.error(f"Retry failed for task {task_id}: {retry_error}")
+                return False
     
     def close(self):
         """Close RabbitMQ connection"""
@@ -175,18 +210,44 @@ class RabbitMQConsumer:
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
     
     def start_consuming(self):
-        """Start consuming messages from queue"""
-        try:
-            self.channel.basic_consume(
-                queue=self.queue_name,
-                on_message_callback=self.process_message
-            )
+        """Start consuming messages from queue with automatic reconnect"""
+        retry_count = 0
+        max_retries = 10
+        
+        while retry_count < max_retries:
+            try:
+                # Ensure connection is fresh
+                if not self.connection or not self.connection.is_open:
+                    logger.info("Reconnecting to RabbitMQ consumer...")
+                    self.connect()
+                    retry_count = 0  # Reset on successful reconnect
+                
+                self.channel.basic_consume(
+                    queue=self.queue_name,
+                    on_message_callback=self.process_message
+                )
+                
+                logger.info(f"Starting to consume messages from {self.queue_name}")
+                self.channel.start_consuming()
             
-            logger.info(f"Starting to consume messages from {self.queue_name}")
-            self.channel.start_consuming()
-        except Exception as e:
-            logger.error(f"Error during consumption: {e}")
-            raise
+            except Exception as e:
+                retry_count += 1
+                logger.error(f"Consumer error (attempt {retry_count}/{max_retries}): {e}")
+                
+                try:
+                    if self.connection:
+                        self.connection.close()
+                except:
+                    pass
+                
+                if retry_count < max_retries:
+                    import time
+                    wait_time = min(30, 2 ** retry_count)  # Exponential backoff, max 30s
+                    logger.info(f"Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error("Max retries exceeded, stopping consumer")
+                    raise
     
     def close(self):
         """Close RabbitMQ connection"""

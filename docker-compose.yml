@@ -69,11 +69,8 @@ services:
       context: ./services/product_service
       dockerfile: Dockerfile
     container_name: product-service
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      POSTGRES_USER: ${POSTGRES_USER:-admin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your_password}
+    env_file:
+      - ./services/product_service/.env
     ports:
       - "8001:8001"
     volumes:
@@ -90,14 +87,8 @@ services:
       context: ./services/recommender_service
       dockerfile: Dockerfile
     container_name: recommender-service
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: products_db
-      POSTGRES_USER: ${POSTGRES_USER:-admin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your_password}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+    env_file:
+      - ./services/recommender_service/.env
     ports:
       - "8002:8002"
     volumes:
@@ -116,15 +107,8 @@ services:
       context: ./services/crawl_service
       dockerfile: Dockerfile
     container_name: crawl-service
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      POSTGRES_USER: ${POSTGRES_USER:-admin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your_password}
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: 5672
-      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
-      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+    env_file:
+      - ./services/crawl_service/.env
     ports:
       - "8003:8003"
     volumes:
@@ -143,15 +127,8 @@ services:
       context: ./services/crawl_service
       dockerfile: Dockerfile.worker
     container_name: crawl-worker
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      POSTGRES_USER: ${POSTGRES_USER:-admin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your_password}
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: 5672
-      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
-      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+    env_file:
+      - ./services/crawl_service/.env
     volumes:
       - ./services/crawl_service:/app
     depends_on:
@@ -168,14 +145,8 @@ services:
       context: ./services/user_service
       dockerfile: Dockerfile
     container_name: user-service
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      POSTGRES_USER: ${POSTGRES_USER:-admin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your_password}
-      JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-in-production}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    env_file:
+      - ./services/user_service/.env
     ports:
       - "8004:8000"
     volumes:

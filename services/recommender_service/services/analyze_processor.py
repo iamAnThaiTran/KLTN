@@ -15,6 +15,7 @@ from db.sku_repository import SKURepository
 from config.database_orm import get_db
 from services.user_service import UserService
 from .job_manager import get_job_manager
+from services.product_service_client import ProductServiceClient
 
 logger = logging.getLogger("analyze_processor")
 
@@ -29,6 +30,7 @@ class AnalyzeProcessor:
         self.sku_repo = SKURepository()
         self.job_manager = get_job_manager()
         self.user_service = UserService()
+        self.product_service_client = ProductServiceClient()
     
     async def process_analyze_job(
         self,
@@ -171,28 +173,27 @@ class AnalyzeProcessor:
             
             if category:
                 try:
-                    category_slug = self.sku_repo.get_category_slug_from_name(category)
-                    if category_slug:
-                        available_filters = self.sku_repo.get_available_filters(category_slug)
-                        filter_groups = [
-                            {
-                                "attribute_name": f['attribute_name'],
-                                "display_name": f['display_name'] or f['attribute_name'],
-                                "data_type": f['data_type'],
-                                "options": [
-                                    {
-                                        "attribute_value": opt.get('attribute_value'),
-                                        "product_count": opt.get('product_count')
-                                    }
-                                    for opt in f['options']
-                                    if opt.get('attribute_value') is not None
-                                ]
-                            }
-                            for f in available_filters
-                        ]
-                        logger.info(f"[Job {job_id}] ✅ Fetched {len(filter_groups)} filters")
+                    # 📤 Call ProductService to fetch filters (not direct DB)
+                    available_filters = await self.product_service_client.get_filters(category)
+                    filter_groups = [
+                        {
+                            "attribute_name": f.get('name') or f.get('attribute_name'),
+                            "display_name": f.get('display_name') or f.get('name') or f.get('attribute_name'),
+                            "data_type": f.get('type') or f.get('data_type') or 'text',
+                            "options": [
+                                {
+                                    "attribute_value": val,
+                                    "product_count": 0  # ProductService doesn't return counts
+                                }
+                                for val in f.get('values', [])
+                            ] if f.get('values') else []
+                        }
+                        for f in available_filters
+                    ]
+                    logger.info(f"[Job {job_id}] ✅ Fetched {len(filter_groups)} filters from ProductService")
                 except Exception as e:
-                    logger.error(f"[Job {job_id}] Error fetching filters: {e}")
+                    logger.warning(f"[Job {job_id}] ⚠️ Failed to fetch filters: {e}. Continuing without filters...")
+                    # Don't fail - filters are optional, continue with results
             
             # ====== Build final response ======
             total_products = orch_result.get("total_found", len(products))

@@ -20,7 +20,19 @@ class SKURepository:
     """Database operations for SKU-based product system"""
     
     def __init__(self, db_url: Optional[str] = None):
-        self.db_url = db_url or os.getenv("DATABASE_URL")
+        # Build DATABASE_URL from environment variables if not provided
+        if db_url:
+            self.db_url = db_url
+        else:
+            self.db_url = os.getenv("DATABASE_URL")
+            if not self.db_url:
+                # Build from individual env variables
+                db_host = os.getenv("DB_HOST", "localhost")
+                db_port = os.getenv("DB_PORT", "5432")
+                db_user = os.getenv("POSTGRES_USER", "user")
+                db_password = os.getenv("POSTGRES_PASSWORD", "password")
+                db_name = os.getenv("DB_NAME", "kltn")
+                self.db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
     
     def _get_connection(self):
         """Get database connection with UTF-8 encoding"""
@@ -104,7 +116,7 @@ class SKURepository:
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT slug FROM categories 
+            SELECT name FROM categories 
             WHERE LOWER(name) = LOWER(%s)
         """, (category_name,))
         

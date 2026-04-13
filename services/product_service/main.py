@@ -8,17 +8,43 @@ Handles:
 - Category attribute configuration
 """
 
-from fastapi import FastAPI, HTTPException, Query, Body
+from fastapi import FastAPI, HTTPException, Query, Body, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 from typing import Optional, List, Dict, Any
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, Session
-import asyncpg
 import os
 from datetime import datetime
+import unicodedata
+import re
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+def slugify(text: str) -> str:
+    """
+    Convert text to URL-friendly slug
+    Removes Vietnamese diacritics: à→a, ư→u, etc.
+    """
+    # Normalize Vietnamese characters (NFD decomposition)
+    nfkd_form = unicodedata.normalize('NFKD', text)
+    # Remove combining marks (diacritics)
+    ascii_form = ''.join([c for c in nfkd_form if not unicodedata.combining(c)])
+    # Convert to lowercase
+    slug = ascii_form.lower()
+    # Replace spaces and underscores with hyphens
+    slug = re.sub(r'[\s_]+', '-', slug)
+    # Remove non-alphanumeric characters except hyphens
+    slug = re.sub(r'[^a-z0-9-]', '', slug)
+    # Remove multiple consecutive hyphens
+    slug = re.sub(r'-+', '-', slug)
+    # Strip leading/trailing hyphens
+    slug = slug.strip('-')
+    return slug
 
 # ============================================================================
 # Environment Configuration
@@ -84,6 +110,7 @@ class Category(Base):
     __tablename__ = "categories"
     id = Column(Integer, primary_key=True)
     name = Column(String(255), unique=True)
+    slug = Column(String(255), unique=True, nullable=False)
     description = Column(Text)
     parent_category_id = Column(Integer, nullable=True)
     category_type = Column(String(50))
@@ -118,6 +145,17 @@ class SKU(Base):
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
     updated_at = Column(TIMESTAMP, default=datetime.utcnow)
 
+class CategoryAttribute(Base):
+    __tablename__ = "category_attributes"
+    id = Column(Integer, primary_key=True)
+    category_id = Column(Integer)
+    attribute_name = Column(String(255))
+    attribute_type = Column(String(50))
+    is_filterable = Column(Boolean, default=True)
+    values = Column(ARRAY(String))
+    display_order = Column(Integer)
+    created_at = Column(TIMESTAMP, default=datetime.utcnow)
+
 # ============================================================================
 # Health Check
 # ============================================================================
@@ -149,7 +187,7 @@ async def search_products(
     filters: Optional[Dict[str, Any]] = Body(None, embed=True),
     limit: int = Body(20, embed=True),
     offset: int = Body(0, embed=True),
-    db: Session = None
+    db: Session = Depends(get_db)
 ):
     """
     Search products by keyword and optional filters
@@ -163,9 +201,6 @@ async def search_products(
         "offset": 0
     }
     """
-    if db is None:
-        db = SessionLocal()
-    
     try:
         # Base query
         base_query = db.query(Product).filter(
@@ -223,9 +258,6 @@ async def search_products(
     except Exception as e:
         logger.error(f"Search failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if db:
-            db.close()
 
 @app.get("/api/products/{product_id}")
 async def get_product(product_id: str):
@@ -344,19 +376,228 @@ async def get_category(category_id: int):
     finally:
         db.close()
 
+@app.post("/api/categories")
+async def create_category(
+    body: Dict[str, Any] = Body(...)
+):
+    """
+    Create new product category with attributes
+    
+    Request body:
+    {
+        "name": "Giày",
+        "description": "Tất cả loại giày",
+        "category_type": "footwear",
+        "attributes": ["brand", "size", "color", "type", "material", "gender", "price_range"]
+    }
+    
+    Returns:
+    {
+        "id": 1,
+        "name": "Giày",
+        "description": "...",
+        "attributes_created": 7
+    }
+    """
+    db = SessionLocal()
+    try:
+        category_name = body.get("name", "").strip()
+        description = body.get("description", "").strip()
+        category_type = body.get("category_type", "general")
+        attributes = body.get("attributes", [])
+        
+        if not category_name:
+            raise HTTPException(status_code=400, detail="Category name is required")
+        
+        # Generate slug from category name (removes diacritics, lowercase, hyphenated)
+        category_slug = slugify(category_name)
+        
+        # Check if category already exists
+        existing = db.query(Category).filter(
+            Category.name.ilike(category_name)
+        ).first()
+        
+        if existing:
+            logger.warning(f"Category '{category_name}' already exists")
+            return {
+                "success": False,
+                "id": existing.id,
+                "name": existing.name,
+                "reason": "Category already exists"
+            }
+        
+        # Create new category
+        new_category = Category(
+            name=category_name,
+            slug=category_slug,
+            description=description,
+            category_type=category_type,
+            is_active=True
+        )
+        db.add(new_category)
+        db.flush()  # Get the ID without committing
+        
+        category_id = new_category.id
+        logger.info(f"✅ Created category '{category_name}' (id={category_id}, slug={category_slug})")
+        
+        # Save category_attributes if provided
+        attributes_created = 0
+        if attributes and len(attributes) > 0:
+            logger.info(f"💾 Saving {len(attributes)} attributes for category '{category_name}'...")
+            
+            for idx, attr_name in enumerate(attributes, 1):
+                try:
+                    attr_name_clean = str(attr_name).strip()
+                    
+                    # Create category_attribute record
+                    cat_attr = CategoryAttribute(
+                        category_id=category_id,
+                        attribute_name=attr_name_clean,
+                        attribute_type="text",
+                        is_filterable=True,
+                        display_order=idx
+                    )
+                    db.add(cat_attr)
+                    attributes_created += 1
+                    logger.info(f"  ✅ Saved attribute #{idx}: '{attr_name_clean}'")
+                except Exception as e:
+                    logger.warning(f"  ⚠️  Failed to save attribute '{attr_name}': {str(e)}")
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "id": category_id,
+            "name": category_name,
+            "description": description,
+            "type": category_type,
+            "attributes_created": attributes_created
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Create category failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create category: {str(e)}")
+    finally:
+        db.close()
+
+
+@app.get("/api/categories/{category_slug}/filters")
+async def get_category_filters(category_slug: str):
+    """
+    Get available filters (attributes) for a category by slug
+    
+    Args:
+        category_slug: Category slug (e.g., "giay", "dien-thoai")
+    
+    Returns:
+    {
+        "filters": [
+            {
+                "name": "brand",
+                "display_name": "Thương hiệu",
+                "type": "text",
+                "values": ["Nike", "Adidas", ...]
+            }
+        ]
+    }
+    """
+    db = SessionLocal()
+    try:
+        # Find category by slug
+        category = db.query(Category).filter(
+            Category.slug == category_slug
+        ).first()
+        
+        # Fallback: if not found by slug, search all categories and match by slugified name
+        if not category:
+            logger.info(f"Slug '{category_slug}' not found, searching by name...")
+            all_categories = db.query(Category).all()
+            for cat in all_categories:
+                if slugify(cat.name) == category_slug:
+                    category = cat
+                    logger.info(f"Matched category by name: {cat.name} → {category_slug}")
+                    break
+        
+        if not category:
+            logger.warning(f"Category not found: {category_slug}")
+            raise HTTPException(status_code=404, detail=f"Category '{category_slug}' not found")
+        
+        # Update slug if missing (data migration)
+        if not category.slug:
+            category.slug = slugify(category.name)
+            db.commit()
+            logger.info(f"✅ Updated category '{category.name}' with slug: {category.slug}")
+        
+        # Query category attributes for this category using raw SQL
+        # (fallback for different schema versions)
+        try:
+            result = db.execute(text("""
+                SELECT id, category_id, attribute_name, 
+                       COALESCE(attribute_type, 'text') as attribute_type,
+                       is_filterable, values, display_order
+                FROM category_attributes
+                WHERE category_id = :category_id AND is_filterable = true
+                ORDER BY COALESCE(display_order, 0)
+            """), {"category_id": category.id})
+            attributes = result.fetchall()
+        except Exception as e:
+            logger.warning(f"Raw SQL query failed, trying ORM: {e}")
+            attributes = db.query(CategoryAttribute).filter(
+                CategoryAttribute.category_id == category.id,
+                CategoryAttribute.is_filterable == True
+            ).order_by(CategoryAttribute.display_order).all()
+        
+        filters = []
+        for attr in attributes:
+            # Handle both tuple (raw query) and object (ORM) results
+            if hasattr(attr, 'keys'):  # Row object from raw query
+                filter_obj = {
+                    "name": attr['attribute_name'],
+                    "display_name": attr['attribute_name'],
+                    "type": attr['attribute_type'] or "text",
+                }
+                if attr['values']:
+                    filter_obj["values"] = list(attr['values'])
+            else:  # ORM object
+                filter_obj = {
+                    "name": attr.attribute_name,
+                    "display_name": attr.attribute_name,
+                    "type": attr.attribute_type or "text",
+                }
+                if attr.values:
+                    filter_obj["values"] = list(attr.values)
+            filters.append(filter_obj)
+        
+        logger.info(f"✅ Retrieved {len(filters)} filters for category '{category.name}'")
+        return {
+            "category_id": category.id,
+            "category_name": category.name,
+            "filters": filters
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get category filters failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get filters: {str(e)}")
+    finally:
+        db.close()
+
 # ============================================================================
 # Product Save & Update APIs
 # ============================================================================
 
 @app.post("/api/products/batch")
 async def save_products(
-    products: List[Dict[str, Any]] = Body(...),
-    source: str = Body("crawler", embed=True)
+    body: Dict[str, Any] = Body(...)
 ):
     """
     Save/update products from crawler
     
-    Example:
+    Request body:
     {
         "products": [
             {
@@ -371,6 +612,8 @@ async def save_products(
         "source": "tiki"
     }
     """
+    products = body.get("products", [])
+    source = body.get("source", "crawler")
     db = SessionLocal()
     try:
         saved = 0
@@ -379,9 +622,16 @@ async def save_products(
         
         for product_data in products:
             try:
+                # Validate required field
+                product_id = product_data.get("product_id")
+                if not product_id or str(product_id).strip() == "":
+                    errors.append({"product_id": product_id, "error": "product_id is required"})
+                    logger.warning(f"Skipping product without product_id: {product_data}")
+                    continue
+                
                 # Check if product exists
                 product = db.query(Product).filter(
-                    Product.product_id == product_data.get("product_id")
+                    Product.product_id == product_id
                 ).first()
                 
                 if product:
@@ -394,7 +644,7 @@ async def save_products(
                 else:
                     # Create new
                     product = Product(
-                        product_id=product_data.get("product_id"),
+                        product_id=product_id,
                         name=product_data.get("name"),
                         brand=product_data.get("brand"),
                         category_id=product_data.get("category_id"),
@@ -408,7 +658,7 @@ async def save_products(
                 
                 # Add SKU if price info provided
                 if "price" in product_data:
-                    sku_id = product_data.get("sku_id", f"{product_data.get('product_id')}_default")
+                    sku_id = product_data.get("sku_id", f"{product_id}_default")
                     sku = db.query(SKU).filter(SKU.sku_id == sku_id).first()
                     
                     if sku:
@@ -418,7 +668,7 @@ async def save_products(
                     else:
                         sku = SKU(
                             sku_id=sku_id,
-                            product_id=product_data.get("product_id"),
+                            product_id=product_id,
                             price=product_data.get("price"),
                             stock=product_data.get("stock", 0),
                             source=source,
@@ -441,8 +691,6 @@ async def save_products(
         db.rollback()
         logger.error(f"Batch save failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
 
 @app.put("/api/products/{product_id}")
 async def update_product(product_id: str, update_data: Dict[str, Any] = Body(...)):

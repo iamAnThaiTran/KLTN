@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 class CategoryValidator:
     """Validate và normalize categories trước khi crawl"""
     
-    def __init__(self):
+    def __init__(self, product_service_client=None):
         # Construct DATABASE_URL from environment variables if not already set
         self.db_url = os.getenv(
             "DATABASE_URL",
@@ -38,6 +38,7 @@ class CategoryValidator:
         # Import khi cần để tránh circular import
         self._universal_keywords = None
         self._llm_utils = None
+        self.product_service_client = product_service_client  # HTTP client to ProductService
     
     @property
     def universal_keywords(self):
@@ -69,12 +70,12 @@ class CategoryValidator:
         conn = psycopg2.connect(self.db_url)
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT id, name, slug FROM categories ORDER BY id")
+            cursor.execute("SELECT id, name FROM categories ORDER BY id")
             rows = cursor.fetchall()
             
             categories = {}
-            for cat_id, name, slug in rows:
-                categories[cat_id] = {"name": name, "slug": slug}
+            for cat_id, name in rows:
+                categories[cat_id] = {"name": name, "slug": self._slugify(name)}
             
             return categories
         finally:
@@ -93,7 +94,7 @@ class CategoryValidator:
         text = re.sub(r'[^a-z0-9]+', '-', text)
         return text.strip('-')
     
-    def validate_category(self, user_category: str) -> Dict[str, Any]:
+    async def validate_category(self, user_category: str) -> Dict[str, Any]:
         """
         Validate category từ user input
         
@@ -195,38 +196,75 @@ class CategoryValidator:
                 }
             
             elif llm_result["status"] == "create_new":
-                # LLM says it's a new category
+                # ✅ NEW CATEGORY DETECTED - Create via ProductService API
                 llm_attributes = llm_result.get("attributes", [])
-                logger.info(f"[CREATE_NEW] Processing new category: '{user_category}'")
-                logger.info(f"[CREATE_NEW] LLM suggested attributes count: {len(llm_attributes)}")
-                if llm_attributes:
-                    logger.info(f"[CREATE_NEW] Attributes to save: {llm_attributes}")
+                logger.info(f"[CREATE_NEW] LLM detected new category: '{user_category}'")
+                logger.info(f"[CREATE_NEW] LLM suggested attributes: {llm_attributes}")
                 
-                new_cat_id = self._create_category(
-                    user_category,
-                    llm_result.get("description", ""),
-                    llm_attributes
-                )
-                
-                if new_cat_id:
-                    logger.info(f"✅ Created new category '{user_category}' (id={new_cat_id})")
-                    logger.warning(f"⚠️ NOTE: {len(llm_attributes)} attributes extracted but NOT YET SAVED to category_attributes table")
-                    
-                    return {
-                        "success": True,
-                        "category": user_category,
-                        "category_id": new_cat_id,
-                        "status": "created_from_llm",
-                        "reason": f"LLM confirmed as new category: {llm_result.get('description', '')}"
-                    }
-                else:
-                    logger.error(f"❌ Failed to create category '{user_category}'")
+                if self.product_service_client is None:
+                    logger.error("⚠️ ProductServiceClient not available - cannot create category")
                     return {
                         "success": False,
-                        "category": None,
+                        "category": user_category,
                         "category_id": None,
-                        "status": "failed",
-                        "reason": "Failed to create category in database"
+                        "status": "unknown_category",
+                        "reason": "ProductService client not available. Cannot create category."
+                    }
+                
+                # Call ProductService API to create category
+                try:
+                    logger.info(f"📤 Calling ProductService to create category '{user_category}'...")
+                    # Use await instead of asyncio.run() since we're already in async context
+                    result = await self.product_service_client.create_category(
+                        name=user_category,
+                        description=llm_result.get("description", ""),
+                        category_type=llm_result.get("category_type", "general"),
+                        attributes=llm_attributes
+                    )
+                    
+                    if result.get("success"):
+                        category_id = result.get("id")
+                        attributes_created = result.get("attributes_created", 0)
+                        logger.info(f"✅ Successfully created category '{user_category}' (id={category_id}, attributes={attributes_created})")
+                        
+                        return {
+                            "success": True,
+                            "category": user_category,
+                            "category_id": category_id,
+                            "status": "created_via_api",
+                            "reason": f"Created via ProductService API with {attributes_created} attributes"
+                        }
+                    else:
+                        # Check if category already exists (not a failure!)
+                        reason = result.get("reason", "Failed to create category")
+                        if "already exists" in reason.lower():
+                            category_id = result.get("id")
+                            logger.info(f"✅ Category '{user_category}' already exists (id={category_id})")
+                            return {
+                                "success": True,
+                                "category": user_category,
+                                "category_id": category_id,
+                                "status": "existing",
+                                "reason": "Category already exists in ProductService"
+                            }
+                        
+                        logger.warning(f"⚠️ ProductService returned failure: {reason}")
+                        return {
+                            "success": False,
+                            "category": user_category,
+                            "category_id": None,
+                            "status": "creation_failed",
+                            "reason": reason
+                        }
+                
+                except Exception as e:
+                    logger.error(f"❌ Failed to create category via ProductService: {str(e)}")
+                    return {
+                        "success": False,
+                        "category": user_category,
+                        "category_id": None,
+                        "status": "api_error",
+                        "reason": f"ProductService API error: {str(e)}"
                     }
         
         # LLM validation failed
@@ -430,10 +468,10 @@ NHẮC NHỜ:
             
             # STEP 1: Insert category
             cursor.execute("""
-                INSERT INTO categories (name, slug, description, created_at)
-                VALUES (%s, %s, %s, NOW())
+                INSERT INTO categories (name, description, created_at)
+                VALUES (%s, %s, NOW())
                 RETURNING id
-            """, (category_name, slug, description or ""))
+            """, (category_name, description or ""))
             
             result = cursor.fetchone()
             
@@ -459,18 +497,14 @@ NHẮC NHỜ:
                         
                         cursor.execute("""
                             INSERT INTO category_attributes 
-                            (category_id, name, display_name, data_type, is_filterable, sort_order)
-                            VALUES (%s, %s, %s, %s, true, %s)
-                            ON CONFLICT (category_id, name) DO UPDATE SET
-                                display_name = EXCLUDED.display_name,
-                                sort_order = EXCLUDED.sort_order
+                            (category_id, attribute_name, attribute_type, is_filterable, display_order)
+                            VALUES (%s, %s, %s, true, %s)
                             RETURNING id
                         """, (
                             category_id,
                             attr_name_clean,
-                            display_name,
                             "text",  # Default to text type, can be refined later
-                            idx  # sort_order based on position
+                            idx  # display_order based on position
                         ))
                         
                         attr_id = cursor.fetchone()

@@ -34,6 +34,7 @@ CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 CREATE TABLE categories (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL UNIQUE,
+    slug VARCHAR(255) NOT NULL UNIQUE,
     description TEXT,
     parent_category_id INTEGER,
     category_type VARCHAR(50),
@@ -55,44 +56,45 @@ CREATE TABLE category_attributes (
 
 CREATE TABLE products (
     id SERIAL PRIMARY KEY,
-    product_id VARCHAR(100) NOT NULL UNIQUE,
-    category_id INTEGER REFERENCES categories(id),
-    name VARCHAR(500) NOT NULL,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    title VARCHAR(500) NOT NULL,
+    brand VARCHAR(100),
     description TEXT,
-    brand VARCHAR(255),
-    images TEXT[],
+    product_url TEXT,
+    thumbnail VARCHAR(500),
     source VARCHAR(50),
-    is_available BOOLEAN DEFAULT TRUE,
+    tiki_product_id VARCHAR(100),
+    tiki_spid VARCHAR(100),
+    seller_id VARCHAR(100) DEFAULT '1',
+    is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE skus (
     id SERIAL PRIMARY KEY,
-    sku_id VARCHAR(100) NOT NULL UNIQUE,
-    product_id VARCHAR(100) NOT NULL REFERENCES products(product_id),
-    price DECIMAL(10, 2),
-    discount_percent DECIMAL(5, 2),
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    sku_code VARCHAR(100) UNIQUE,
+    price DECIMAL(12, 2) NOT NULL,
+    original_price DECIMAL(12, 2),
     stock INTEGER DEFAULT 0,
     is_available BOOLEAN DEFAULT TRUE,
-    source VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE sku_attributes (
-    id SERIAL PRIMARY KEY,
-    sku_id VARCHAR(100) NOT NULL REFERENCES skus(sku_id),
-    attribute_name VARCHAR(255),
-    attribute_value TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    sku_id INTEGER NOT NULL REFERENCES skus(id) ON DELETE CASCADE,
+    attribute_name VARCHAR(100) NOT NULL,
+    attribute_value TEXT NOT NULL,
+    PRIMARY KEY (sku_id, attribute_name)
 );
 
 -- Indexes for products_db
 CREATE INDEX idx_products_category ON products(category_id);
 CREATE INDEX idx_products_brand ON products(brand);
 CREATE INDEX idx_products_source ON products(source);
-CREATE INDEX idx_products_available ON products(is_available);
+CREATE INDEX idx_products_active ON products(is_active);
 CREATE INDEX idx_skus_product ON skus(product_id);
 CREATE INDEX idx_skus_price ON skus(price);
 CREATE INDEX idx_skus_stock ON skus(stock);

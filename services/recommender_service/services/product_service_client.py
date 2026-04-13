@@ -8,8 +8,35 @@ import logging
 from typing import Optional, Dict, List, Any
 import httpx
 from datetime import datetime
+import unicodedata
+import re
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+def slugify(text: str) -> str:
+    """
+    Convert text to URL-friendly slug
+    Removes Vietnamese diacritics: à→a, ư→u, etc.
+    """
+    # Normalize Vietnamese characters (NFD decomposition)
+    nfkd_form = unicodedata.normalize('NFKD', text)
+    # Remove combining marks (diacritics)
+    ascii_form = ''.join([c for c in nfkd_form if not unicodedata.combining(c)])
+    # Convert to lowercase
+    slug = ascii_form.lower()
+    # Replace spaces and underscores with hyphens
+    slug = re.sub(r'[\s_]+', '-', slug)
+    # Remove non-alphanumeric characters except hyphens
+    slug = re.sub(r'[^a-z0-9-]', '', slug)
+    # Remove multiple consecutive hyphens
+    slug = re.sub(r'-+', '-', slug)
+    # Strip leading/trailing hyphens
+    slug = slug.strip('-')
+    return slug
 
 
 class ProductServiceClient:
@@ -247,6 +274,69 @@ class ProductServiceClient:
             "POST",
             f"/api/categories/{category_id}/filter",
             json=filters
+        )
+    
+    async def get_filters(self, category_name: str) -> List[Dict[str, Any]]:
+        """
+        Get available filters for a category by name
+        
+        Args:
+            category_name: Category name (e.g., "Giày", "Đồng hồ")
+        
+        Returns:
+            List of filter objects with options
+        """
+        try:
+            # Convert category name to slug (removes diacritics, lowercase, hyphenated)
+            category_slug = slugify(category_name)
+            
+            # Get filters from ProductService
+            response = await self._request_with_retry(
+                "GET",
+                f"/api/categories/{category_slug}/filters"
+            )
+            return response.get("filters", [])
+        
+        except Exception as e:
+            logger.error(f"Error fetching filters for category '{category_name}': {e}")
+            return []
+    
+    async def create_category(
+        self,
+        name: str,
+        description: str = "",
+        category_type: str = "general",
+        attributes: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Create new product category with attributes
+        
+        Args:
+            name: Category name (e.g., "Giày")
+            description: Category description
+            category_type: Category type (e.g., "footwear")
+            attributes: List of attribute names to create
+        
+        Returns:
+            {
+                "success": True,
+                "id": 1,
+                "name": "Giày",
+                "attributes_created": 7
+            }
+        """
+        payload = {
+            "name": name,
+            "description": description,
+            "category_type": category_type
+        }
+        if attributes:
+            payload["attributes"] = attributes
+        
+        return await self._request_with_retry(
+            "POST",
+            "/api/categories",
+            json=payload
         )
     
     # ========================================================================

@@ -3,16 +3,16 @@
 """
 Product Repository Service - WRITE operations only
 
-Save & manage products in database:
+Save & manage products in database (new SKU-based schema):
 1. Save single product
 2. Save SKU variants
 3. Batch save crawled products
 
 For QUERIES → Use SKURepository instead!
 
-Uses EXISTING TABLES:
-- products (id, category_id, title, brand, description, product_url, ...)
-- skus (id, product_id, sku_code, price, stock, ...)
+Uses EXISTING TABLES (Dynamic DB Schema):
+- products (id, category_id, product_id, name, brand, description, images[], ...)
+- skus (sku_id, product_id, price, discount_percent, stock, ...)
 - sku_attributes (sku_id, attribute_name, attribute_value)
 
 REQUIRES:
@@ -23,6 +23,7 @@ import logging
 import sys
 from typing import Dict, Any, List, Optional
 import json
+import hashlib
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
@@ -98,7 +99,7 @@ class ProductRepository:
             # Get category slug from ID
             conn = self.get_connection()
             cursor = conn.cursor(cursor_factory=RealDictCursor)
-            cursor.execute("SELECT slug FROM categories WHERE id = %s LIMIT 1", [category_id])
+            cursor.execute("SELECT name FROM categories WHERE id = %s LIMIT 1", [category_id])
             cat_result = cursor.fetchone()
             cursor.close()
             conn.close()
@@ -167,50 +168,58 @@ class ProductRepository:
         thumbnail: str = "",
         source: str = "",
         attributes: Dict[str, Any] = None
-    ) -> int:
+    ) -> str:
         """
         Save a single product to database
         
         Returns:
-            Product ID (created or existing)
+            Product ID (unique string identifier)
         """
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
             
-            # Check if product already exists (by URL or title)
+            # Generate product_id from URL or title
+            import hashlib
+            unique_data = f"{product_url}{title}".encode('utf-8')
+            product_id = hashlib.md5(unique_data).hexdigest()[:20]
+            
+            # Check if product already exists (by product_id or name)
             cursor.execute("""
                 SELECT id FROM products 
-                WHERE category_id = %s AND (product_url = %s OR (title ILIKE %s AND brand = %s))
-                LIMIT 1
-            """, [category_id, product_url or "", f"%{title}%", brand or ""])
+                WHERE product_id = %s LIMIT 1
+            """, [product_id])
             
             existing = cursor.fetchone()
             if existing:
-                return existing[0]
+                return product_id
             
-            # Save new product
-            # Note: attributes are saved in sku_attributes table (SKU-based model)
+            # Save new product using new schema
             cursor.execute("""
                 INSERT INTO products 
-                (category_id, title, brand, description, product_url, thumbnail, source)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
+                (category_id, product_id, name, brand, description, images, source, is_available, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, true, NOW())
+                RETURNING product_id
             """, [
                 category_id,
+                product_id,
                 title,
                 brand or "",
                 description or "",
-                product_url or "",
-                thumbnail or "",
+                [thumbnail] if thumbnail else [],  # images as array
                 source or ""
             ])
             
-            product_id = cursor.fetchone()[0]
-            conn.commit()
-            
-            logger.info(f"✅ Saved product '{title}' (id={product_id})")
-            return product_id
+            result = cursor.fetchone()
+            if result:
+                saved_product_id = result[0]
+                conn.commit()
+                logger.info(f"✅ Saved product '{title}' (product_id={saved_product_id})")
+                return saved_product_id
+            else:
+                conn.rollback()
+                logger.error(f"Failed to save product '{title}'")
+                return None
         
         except Exception as e:
             logger.error(f"Error saving product: {e}")
@@ -222,13 +231,13 @@ class ProductRepository:
     
     def save_sku(
         self,
-        product_id: int,
+        product_id: str,
         sku_code: str,
         price: float,
         original_price: float = None,
         stock: int = 0,
         attributes: Dict[str, Any] = None
-    ) -> int:
+    ) -> str:
         """
         Save SKU (product variant) to database
         Attributes are saved separately in sku_attributes table
@@ -241,7 +250,7 @@ class ProductRepository:
             cursor = conn.cursor()
             
             # Check if SKU exists
-            cursor.execute("SELECT id FROM skus WHERE sku_code = %s LIMIT 1", [sku_code])
+            cursor.execute("SELECT sku_id FROM skus WHERE sku_id = %s LIMIT 1", [sku_code])
             existing = cursor.fetchone()
             
             sku_id = None
@@ -250,24 +259,23 @@ class ProductRepository:
                 sku_id = existing[0]
                 cursor.execute("""
                     UPDATE skus 
-                    SET price = %s, original_price = %s, stock = %s, updated_at = NOW()
-                    WHERE id = %s
-                """, [price, original_price or price, stock, sku_id])
+                    SET price = %s, discount_percent = %s, stock = %s, updated_at = NOW()
+                    WHERE sku_id = %s
+                """, [price, (original_price - price) if original_price and original_price > price else 0, stock, sku_id])
             else:
-                # Create new SKU
+                # Create new SKU - using sku_code as sku_id
+                sku_id = sku_code
                 cursor.execute("""
-                    INSERT INTO skus (product_id, sku_code, price, original_price, stock)
-                    VALUES (%s, %s, %s, %s, %s)
-                    RETURNING id
-                """, [product_id, sku_code, price, original_price or price, stock])
-                sku_id = cursor.fetchone()[0]
+                    INSERT INTO skus (sku_id, product_id, price, discount_percent, stock, is_available, created_at)
+                    VALUES (%s, %s, %s, %s, %s, true, NOW())
+                """, [sku_id, product_id, price, (original_price - price) if original_price and original_price > price else 0, stock])
             
             # Save attributes separately in sku_attributes table
             if attributes and sku_id:
-                self._save_sku_attributes(cursor, sku_id, attributes)
+                self._save_sku_attributes(sku_id, attributes)
             
             conn.commit()
-            logger.info(f"✅ Saved SKU (id={sku_id})")
+            logger.info(f"✅ Saved SKU (sku_id={sku_id})")
             return sku_id
         
         except Exception as e:
@@ -280,19 +288,19 @@ class ProductRepository:
     
     def _save_sku_attributes(
         self,
-        cursor,
-        sku_id: int,
+        sku_id: str,
         attributes: Dict[str, Any]
     ) -> None:
         """
         Save SKU attributes to sku_attributes table
         
         Args:
-            cursor: Database cursor
             sku_id: SKU ID
             attributes: Dictionary of attribute name-value pairs
         """
+        conn = self.get_connection()
         try:
+            cursor = conn.cursor()
             # Delete existing attributes first
             cursor.execute("DELETE FROM sku_attributes WHERE sku_id = %s", [sku_id])
             
@@ -309,11 +317,15 @@ class ProductRepository:
                     VALUES (%s, %s, %s)
                 """, [sku_id, str(attr_name), attr_value])
             
+            conn.commit()
             logger.debug(f"✅ Saved {len(attributes)} attributes for SKU {sku_id}")
         
         except Exception as e:
             logger.error(f"Error saving SKU attributes: {e}")
-            raise
+            conn.rollback()
+        
+        finally:
+            conn.close()
     
     def save_products_batch(
         self,

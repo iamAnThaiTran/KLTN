@@ -9,6 +9,7 @@ from .matcher import ProductMatcher
 from .ranker import ProductRanker
 # 🚀 REMOVED: from app.crawler.multi_crawler import MultiCrawler
 from services.crawl_service_client import CrawlServiceClient  # ✅ Use absolute import
+from services.product_service_client import ProductServiceClient  # ✅ Use absolute import
 from .schema import get_schema
 from .intent import EnhancedIntentDetector
 from .intent_mapper import IntentMapper
@@ -37,7 +38,8 @@ class RecommendationOrchestrator:
         self.product_ranker = ProductRanker()
         # 🚀 CHANGED: Use CrawlServiceClient instead of MultiCrawler
         self.crawl_service_client = CrawlServiceClient()  # ✅ HTTP client to Crawl Service (8003)
-        self.category_validator = CategoryValidator()  # NEW: Category validation before crawl
+        self.product_service_client = ProductServiceClient()  # ✅ HTTP client to Product Service (8001)
+        self.category_validator = CategoryValidator(product_service_client=self.product_service_client)  # ✅ Pass ProductServiceClient
         self.product_repository = ProductRepository()  # NEW: Query DB before crawl
         
         # Cache management (Lazada-style)
@@ -304,7 +306,7 @@ class RecommendationOrchestrator:
         
         # NEW: Validate category before crawling
         logger.info(f"[CASE 1] Validating category: '{category}'")
-        validation_result = self.category_validator.validate_category(category)
+        validation_result = await self.category_validator.validate_category(category)
         if not validation_result["success"]:
             logger.info(f"[CASE 1] ❌ Category validation failed: {validation_result['reason']}")
             return {
@@ -379,9 +381,12 @@ class RecommendationOrchestrator:
                 "state": conversation_state
             }
         
-        # ✅ Save crawled products to DB for future queries (cache for next time)
-        logger.info(f"[CASE 1] 💾 Saving {len(crawled_products)} crawled products to database...")
-        self.product_repository.save_products_batch(category_id, crawled_products)
+        # ✅ Save crawled products to Product Service (not directly to DB)
+        logger.info(f"[CASE 1] 💾 Saving {len(crawled_products)} crawled products via Product Service...")
+        try:
+            await self.product_service_client.save_products(crawled_products, source="tiki")
+        except Exception as e:
+            logger.warning(f"[CASE 1] ⚠️ Failed to save products via Product Service: {e}")
         
         # Return crawled products directly (already complete from CrawlService)
         return await self._process_crawl_results(crawled_products, conversation_state, case=1, source="crawl")
@@ -425,7 +430,7 @@ class RecommendationOrchestrator:
         
         # NEW: Validate category before proceeding
         logger.info(f"[CASE 2] Validating category: '{category}'")
-        validation_result = self.category_validator.validate_category(category)
+        validation_result = await self.category_validator.validate_category(category)
         logger.info(f"[CASE 2] Category validation result: {validation_result}")
         
         if not validation_result["success"]:
@@ -492,7 +497,11 @@ class RecommendationOrchestrator:
                     "case": 2,
                     "state": conversation_state
                 }
-            self.product_repository.save_products_batch(category_id, crawled_products)
+            # ✅ Save crawled products to Product Service (not directly to DB)
+            try:
+                await self.product_service_client.save_products(crawled_products, source="tiki")
+            except Exception as e:
+                logger.warning(f"[CASE 2] ⚠️ Failed to save products via Product Service: {e}")
             return await self._process_crawl_results(crawled_products, conversation_state, case=2, source="crawl")
         
         required_attrs = [
@@ -536,9 +545,12 @@ class RecommendationOrchestrator:
                     "state": conversation_state
                 }
             
-            # ✅ Save crawled products to DB for future queries
-            logger.info(f"[CASE 2] 💾 Saving crawled products to database...")
-            self.product_repository.save_products_batch(category_id, crawled_products)
+            # ✅ Save crawled products to Product Service (not directly to DB)
+            logger.info(f"[CASE 2] 💾 Saving crawled products via Product Service...")
+            try:
+                await self.product_service_client.save_products(crawled_products, source="tiki")
+            except Exception as e:
+                logger.warning(f"[CASE 2] ⚠️ Failed to save products via Product Service: {e}")
             
             # Return crawled products directly (already complete from CrawlService)
             return await self._process_crawl_results(crawled_products, conversation_state, case=2, source="crawl")
@@ -731,7 +743,7 @@ Be practical and culturally relevant for Vietnamese shopping."""
         # Validate new category
         new_category = case_data["new_category"]
         logger.info(f"[CASE 5] Validating new category: '{new_category}'")
-        validation_result = self.category_validator.validate_category(new_category)
+        validation_result = await self.category_validator.validate_category(new_category)
         
         if not validation_result["success"]:
             logger.info(f"[CASE 5] ❌ Category validation failed")
@@ -795,9 +807,12 @@ Be practical and culturally relevant for Vietnamese shopping."""
                     "state": conversation_state
                 }
             
-            # ✅ Save crawled products to DB for future queries
-            logger.info(f"[CASE 5] 💾 Saving crawled products to database...")
-            self.product_repository.save_products_batch(category_id, crawled_products)
+            # ✅ Save crawled products to Product Service (not directly to DB)
+            logger.info(f"[CASE 5] 💾 Saving crawled products via Product Service...")
+            try:
+                await self.product_service_client.save_products(crawled_products, source="tiki")
+            except Exception as e:
+                logger.warning(f"[CASE 5] ⚠️ Failed to save products via Product Service: {e}")
             
             # Return crawled products directly (already complete from CrawlService)
             return await self._process_crawl_results(crawled_products, conversation_state, case=5, source="crawl")
@@ -1069,9 +1084,12 @@ Format:
             )
             logger.info(f"[CASE 8] ✅ Created category in DB: id={category_id}")
             
-            # Save crawled products to DB
-            self.product_repository.save_products_batch(category_id, crawled_products)
-            logger.info(f"[CASE 8] ✅ Saved {len(crawled_products)} products to DB")
+            # Save crawled products to Product Service
+            try:
+                await self.product_service_client.save_products(crawled_products, source="tiki")
+                logger.info(f"[CASE 8] ✅ Saved {len(crawled_products)} products via Product Service")
+            except Exception as e:
+                logger.warning(f"[CASE 8] ⚠️ Failed to save products via Product Service: {e}")
             
         except Exception as e:
             logger.error(f"[CASE 8] ⚠️  Warning: Failed to save to DB: {e}")
@@ -1519,10 +1537,13 @@ Be concise. Attributes should be practical filtering criteria."""
         if not crawled_products:
             return []
         
-        # Step 3: Save crawled results to DB for future queries
-        if category_id:
-            logger.info(f"[SMART_CRAWL] 💾 Saving {len(crawled_products)} products to database...")
-            self.product_repository.save_products_batch(category_id, crawled_products)
+        # Step 3: Save crawled results to Product Service for future queries
+        if category_id and crawled_products:
+            logger.info(f"[SMART_CRAWL] 💾 Saving {len(crawled_products)} products via Product Service...")
+            try:
+                await self.product_service_client.save_products(crawled_products, source="tiki")
+            except Exception as e:
+                logger.warning(f"[SMART_CRAWL] ⚠️ Failed to save products via Product Service: {e}")
         
         return crawled_products
     

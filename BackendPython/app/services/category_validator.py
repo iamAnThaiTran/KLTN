@@ -426,10 +426,10 @@ NHẮC NHỜ:
             
             # STEP 1: Insert category
             cursor.execute("""
-                INSERT INTO categories (name, slug, description, created_at)
-                VALUES (%s, %s, %s, NOW())
+                INSERT INTO categories (name, description, created_at)
+                VALUES (%s, %s, NOW())
                 RETURNING id
-            """, (category_name, slug, description or ""))
+            """, (category_name, description or ""))
             
             result = cursor.fetchone()
             
@@ -455,18 +455,14 @@ NHẮC NHỜ:
                         
                         cursor.execute("""
                             INSERT INTO category_attributes 
-                            (category_id, name, display_name, data_type, is_filterable, sort_order)
-                            VALUES (%s, %s, %s, %s, true, %s)
-                            ON CONFLICT (category_id, name) DO UPDATE SET
-                                display_name = EXCLUDED.display_name,
-                                sort_order = EXCLUDED.sort_order
+                            (category_id, attribute_name, attribute_type, is_filterable, display_order)
+                            VALUES (%s, %s, %s, true, %s)
                             RETURNING id
                         """, (
                             category_id,
                             attr_name_clean,
-                            display_name,
                             "text",  # Default to text type, can be refined later
-                            idx  # sort_order based on position
+                            idx  # display_order based on position
                         ))
                         
                         attr_id = cursor.fetchone()

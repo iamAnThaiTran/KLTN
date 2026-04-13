@@ -7,6 +7,8 @@ Handles JavaScript-rendered content
 import asyncio
 from typing import List, Dict, Any
 from playwright.async_api import async_playwright, Browser, Page
+from urllib.parse import urlparse, parse_qs
+import re
 import logging
 
 logger = logging.getLogger(__name__)
@@ -134,6 +136,20 @@ class TikiCrawler:
                                 const link = item.href || '';
                                 if (!link) continue;
                                 
+                                // Extract product_id and spid from URL
+                                const urlObj = new URL(link);
+                                let product_id = null;
+                                let spid = null;
+                                
+                                // Extract product_id from path (e.g., /...p279078759.html)
+                                const pathMatch = urlObj.pathname.match(/p(\\d+)/);
+                                if (pathMatch) {{
+                                    product_id = pathMatch[1];
+                                }}
+                                
+                                // Extract spid from query params
+                                spid = urlObj.searchParams.get('spid');
+                                
                                 const titleEl = item.querySelector('h3.dDeapS');
                                 const title = titleEl?.innerText?.trim() || '';
                                 if (!title) continue;
@@ -176,7 +192,9 @@ class TikiCrawler:
                                     link: link,
                                     image: image,
                                     sold: parseInt(sold, 10),
-                                    source: 'tiki'
+                                    source: 'tiki',
+                                    product_id: product_id,
+                                    spid: spid
                                 }});
                             }} catch (e) {{
                                 console.error('Error parsing item:', e);

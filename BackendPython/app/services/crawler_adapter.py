@@ -6,6 +6,8 @@ Adapter để convert crawler data sang SKU-based format và lưu vào database
 import os
 import re
 import psycopg2
+import hashlib
+import random
 from psycopg2.extras import execute_values
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
@@ -216,140 +218,134 @@ class CrawlerToSKUAdapter:
             
             for product_data in products:
                 try:
+                    # Generate or get product_id from crawler data
+                    # Use link as base for generating product_id if not provided
+                    if 'product_id' in product_data and product_data['product_id']:
+                        unique_product_id = str(product_data['product_id'])
+                    else:
+                        # Generate from link or title
+                        link = product_data.get('link', '')
+                        title = product_data.get('title', 'unknown')
+                        unique_data = f"{link}{title}".encode('utf-8')
+                        unique_product_id = hashlib.md5(unique_data).hexdigest()[:20]
+                    
                     # 1. Check if product exists, if not insert
                     cursor.execute("""
-                        SELECT id FROM products WHERE product_url = %s LIMIT 1
-                    """, (product_data.get('link', ''),))
+                        SELECT id FROM products WHERE product_id = %s LIMIT 1
+                    """, (unique_product_id,))
                     
                     existing = cursor.fetchone()
                     
                     if existing:
-                        product_id = existing[0]
+                        product_id_db = existing[0]
                         # Update existing product
                         cursor.execute("""
                             UPDATE products SET
-                                title = %s,
-                                thumbnail = %s,
-                                tiki_product_id = %s,
-                                tiki_spid = %s,
-                                seller_id = %s,
+                                name = %s,
+                                description = %s,
+                                brand = %s,
+                                images = %s,
                                 updated_at = NOW()
                             WHERE id = %s
                             RETURNING id
                         """, (
                             product_data.get('title', 'Unknown Product'),
-                            product_data.get('image', ''),
-                            product_data.get('product_id', ''),
-                            product_data.get('spid', ''),
-                            product_data.get('seller_id', '1'),
-                            product_id
+                            product_data.get('description', ''),
+                            product_data.get('brand', 'Unknown'),
+                            [product_data.get('image', '')],  # Images as array
+                            product_id_db
                         ))
                         result = cursor.fetchone()
                         if result:
-                            product_id = result[0]
+                            product_id_db = result[0]
                     else:
                         # Insert new product
                         cursor.execute("""
                             INSERT INTO products (
-                                category_id, title, brand, description, 
-                                product_url, source, thumbnail, 
-                                tiki_product_id, tiki_spid, seller_id, created_at
+                                category_id, product_id, name, brand, description, 
+                                images, source, is_available, created_at
                             )
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
                             RETURNING id
                         """, (
                             category_id,
+                            unique_product_id,
                             product_data.get('title', 'Unknown Product'),
                             product_data.get('brand', 'Unknown'),
                             product_data.get('description', ''),
-                            product_data.get('link', ''),
+                            [product_data.get('image', '')],  # Images as array
                             product_data.get('source', 'tiki'),
-                            product_data.get('image', ''),
-                            product_data.get('product_id', ''),
-                            product_data.get('spid', ''),
-                            product_data.get('seller_id', '1')
+                            True  # is_available
                         ))
                         
                         result = cursor.fetchone()
                         if result:
-                            product_id = result[0]
+                            product_id_db = result[0]
                             products_saved += 1
                         else:
-                            logger.error(f"Failed to get product_id for: {product_data.get('title')}")
+                            logger.error(f"Failed to create product: {product_data.get('title')}")
                             continue
                     
-                    # 2. Extract attributes - ƯU TIÊN dùng extracted_attributes nếu có
+                    # 2. Extract attributes
                     if 'extracted_attributes' in product_data and product_data['extracted_attributes']:
-                        # Dùng attributes đã extract từ Tiki API
                         extracted = product_data['extracted_attributes']
                         attributes = {}
                         
-                        # Lấy size đầu tiên nếu có
                         if extracted.get('sizes'):
                             attributes['size'] = extracted['sizes'][0]
-                        
-                        # Lấy color đầu tiên nếu có
                         if extracted.get('colors'):
                             attributes['color'] = extracted['colors'][0]
-                        
-                        # Lấy material đầu tiên nếu có
                         if extracted.get('materials'):
                             attributes['material'] = extracted['materials'][0]
-                        
-                        # logger.info(f"    Using extracted attributes: {attributes}")
                     else:
-                        # Fallback: Extract từ title
                         attributes = self.extract_attributes_from_title(
                             product_data.get('title', ''),
                             category_name
                         )
                     
-                    # 3. Create SKU code
-                    brand_prefix = product_data.get('brand', 'UNK')[:4].upper()
-                    attr_suffix = '-'.join([v[:3].upper() for v in attributes.values()][:2])
-                    sku_code = f"{brand_prefix}-{attr_suffix}-{product_id}"
+                    # 3. Create SKU code and SKU ID
+                    brand_prefix = product_data.get('brand', 'UNK')[:3].upper()
+                    source_prefix = product_data.get('source', 'UNK')[:2].upper()
+                    sku_id = f"{brand_prefix}-{source_prefix}-{unique_product_id[:8]}-{random.randint(1000, 9999)}"
                     
                     # 4. Insert SKU
                     price = product_data.get('price', 0)
-                    original_price = price
-                    if product_data.get('discount', 0) > 0:
-                        original_price = int(price / (1 - product_data.get('discount', 0) / 100))
+                    discount = product_data.get('discount', 0)
                     
                     cursor.execute("""
                         INSERT INTO skus (
-                            product_id, sku_code, price, original_price, 
-                            stock, is_available
+                            sku_id, product_id, price, discount_percent, 
+                            stock, is_available, source, created_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (sku_code)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                        ON CONFLICT (sku_id)
                         DO UPDATE SET
                             price = EXCLUDED.price,
-                            original_price = EXCLUDED.original_price,
+                            discount_percent = EXCLUDED.discount_percent,
+                            stock = EXCLUDED.stock,
                             updated_at = NOW()
                         RETURNING id
                     """, (
-                        product_id,
-                        sku_code,
+                        sku_id,
+                        unique_product_id,  # product_id as foreign key
                         price,
-                        original_price,
-                        product_data.get('sold', 0),  # Use sold as stock estimate
-                        True
+                        discount,
+                        product_data.get('sold', 0),
+                        True,
+                        product_data.get('source', 'tiki')
                     ))
                     
                     sku_result = cursor.fetchone()
                     if not sku_result:
-                        logger.error(f"Failed to get SKU_id for: {product_data.get('title')}")
+                        logger.error(f"Failed to create SKU for: {product_data.get('title')}")
                         continue
                     
-                    sku_id = sku_result[0]
                     skus_saved += 1
                     
                     # 5. Insert SKU attributes
                     if attributes:
-                        # Delete old attributes
                         cursor.execute("DELETE FROM sku_attributes WHERE sku_id = %s", (sku_id,))
                         
-                        # Insert new attributes
                         attr_values = [
                             (sku_id, attr_name, attr_value)
                             for attr_name, attr_value in attributes.items()
@@ -364,8 +360,6 @@ class CrawlerToSKUAdapter:
                                 """,
                                 attr_values
                             )
-                    
-                    # logger.info(f"✅ Saved: {product_data.get('title')} → SKU: {sku_code}")
                     
                 except Exception as e:
                     logger.error(f"Error saving product: {e}")
