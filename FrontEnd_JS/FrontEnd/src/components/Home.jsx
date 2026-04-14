@@ -44,7 +44,7 @@ const HOW_IT_WORKS = [
 
 export default function LandingPage() {
   const navigate = useNavigate();
-  const { showLoginModal, setShowLoginModal } = useAuth();
+  const { showLoginModal, setShowLoginModal, user } = useAuth();
   const [input, setInput] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
@@ -467,7 +467,7 @@ export default function LandingPage() {
       </div>
 
       <LoginModal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} />
-      {showComparison && <ProductComparison onClose={() => setShowComparison(false)} />}
+      {showComparison && <ProductComparison user={user} onClose={() => setShowComparison(false)} />}
     </div>
   );
 }

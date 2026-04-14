@@ -9,7 +9,7 @@ import { compareProducts } from '../utils/comparisonApi';
  * Main orchestrator for product comparison workflow
  * Manages state and transitions between selector and result views
  */
-export default function ProductComparison({ onClose }) {
+export default function ProductComparison({ user, onClose }) {
   const [step, setStep] = useState('select'); // 'select' | 'loading' | 'result'
   const [comparisonData, setComparisonData] = useState(null);
   const [error, setError] = useState(null);
@@ -130,6 +130,7 @@ export default function ProductComparison({ onClose }) {
         {/* Select Products Step */}
         {step === 'select' && (
           <ProductSelector
+            user={user}
             onProductsSelected={handleProductsSelected}
             onBack={onClose}
           />

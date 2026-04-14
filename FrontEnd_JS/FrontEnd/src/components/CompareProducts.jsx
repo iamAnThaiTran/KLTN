@@ -29,7 +29,13 @@ export default function CompareProducts({ token, user, onBack }) {
       setLoading(true);
       setError(null);
       console.log('📥 Fetching favorites for comparison...');
-      const response = await getUserFavorites({ limit: 100, offset: 0 });
+      
+      const userId = user?.user_id || user?.id;
+      if (!userId) {
+        throw new Error('User ID not found. Please login again.');
+      }
+      
+      const response = await getUserFavorites(userId, { limit: 100, offset: 0 });
       console.log('✅ Favorites fetched:', response);
       setFavorites(response.favorites || []);
     } catch (err) {

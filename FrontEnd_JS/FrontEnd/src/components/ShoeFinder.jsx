@@ -115,11 +115,14 @@ const ShoeFinder = () => {
   const handleToggleFavorite = async (product) => {
     if (!user || !token) { alert('Vui lòng đăng nhập để sử dụng tính năng này'); return; }
     try {
+      const userId = user.user_id || user.id;
+      if (!userId) { alert('Không tìm thấy user ID. Vui lòng đăng nhập lại.'); return; }
+      
       if (favoriteProductIds.has(product.id)) {
-        await removeFromFavorites(product.id, token);
+        await removeFromFavorites(userId, product.id);
         setFavoriteProductIds(prev => { const s = new Set(prev); s.delete(product.id); return s; });
       } else {
-        await addToFavorites(product.id, token);
+        await addToFavorites(userId, product.id);
         setFavoriteProductIds(prev => new Set(prev).add(product.id));
       }
     } catch (err) { alert('Lỗi: ' + err.message); }
@@ -235,7 +238,7 @@ const ShoeFinder = () => {
 
 
 
-      {showComparison && <ProductComparison onClose={() => setShowComparison(false)} />}
+      {showComparison && <ProductComparison user={user} onClose={() => setShowComparison(false)} />}
     </div>
   );
 };

@@ -7,13 +7,16 @@ import apiRequest from './apiClient.js';
 
 /**
  * Get all favorites for the user
+ * @param {string} userId - User ID from auth context
  * @param {number} limit - Number of results
  * @param {number} offset - Pagination offset
  * @returns {Promise<Object>} Favorites list with product details
  */
-export async function getUserFavorites({ limit = 50, offset = 0 } = {}) {
+export async function getUserFavorites(userId, { limit = 50, offset = 0 } = {}) {
   try {
-    const response = await apiRequest(`/api/user/favorites?limit=${limit}&offset=${offset}`, {
+    if (!userId) throw new Error('User ID is required');
+    
+    const response = await apiRequest(`/api/users/${userId}/favorites?limit=${limit}&offset=${offset}`, {
       method: 'GET'
     });
 
@@ -31,13 +34,25 @@ export async function getUserFavorites({ limit = 50, offset = 0 } = {}) {
 
 /**
  * Add a product to favorites
+ * @param {string} userId - User ID from auth context
  * @param {number} productId - Product ID
+ * @param {number} skuId - Optional SKU ID
+ * @param {number} price - Optional current price
  * @returns {Promise<Object>} Response with favorite info
  */
-export async function addToFavorites(productId) {
+export async function addToFavorites(userId, productId, skuId = null, price = null) {
   try {
-    const response = await apiRequest(`/api/user/favorites/${productId}`, {
-      method: 'POST'
+    if (!userId) throw new Error('User ID is required');
+    if (productId === undefined || productId === null) throw new Error('Product ID is required');
+    
+    const response = await apiRequest(`/api/users/${userId}/favorites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        product_id: productId,
+        sku_id: skuId,
+        price: price
+      })
     });
 
     if (!response.ok) {
@@ -55,12 +70,16 @@ export async function addToFavorites(productId) {
 
 /**
  * Remove a product from favorites
+ * @param {string} userId - User ID from auth context
  * @param {number} productId - Product ID
  * @returns {Promise<Object>} Response with success status
  */
-export async function removeFromFavorites(productId) {
+export async function removeFromFavorites(userId, productId) {
   try {
-    const response = await apiRequest(`/api/user/favorites/${productId}`, {
+    if (!userId) throw new Error('User ID is required');
+    if (!productId) throw new Error('Product ID is required');
+    
+    const response = await apiRequest(`/api/users/${userId}/favorites/${productId}`, {
       method: 'DELETE'
     });
 
@@ -79,12 +98,16 @@ export async function removeFromFavorites(productId) {
 
 /**
  * Check if a product is in user's favorites
+ * @param {string} userId - User ID from auth context
  * @param {number} productId - Product ID
  * @returns {Promise<boolean>} True if favorited, false otherwise
  */
-export async function checkFavoriteStatus(productId) {
+export async function checkFavoriteStatus(userId, productId) {
   try {
-    const response = await apiRequest(`/api/user/favorites/${productId}/status`, {
+    if (!userId) throw new Error('User ID is required');
+    if (!productId) throw new Error('Product ID is required');
+    
+    const response = await apiRequest(`/api/users/${userId}/favorites/${productId}`, {
       method: 'GET'
     });
 
@@ -103,11 +126,14 @@ export async function checkFavoriteStatus(productId) {
 
 /**
  * Clear all favorites for the user
+ * @param {string} userId - User ID from auth context
  * @returns {Promise<Object>} Response with deleted count
  */
-export async function clearAllFavorites() {
+export async function clearAllFavorites(userId) {
   try {
-    const response = await apiRequest(`/api/user/favorites`, {
+    if (!userId) throw new Error('User ID is required');
+    
+    const response = await apiRequest(`/api/users/${userId}/favorites`, {
       method: 'DELETE'
     });
 

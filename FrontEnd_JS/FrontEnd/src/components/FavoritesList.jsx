@@ -25,7 +25,13 @@ export default function FavoritesList({ token, user, onBack, onProductClick }) {
       setLoading(true);
       setError(null);
       console.log('📥 Fetching favorites...');
-      const response = await getUserFavorites({ limit: 100, offset: 0 });
+      
+      const userId = user?.user_id || user?.id;
+      if (!userId) {
+        throw new Error('User ID not found. Please login again.');
+      }
+      
+      const response = await getUserFavorites(userId, { limit: 100, offset: 0 });
       console.log('✅ Favorites fetched:', response);
       setFavorites(response.favorites || []);
       setTotalCount(response.total || 0);
@@ -40,7 +46,10 @@ export default function FavoritesList({ token, user, onBack, onProductClick }) {
   const handleRemove = async (productId) => {
     try {
       setDeletingId(productId);
-      await removeFromFavorites(productId);
+      const userId = user?.user_id || user?.id;
+      if (!userId) throw new Error('User ID not found');
+      
+      await removeFromFavorites(userId, productId);
       setFavorites(favorites.filter(fav => fav.product_id !== productId));
       setTotalCount(totalCount - 1);
     } catch (err) {
@@ -55,7 +64,10 @@ export default function FavoritesList({ token, user, onBack, onProductClick }) {
 
     try {
       setIsClearing(true);
-      await clearAllFavorites();
+      const userId = user?.user_id || user?.id;
+      if (!userId) throw new Error('User ID not found');
+      
+      await clearAllFavorites(userId);
       setFavorites([]);
       setTotalCount(0);
     } catch (err) {

@@ -6,7 +6,7 @@ import { getUserFavorites } from '../utils/favoritesApi';
  * ProductSelector Component
  * Allows users to select 2-3 products from favorites for comparison
  */
-export default function ProductSelector({ onProductsSelected, onBack }) {
+export default function ProductSelector({ user, onProductsSelected, onBack }) {
   const [favorites, setFavorites] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -21,7 +21,13 @@ export default function ProductSelector({ onProductsSelected, onBack }) {
     try {
       setLoading(true);
       setError(null);
-      const response = await getUserFavorites({ limit: 100, offset: 0 });
+      
+      const userId = user?.user_id || user?.id;
+      if (!userId) {
+        throw new Error('User ID not found. Please login again.');
+      }
+      
+      const response = await getUserFavorites(userId, { limit: 100, offset: 0 });
       setFavorites(response.favorites || []);
     } catch (err) {
       console.error('Error fetching favorites:', err);
