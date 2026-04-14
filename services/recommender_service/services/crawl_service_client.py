@@ -23,8 +23,8 @@ class CrawlServiceClient:
         self,
         base_url: str = "http://crawl-service:8003",
         timeout: float = 30.0,
-        max_retries: int = 3,
-        retry_delay: float = 1.0
+        max_retries: int = 5,
+        retry_delay: float = 2.0
     ):
         self.base_url = base_url.rstrip('/')
         self.timeout = timeout

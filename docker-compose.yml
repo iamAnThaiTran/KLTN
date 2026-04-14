@@ -98,6 +98,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      crawl-service:
+        condition: service_healthy
     networks:
       - db_network
     restart: unless-stopped
@@ -120,6 +122,12 @@ services:
         condition: service_healthy
     networks:
       - db_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/api/health"] || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   crawl-worker:
