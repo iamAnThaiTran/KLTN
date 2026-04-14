@@ -1,7 +1,8 @@
-import { useState, useCallback, useRef, useMemo } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
 import { mergeFilters } from '../utils/storage';
+import { useSearchPolling } from './useSearchPolling';
 
 /**
  * Encapsulates all product-search state and API calls.
@@ -10,6 +11,8 @@ import { mergeFilters } from '../utils/storage';
  * showSidebar to become false, hiding the product grid while the new request
  * was in flight.  Now we only clear filters AFTER a successful response that
  * returns new filter definitions.  Products remain visible until replaced.
+ * 
+ * ASYNC JOB FIX: Now uses async job pattern with useSearchPolling for /api/analyze
  */
  
 export const useProductSearch = ({ token, onAddMessage }) => {
@@ -20,8 +23,10 @@ export const useProductSearch = ({ token, onAddMessage }) => {
   onAddMsgRef.current = onAddMessage;
  
   // ── Loading ──
-  const [productsLoading, setProductsLoading] = useState(false);
- 
+  const [productsLoading, setProductsLoading] = useState(false);  const [jobId, setJobId] = useState(null);
+  
+  // ── Polling hook for async analyze job ──
+  const { data: jobResult, loading: pollingLoading, error: pollingError } = useSearchPolling(jobId, token); 
   // ── Filter state (sidebar — chỉ áp dụng lên kết quả mới nhất) ──
   const [activeFilters,       setActiveFilters]       = useState([]);
   const [selectedFilters,     setSelectedFilters]     = useState({});
@@ -83,7 +88,7 @@ export const useProductSearch = ({ token, onAddMessage }) => {
   }, []);
  
   // ─────────────────────────────────────────────────────────────
-  // analyzeAndSearch
+  // analyzeAndSearch - Async job pattern
   // ─────────────────────────────────────────────────────────────
   const analyzeAndSearch = useCallback(async (userInput) => {
     setProductsLoading(true);
@@ -103,45 +108,59 @@ export const useProductSearch = ({ token, onAddMessage }) => {
       const d = res.data;
       if (!d.success) {
         onAddMsgRef.current({ type: 'bot', text: `❌ ${d.error}`, timestamp: new Date() });
+        setProductsLoading(false);
         return;
       }
- 
-      setConversationId(d.conversation_id);
-      setLastCategoryName(d.category);
-      setSelectedFilters({});
- 
-      if (d.selected_attributes && Object.keys(d.selected_attributes).length > 0) {
-        const extracted = {};
-        Object.entries(d.selected_attributes).forEach(([attr, value]) => {
-          if (value == null) return;
-          extracted[attr] = Array.isArray(value) ? value.map(v => String(v)) : [String(value)];
-        });
-        setExtractedAttributes(extracted);
-      } else {
-        setExtractedAttributes({});
+
+      // Handle conversation metadata
+      if (d.conversation_id) {
+        setConversationId(d.conversation_id);
       }
- 
-      if (d.status === 'need_info' && d.question) {
-        onAddMsgRef.current({
-          type: 'bot',
-          text: d.question,
-          quickReplies: d.options?.map(o => o.label || o.value || o) ?? null,
-          timestamp: new Date(),
-        });
-      } else if (d.products?.length) {
-        appendProducts(d.products, d.filters, d.total);
-      } else {
-        onAddMsgRef.current({
-          type: 'bot',
-          text: `ℹ️ Hiện tại chưa có sản phẩm "${d.category}" trong kho.\n\nVui lòng thử mô tả khác.`,
-          timestamp: new Date(),
-        });
+      
+      // Check if response contains jobId (async) or products (sync fallback)
+      if (d.jobId) {
+        console.log('[UseProductSearch] 📤 Job created:', d.jobId);
+        // Start polling for results
+        setJobId(d.jobId);
+        // Keep productsLoading true until polling completes
+      } else if (d.category) {
+        // Sync fallback or direct response
+        setLastCategoryName(d.category);
+        setSelectedFilters({});
+        
+        if (d.selected_attributes && Object.keys(d.selected_attributes).length > 0) {
+          const extracted = {};
+          Object.entries(d.selected_attributes).forEach(([attr, value]) => {
+            if (value == null) return;
+            extracted[attr] = Array.isArray(value) ? value.map(v => String(v)) : [String(value)];
+          });
+          setExtractedAttributes(extracted);
+        } else {
+          setExtractedAttributes({});
+        }
+        
+        if (d.status === 'need_info' && d.question) {
+          onAddMsgRef.current({
+            type: 'bot',
+            text: d.question,
+            quickReplies: d.options?.map(o => o.label || o.value || o) ?? null,
+            timestamp: new Date(),
+          });
+        } else if (d.products?.length) {
+          appendProducts(d.products, d.filters, d.total);
+        } else {
+          onAddMsgRef.current({
+            type: 'bot',
+            text: `ℹ️ Hiện tại chưa có sản phẩm "${d.category}" trong kho.\n\nVui lòng thử mô tả khác.`,
+            timestamp: new Date(),
+          });
+        }
+        setProductsLoading(false);
       }
     } catch (err) {
       const msg = err.response?.data?.detail || err.message || 'Có lỗi xảy ra';
       onAddMsgRef.current({ type: 'bot', text: `❌ Lỗi: ${msg}`, timestamp: new Date() });
-      onAddMsgRef.current({ type: 'bot', text: 'Vui lòng chắc chắn backend Python đang chạy trên http://localhost:8000', timestamp: new Date() });
-    } finally {
+      onAddMsgRef.current({ type: 'bot', text: 'ℹ️ Vui lòng chắc chắn backend Python đang chạy trên http://localhost:8000', timestamp: new Date() });
       setProductsLoading(false);
     }
   }, [appendProducts]);
@@ -237,6 +256,41 @@ export const useProductSearch = ({ token, onAddMessage }) => {
     if (saved.productCount    != null) setProductCount(saved.productCount);
     if (saved.lastProductsMsgId)       setLastProductsMsgId(saved.lastProductsMsgId);
   }, []);
+  
+  // ─────────────────────────────────────────────────────────────
+  // Handle job completion - when polling returns results
+  // ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (pollingError) {
+      onAddMsgRef.current({ type: 'bot', text: `❌ Lỗi: ${pollingError}`, timestamp: new Date() });
+      setProductsLoading(false);
+      return;
+    }
+    
+    if (jobResult && !pollingLoading) {
+      console.log('[UseProductSearch] Job result received:', jobResult);
+      setProductsLoading(false);
+      
+      if (jobResult.status === 'need_info' && jobResult.question) {
+        onAddMsgRef.current({
+          type: 'bot',
+          text: jobResult.question,
+          quickReplies: jobResult.options?.map(o => o.label || o.value || o) ?? null,
+          timestamp: new Date(),
+        });
+      } else if (jobResult.products?.length) {
+        appendProducts(jobResult.products, jobResult.filters, jobResult.total);
+      } else if (jobResult.category) {
+        onAddMsgRef.current({
+          type: 'bot',
+          text: `ℹ️ Hiện tại chưa có sản phẩm "${jobResult.category}" trong kho.\n\nVui lòng thử mô tả khác.`,
+          timestamp: new Date(),
+        });
+      }
+      
+      setJobId(null); // Reset job ID after processing
+    }
+  }, [jobResult, pollingLoading, pollingError, appendProducts]);
  
   return {
     productsLoading,

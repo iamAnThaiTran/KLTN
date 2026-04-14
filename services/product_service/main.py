@@ -9,7 +9,6 @@ Handles:
 """
 
 from fastapi import FastAPI, HTTPException, Query, Body, Depends
-from fastapi.middleware.cors import CORSMiddleware
 import logging
 from typing import Optional, List, Dict, Any
 from sqlalchemy import create_engine, inspect, text
@@ -68,14 +67,8 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS Configuration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS is handled by API Gateway (nginx)
+# Don't add CORS middleware here to avoid duplicate headers
 
 # ============================================================================
 # Database Connection
