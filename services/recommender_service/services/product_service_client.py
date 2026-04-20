@@ -196,7 +196,8 @@ class ProductServiceClient:
     async def save_products(
         self,
         products: List[Dict[str, Any]],
-        source: str = "crawler"
+        source: str = "crawler",
+        category_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Save/update products from crawler
@@ -204,6 +205,7 @@ class ProductServiceClient:
         Args:
             products: List of product data to save
             source: Data source (tiki, lazada, shopee)
+            category_id: Category ID for the products (REQUIRED)
         
         Returns:
             {
@@ -217,7 +219,8 @@ class ProductServiceClient:
             "/api/products/batch",
             json={
                 "products": products,
-                "source": source
+                "source": source,
+                "category_id": category_id  # ✅ IMPORTANT: Include category_id
             }
         )
     

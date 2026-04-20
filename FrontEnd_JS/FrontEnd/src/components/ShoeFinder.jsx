@@ -118,12 +118,12 @@ const ShoeFinder = () => {
       const userId = user.user_id || user.id;
       if (!userId) { alert('Không tìm thấy user ID. Vui lòng đăng nhập lại.'); return; }
       
-      if (favoriteProductIds.has(product.id)) {
-        await removeFromFavorites(userId, product.id);
-        setFavoriteProductIds(prev => { const s = new Set(prev); s.delete(product.id); return s; });
+      if (favoriteProductIds.has(product.product_id)) {
+        await removeFromFavorites(userId, product.product_id);
+        setFavoriteProductIds(prev => { const s = new Set(prev); s.delete(product.product_id); return s; });
       } else {
-        await addToFavorites(userId, product.id);
-        setFavoriteProductIds(prev => new Set(prev).add(product.id));
+        await addToFavorites(userId, product.product_id);
+        setFavoriteProductIds(prev => new Set(prev).add(product.product_id));
       }
     } catch (err) { alert('Lỗi: ' + err.message); }
   };

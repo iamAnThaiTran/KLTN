@@ -114,27 +114,29 @@ class Category(Base):
 class Product(Base):
     __tablename__ = "products"
     id = Column(Integer, primary_key=True)
-    product_id = Column(String(100), unique=True)
-    category_id = Column(Integer)
-    name = Column(String(500))
+    category_id = Column(Integer, nullable=False)  # Required!
+    title = Column(String(500), nullable=False)  # Changed from 'name'
+    brand = Column(String(100))
     description = Column(Text)
-    brand = Column(String(255))
-    images = Column(ARRAY(String))
+    product_url = Column(String(500))  # From crawler link
+    thumbnail = Column(String(500))  # From crawler image
     source = Column(String(50))  # tiki, lazada, shopee
-    is_available = Column(Boolean, default=True)
+    tiki_product_id = Column(String(100))  # From crawler product_id
+    tiki_spid = Column(String(100))  # From crawler spid
+    seller_id = Column(String(100), default='1')
+    is_active = Column(Boolean, default=True)  # Changed from is_available
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
     updated_at = Column(TIMESTAMP, default=datetime.utcnow)
 
 class SKU(Base):
     __tablename__ = "skus"
     id = Column(Integer, primary_key=True)
-    sku_id = Column(String(100), unique=True)
-    product_id = Column(String(100))
-    price = Column(Float)
-    discount_percent = Column(Float, nullable=True)
+    product_id = Column(Integer, nullable=False)  # FK to products.id (INTEGER)
+    sku_code = Column(String(100), unique=True)  # Changed from sku_id
+    price = Column(Float, nullable=False)  # Selling price
+    original_price = Column(Float)  # Original price before discount
     stock = Column(Integer, default=0)
     is_available = Column(Boolean, default=True)
-    source = Column(String(50))
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
     updated_at = Column(TIMESTAMP, default=datetime.utcnow)
 
@@ -197,7 +199,7 @@ async def search_products(
     try:
         # Base query
         base_query = db.query(Product).filter(
-            (Product.name.ilike(f"%{query}%")) |
+            (Product.title.ilike(f"%{query}%")) |
             (Product.description.ilike(f"%{query}%"))
         )
         
@@ -237,12 +239,13 @@ async def search_products(
             "offset": offset,
             "products": [
                 {
-                    "product_id": p.product_id,
-                    "name": p.name,
+                    "product_id": p.tiki_product_id,
+                    "spid": p.tiki_spid,  # ✅ Include spid in search results
+                    "title": p.title,
                     "brand": p.brand,
                     "category_id": p.category_id,
-                    "is_available": p.is_available,
-                    "images": p.images,
+                    "is_active": p.is_active,
+                    "thumbnail": p.thumbnail,
                     "source": p.source
                 }
                 for p in products
@@ -254,29 +257,31 @@ async def search_products(
 
 @app.get("/api/products/{product_id}")
 async def get_product(product_id: str):
-    """Get product details by ID"""
+    """Get product details by ID (tiki_product_id)"""
     db = SessionLocal()
     try:
-        product = db.query(Product).filter(Product.product_id == product_id).first()
+        product = db.query(Product).filter(Product.tiki_product_id == product_id).first()
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
         
-        skus = db.query(SKU).filter(SKU.product_id == product_id).all()
+        skus = db.query(SKU).filter(SKU.product_id == product.id).all()
         
         return {
-            "product_id": product.product_id,
-            "name": product.name,
+            "product_id": product.tiki_product_id,
+            "spid": product.tiki_spid,  # ✅ Include spid in product details
+            "title": product.title,
             "description": product.description,
             "brand": product.brand,
             "category_id": product.category_id,
-            "images": product.images,
+            "thumbnail": product.thumbnail,
+            "product_url": product.product_url,
             "source": product.source,
-            "is_available": product.is_available,
+            "is_active": product.is_active,
             "skus": [
                 {
-                    "sku_id": sku.sku_id,
+                    "sku_code": sku.sku_code,
                     "price": sku.price,
-                    "discount_percent": sku.discount_percent,
+                    "original_price": sku.original_price,
                     "stock": sku.stock,
                     "is_available": sku.is_available
                 }
@@ -292,24 +297,23 @@ async def get_product(product_id: str):
 
 @app.get("/api/skus/{sku_id}")
 async def get_sku(sku_id: str):
-    """Get SKU details by ID"""
+    """Get SKU details by code (sku_code from Tiki spid)"""
     db = SessionLocal()
     try:
-        sku = db.query(SKU).filter(SKU.sku_id == sku_id).first()
+        sku = db.query(SKU).filter(SKU.sku_code == sku_id).first()
         if not sku:
             raise HTTPException(status_code=404, detail="SKU not found")
         
-        product = db.query(Product).filter(Product.product_id == sku.product_id).first()
+        product = db.query(Product).filter(Product.id == sku.product_id).first()
         
         return {
-            "sku_id": sku.sku_id,
-            "product_id": sku.product_id,
-            "product_name": product.name if product else None,
+            "sku_code": sku.sku_code,
+            "product_id": product.tiki_product_id if product else None,
+            "product_title": product.title if product else None,
             "price": sku.price,
-            "discount_percent": sku.discount_percent,
+            "original_price": sku.original_price,
             "stock": sku.stock,
-            "is_available": sku.is_available,
-            "source": sku.source
+            "is_available": sku.is_available
         }
     except Exception as e:
         logger.error(f"Get SKU failed: {e}")
@@ -588,25 +592,37 @@ async def save_products(
     body: Dict[str, Any] = Body(...)
 ):
     """
-    Save/update products from crawler
+    Save/update products from crawler (e.g., Tiki scraper)
     
-    Request body:
+    Request body example:
     {
+        "category_id": 5,               # ✅ REQUIRED: From RecommendationService
+        "source": "tiki",
         "products": [
             {
-                "product_id": "tiki_123",
-                "name": "Laptop",
-                "brand": "Dell",
-                "category_id": 5,
-                "price": 999.99,
-                "stock": 10
+                "product_id": "276183351",      # From crawler (product ID)
+                "title": "Giày thể thao nam...", # From crawler (title)
+                "brand": "BEE GEE",
+                "price": 620000,                # Selling price
+                "discount": 50,                 # Discount percentage
+                "spid": "276183355",            # From crawler (SKU ID)
+                "image": "https://...",         # Product thumbnail
+                "link": "https://tiki.vn/..."   # Product URL
             }
-        ],
-        "source": "tiki"
+        ]
     }
     """
     products = body.get("products", [])
     source = body.get("source", "crawler")
+    category_id = body.get("category_id")  # ✅ Extract from request body
+    
+    # Validate category_id is provided
+    if not category_id:
+        logger.error("❌ category_id is required in request body")
+        raise HTTPException(
+            status_code=400, 
+            detail="category_id is required in request body"
+        )
     db = SessionLocal()
     try:
         saved = 0
@@ -615,64 +631,107 @@ async def save_products(
         
         for product_data in products:
             try:
-                # Validate required field
+                # Validate required fields
                 product_id = product_data.get("product_id")
+                title = product_data.get("title") or product_data.get("name")
+                
                 if not product_id or str(product_id).strip() == "":
-                    errors.append({"product_id": product_id, "error": "product_id is required"})
-                    logger.warning(f"Skipping product without product_id: {product_data}")
+                    errors.append({
+                        "product_id": product_id, 
+                        "error": "product_id is required"
+                    })
+                    logger.warning(f"Skipping product without product_id")
                     continue
                 
-                # Check if product exists
+                if not title:
+                    errors.append({
+                        "product_id": product_id,
+                        "error": "title is required"
+                    })
+                    logger.warning(f"Skipping product {product_id}: missing title")
+                    continue
+                
+                # Check if product exists by tiki_product_id
                 product = db.query(Product).filter(
-                    Product.product_id == product_id
+                    Product.tiki_product_id == str(product_id)
                 ).first()
                 
                 if product:
-                    # Update existing
-                    product.name = product_data.get("name", product.name)
+                    # Update existing product
+                    product.title = title
                     product.brand = product_data.get("brand", product.brand)
                     product.description = product_data.get("description", product.description)
+                    product.thumbnail = product_data.get("image", product.thumbnail)
+                    product.product_url = product_data.get("link", product.product_url)
+                    product.tiki_spid = product_data.get("spid", product.tiki_spid)  # ✅ Update spid too
                     product.updated_at = datetime.utcnow()
+                    db.flush()
                     updated += 1
+                    logger.info(f"✏️ Updated product: {product_id}")
                 else:
-                    # Create new
+                    # Create new product
                     product = Product(
-                        product_id=product_id,
-                        name=product_data.get("name"),
+                        tiki_product_id=str(product_id),
+                        tiki_spid=product_data.get("spid"),  # ✅ IMPORTANT: Save spid here too
+                        category_id=category_id,
+                        title=title,
                         brand=product_data.get("brand"),
-                        category_id=product_data.get("category_id"),
                         description=product_data.get("description"),
-                        images=product_data.get("images", []),
+                        thumbnail=product_data.get("image"),
+                        product_url=product_data.get("link"),
                         source=source,
-                        is_available=True
+                        seller_id=product_data.get("seller_id", "1"),
+                        is_active=True
                     )
                     db.add(product)
+                    db.flush()  # Flush to get product.id
                     saved += 1
+                    logger.info(f"✅ Created product: {product_id}")
                 
-                # Add SKU if price info provided
-                if "price" in product_data:
-                    sku_id = product_data.get("sku_id", f"{product_id}_default")
-                    sku = db.query(SKU).filter(SKU.sku_id == sku_id).first()
+                # Add/Update SKU if price info provided
+                if "price" in product_data and product.id:
+                    spid = product_data.get("spid", str(product_id))
+                    sku = db.query(SKU).filter(SKU.sku_code == str(spid)).first()
+                    
+                    price = float(product_data.get("price", 0))
+                    discount_percent = float(product_data.get("discount", 0))
+                    
+                    # Calculate original price if discount is provided
+                    original_price = None
+                    if discount_percent > 0:
+                        original_price = price / (1 - discount_percent / 100)
                     
                     if sku:
-                        sku.price = product_data.get("price")
+                        # Update existing SKU
+                        sku.price = price
+                        sku.original_price = original_price
                         sku.stock = product_data.get("stock", sku.stock)
+                        sku.is_available = product_data.get("is_available", True)
                         sku.updated_at = datetime.utcnow()
+                        logger.info(f"✏️ Updated SKU: {spid}")
                     else:
+                        # Create new SKU
                         sku = SKU(
-                            sku_id=sku_id,
-                            product_id=product_id,
-                            price=product_data.get("price"),
+                            product_id=product.id,  # Use product.id (INTEGER FK)
+                            sku_code=str(spid),
+                            price=price,
+                            original_price=original_price,
                             stock=product_data.get("stock", 0),
-                            source=source,
-                            is_available=True
+                            is_available=product_data.get("is_available", True)
                         )
                         db.add(sku)
+                        logger.info(f"✅ Created SKU: {spid}")
                 
             except Exception as e:
-                errors.append({"product_id": product_data.get("product_id"), "error": str(e)})
+                error_msg = str(e)
+                errors.append({
+                    "product_id": product_data.get("product_id"),
+                    "error": error_msg
+                })
+                logger.error(f"❌ Error saving product {product_data.get('product_id')}: {error_msg}")
         
         db.commit()
+        logger.info(f"Batch save completed: {saved} saved, {updated} updated, {len(errors)} errors")
         
         return {
             "saved": saved,
@@ -684,18 +743,22 @@ async def save_products(
         db.rollback()
         logger.error(f"Batch save failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
 
 @app.put("/api/products/{product_id}")
 async def update_product(product_id: str, update_data: Dict[str, Any] = Body(...)):
-    """Update single product"""
+    """Update single product by tiki_product_id"""
     db = SessionLocal()
     try:
-        product = db.query(Product).filter(Product.product_id == product_id).first()
+        product = db.query(Product).filter(Product.tiki_product_id == product_id).first()
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
         
+        # Allow updating certain fields only
+        allowed_fields = ["title", "brand", "description", "thumbnail", "product_url", "is_active"]
         for key, value in update_data.items():
-            if hasattr(product, key) and key != "product_id":
+            if key in allowed_fields and hasattr(product, key):
                 setattr(product, key, value)
         
         product.updated_at = datetime.utcnow()
@@ -710,22 +773,24 @@ async def update_product(product_id: str, update_data: Dict[str, Any] = Body(...
         db.close()
 
 @app.put("/api/skus/{sku_id}/price")
-async def update_sku_price(sku_id: str, price: float = Body(..., embed=True), stock: Optional[int] = Body(None, embed=True)):
-    """Update SKU price and optional stock"""
+async def update_sku_price(sku_id: str, price: float = Body(..., embed=True), stock: Optional[int] = Body(None, embed=True), original_price: Optional[float] = Body(None, embed=True)):
+    """Update SKU price and optional stock by sku_code"""
     db = SessionLocal()
     try:
-        sku = db.query(SKU).filter(SKU.sku_id == sku_id).first()
+        sku = db.query(SKU).filter(SKU.sku_code == sku_id).first()
         if not sku:
             raise HTTPException(status_code=404, detail="SKU not found")
         
         sku.price = price
         if stock is not None:
             sku.stock = stock
+        if original_price is not None:
+            sku.original_price = original_price
         sku.updated_at = datetime.utcnow()
         
         db.commit()
         
-        return {"status": "updated", "sku_id": sku_id, "new_price": price}
+        return {"status": "updated", "sku_code": sku_id, "new_price": price}
     except Exception as e:
         db.rollback()
         logger.error(f"Update SKU price failed: {e}")

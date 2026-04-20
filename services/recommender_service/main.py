@@ -97,26 +97,6 @@ class ResponseUpdate(BaseModel):
 # ============================================================================
 # Helper Functions
 # ============================================================================
-
-def _generate_hints_from_filters(category: str, filter_groups: List[Dict]) -> List[str]:
-    """Generate user-friendly filter hints"""
-    hints = []
-    if not filter_groups:
-        return hints
-    
-    enum_filters = [f for f in filter_groups if f.get('data_type') == 'enum']
-    if enum_filters:
-        filter_names = ", ".join([f['display_name'] for f in enum_filters[:3]])
-        hints.append(f"Bạn có thể lọc theo {filter_names}")
-    
-    return hints
-
-def _update_search_history(history: List[str], new_input: str) -> List[str]:
-    """Add to search history, keep last 10"""
-    if new_input not in history:
-        history.append(new_input)
-    return history[-10:]
-
 # ============================================================================
 # Endpoints
 # ============================================================================

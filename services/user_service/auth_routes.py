@@ -246,7 +246,8 @@ async def google_login(request: GoogleLoginRequest, db: Session = Depends(get_db
             id_info = id_token.verify_oauth2_token(
                 request.idToken, 
                 request_obj, 
-                audience=google_client_id
+                audience=google_client_id,
+                clock_skew_in_seconds=10
             )
         except ValueError as e:
             logger.error(f"Google token verification failed: {e}")

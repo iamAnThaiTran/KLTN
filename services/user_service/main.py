@@ -438,9 +438,25 @@ async def add_favorite(
     sku_id: Optional[str] = Body(None, embed=True),
     price: Optional[float] = Body(None, embed=True)
 ):
-    """Add product to user's wishlist"""
+    """Add product to user's favorites"""
     db = SessionLocal()
     try:
+        # Check if already favorited
+        existing = db.query(Favorite).filter(
+            Favorite.user_id == user_id,
+            Favorite.product_id == product_id
+        ).first()
+        
+        if existing:
+            return {
+                "success": True,
+                "user_id": user_id,
+                "product_id": product_id,
+                "is_favorite": True,
+                "added_at": existing.added_at.isoformat() if existing.added_at else None,
+                "message": "Already in favorites"
+            }
+        
         favorite = Favorite(
             user_id=user_id,
             product_id=product_id,
@@ -449,8 +465,15 @@ async def add_favorite(
         )
         db.add(favorite)
         db.commit()
+        db.refresh(favorite)
         
-        return {"status": "added", "product_id": product_id}
+        return {
+            "success": True,
+            "user_id": user_id,
+            "product_id": product_id,
+            "is_favorite": True,
+            "added_at": favorite.added_at.isoformat() if favorite.added_at else None
+        }
     except Exception as e:
         db.rollback()
         logger.error(f"Add favorite failed: {e}")
@@ -467,11 +490,19 @@ async def remove_favorite(user_id: str, product_id: str):
             Favorite.user_id == user_id,
             Favorite.product_id == product_id
         ).first()
-        if favorite:
-            db.delete(favorite)
-            db.commit()
         
-        return {"status": "removed", "product_id": product_id}
+        if not favorite:
+            raise HTTPException(status_code=404, detail="Favorite not found")
+        
+        db.delete(favorite)
+        db.commit()
+        
+        return {
+            "success": True,
+            "user_id": user_id,
+            "product_id": product_id,
+            "is_favorite": False
+        }
     except Exception as e:
         db.rollback()
         logger.error(f"Remove favorite failed: {e}")
@@ -480,25 +511,103 @@ async def remove_favorite(user_id: str, product_id: str):
         db.close()
 
 @app.get("/api/users/{user_id}/favorites")
-async def get_favorites(user_id: str, limit: int = 20, offset: int = 0):
+async def get_favorites(user_id: str, limit: int = 50, offset: int = 0):
     """Get user's favorite products"""
     db = SessionLocal()
     try:
-        favorites = db.query(Favorite).filter(
-            Favorite.user_id == user_id
-        ).offset(offset).limit(limit).all()
+        # Query total count
+        total_query = db.query(Favorite).filter(Favorite.user_id == user_id)
+        total = total_query.count()
+        
+        # Query with pagination
+        favorites = total_query.order_by(Favorite.added_at.desc()).offset(offset).limit(limit).all()
+        
+        # Fetch product details from Product Service
+        import httpx
+        import time
+        
+        favorites_with_products = []
+        
+        for fav in favorites:
+            product = None
+            try:
+                # Call product service to get product details (synchronous)
+                response = httpx.get(
+                    f"http://product-service:8001/api/products/{fav.product_id}",
+                    timeout=10.0,
+                    headers={"Accept": "application/json"}
+                )
+                if response.status_code == 200:
+                    product = response.json()
+                else:
+                    logger.warning(f"Product service returned {response.status_code} for product {fav.product_id}")
+            except httpx.TimeoutException:
+                logger.warning(f"Timeout fetching product {fav.product_id}")
+            except httpx.ConnectError as e:
+                logger.warning(f"Connection error to product service: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to fetch product {fav.product_id}: {e}")
+            
+            favorites_with_products.append({
+                "id": fav.id,
+                "user_id": fav.user_id,
+                "product_id": fav.product_id,
+                "added_at": fav.added_at.isoformat() if fav.added_at else None,
+                "product": product
+            })
         
         return {
-            "favorites": [
-                {
-                    "product_id": f.product_id,
-                    "added_at": f.added_at.isoformat() if f.added_at else None
-                }
-                for f in favorites
-            ]
+            "user_id": user_id,
+            "total": total,
+            "count": len(favorites_with_products),
+            "limit": limit,
+            "offset": offset,
+            "favorites": favorites_with_products
         }
     except Exception as e:
         logger.error(f"Get favorites failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+@app.get("/api/users/{user_id}/favorites/{product_id}/status")
+async def check_favorite_status(user_id: str, product_id: str):
+    """Check if a product is in user's favorites"""
+    db = SessionLocal()
+    try:
+        favorite = db.query(Favorite).filter(
+            Favorite.user_id == user_id,
+            Favorite.product_id == product_id
+        ).first()
+        
+        return {
+            "user_id": user_id,
+            "product_id": product_id,
+            "is_favorite": favorite is not None
+        }
+    except Exception as e:
+        logger.error(f"Check favorite status failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+@app.delete("/api/users/{user_id}/favorites")
+async def clear_favorites(user_id: str):
+    """Clear all favorites for the user"""
+    db = SessionLocal()
+    try:
+        # Delete all favorites for user
+        result = db.query(Favorite).filter(Favorite.user_id == user_id).delete()
+        db.commit()
+        
+        return {
+            "success": True,
+            "user_id": user_id,
+            "deleted_count": result
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Clear favorites failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
