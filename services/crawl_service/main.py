@@ -244,6 +244,73 @@ async def enqueue_crawl(
     finally:
         db.close()
 
+@app.post("/api/crawl/enqueue-single")
+async def enqueue_single_crawl(
+    product_id: int = Body(..., embed=True),
+    seller_id: str = Body("1", embed=True),
+    priority: str = Body("normal", embed=True),
+    max_retries: int = Body(3, embed=True),
+    crawl_reviews: bool = Body(True, embed=True)
+):
+    """
+    Enqueue a single product crawl task (for comparison/details)
+    
+    Example:
+    {
+        "product_id": 3553507,
+        "seller_id": "1",
+        "priority": "high",
+        "max_retries": 3,
+        "crawl_reviews": true
+    }
+    """
+    db = SessionLocal()
+    try:
+        # Generate unique task ID
+        task_id = f"single_{uuid.uuid4().hex[:12]}"
+        
+        # Create task record in database
+        task = CrawlTask(
+            task_id=task_id,
+            category="single_product",
+            category_id=product_id,  # Store product_id here
+            attributes={"seller_id": seller_id, "crawl_reviews": crawl_reviews},
+            status="pending",
+            priority=priority,
+            max_retries=max_retries,
+            retry_count=0
+        )
+        db.add(task)
+        db.commit()
+        
+        # Enqueue to RabbitMQ
+        producer = get_rabbitmq_producer()
+        if producer:
+            task_data = {
+                "product_id": product_id,
+                "seller_id": seller_id,
+                "crawl_reviews": crawl_reviews,
+                "task_type": "single_product"
+            }
+            producer.enqueue_task(task_id, task_data, priority)
+            logger.info(f"🚀 Single product crawl task enqueued: {task_id} for product {product_id}")
+        else:
+            logger.warning(f"RabbitMQ producer not available, task saved locally: {task_id}")
+        
+        return {
+            "task_id": task_id,
+            "id": task_id,  # Backward compatibility
+            "status": "pending",
+            "product_id": product_id,
+            "estimated_completion": (datetime.utcnow() + timedelta(minutes=2)).isoformat()
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ Enqueue single crawl failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
 @app.get("/api/crawl/status/{task_id}")
 async def get_task_status(task_id: str):
     """Get status of a crawl task"""
@@ -275,35 +342,41 @@ async def get_task_status(task_id: str):
 
 @app.get("/api/crawl/result/{task_id}")
 async def get_task_result(task_id: str):
-    """Get result of a completed crawl task - includes products list"""
+    """Get result of a crawl task - returns status + snapshot when completed"""
     db = SessionLocal()
     try:
         task = db.query(CrawlTask).filter(CrawlTask.task_id == task_id).first()
         if not task:
+            logger.warning(f"Task not found: {task_id}")
             raise HTTPException(status_code=404, detail="Task not found")
         
-        if task.status != "completed":
-            raise HTTPException(status_code=400, detail="Task not completed")
+        logger.info(f"Task {task_id} status: {task.status}, result keys: {task.result.keys() if task.result else 'None'}")
         
         # Handle result - could be dict, string, or None
         import json
+        result_data = {}
         if isinstance(task.result, str):
-            result = json.loads(task.result) if task.result else {}
+            result_data = json.loads(task.result) if task.result else {}
         elif isinstance(task.result, dict):
-            result = task.result
-        else:
-            result = {}
+            result_data = task.result
         
+        # Extract snapshot from result
+        snapshot = result_data.get("snapshot", {})
+        
+        # Return response with status field for polling
         return {
             "task_id": task_id,
-            "products": result.get("products", []),  # ✅ NEW: Include products list
-            "products_found": result.get("products_found", 0),
-            "products_saved": result.get("products_saved", 0),
-            "sources": result.get("sources", {}),
-            "duration_seconds": result.get("duration_seconds", 0)
+            "status": task.status,  # pending, running, completed, failed
+            "snapshot": snapshot if task.status == "completed" else None,
+            "error": task.error_message if task.status == "failed" else None,
+            "created_at": task.created_at.isoformat() if task.created_at else None,
+            "completed_at": task.completed_at.isoformat() if task.completed_at else None
         }
+    except HTTPException:
+        # Re-raise HTTPException without catching it
+        raise
     except Exception as e:
-        logger.error(f"Get result failed: {e}")
+        logger.error(f"Get result failed for {task_id}: {type(e).__name__}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()

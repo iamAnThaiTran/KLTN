@@ -192,6 +192,96 @@ def _simulated_crawl(results: Dict, sources: list) -> Dict:
     return results
 
 # ============================================================================
+# Single Product Crawl Executor (for comparison/details)
+# ============================================================================
+
+def execute_single_product_crawl(task_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Execute single product crawl with details + reviews (for comparison feature)
+    
+    Args:
+        task_data: {"product_id": int, "seller_id": str, "crawl_reviews": bool}
+    
+    Returns:
+        Dictionary with snapshot
+    """
+    try:
+        product_id = task_data.get("product_id")
+        seller_id = task_data.get("seller_id", "1")
+        crawl_reviews = task_data.get("crawl_reviews", True)
+        
+        logger.info(f"📦 Single product crawl: product_id={product_id}, seller_id={seller_id}")
+        
+        # Import local crawler
+        from crawlers.tiki_review_crawler_simple import TikiReviewCrawlerSimple
+        
+        crawler = TikiReviewCrawlerSimple()
+        
+        # Run async crawl
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        snapshot = loop.run_until_complete(
+            crawler.get_product_snapshot(
+                product_id=str(product_id),
+                spid="",
+                seller_id=seller_id,
+                label=f"Product {product_id}"
+            )
+        )
+        
+        loop.run_until_complete(crawler.close())
+        loop.close()
+        
+        logger.info(f"✅ Snapshot created: {snapshot.get('name', 'Unknown')[:50]}")
+        
+        return {
+            "status": "success",
+            "snapshot": snapshot,
+            "product_id": product_id,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    
+    except Exception as e:
+        logger.error(f"❌ Single product crawl error: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e),
+            "product_id": task_data.get("product_id"),
+            "snapshot": None
+        }
+
+
+def _mock_product_snapshot(product_id: int) -> Dict[str, Any]:
+    """Create mock product snapshot for testing"""
+    return {
+        "product_id": product_id,
+        "name": f"Mock Product {product_id}",
+        "brand": "Mock Brand",
+        "price": 1000000,
+        "rating_avg": 4.5,
+        "rating_count": 100,
+        "reviews": [
+            {
+                "rating": 5,
+                "title": "Sản phẩm tốt",
+                "content": "Chất lượng rất tốt, đáng tiền",
+                "is_purchased": True
+            }
+        ],
+        "rating_breakdown": {
+            "5": {"count": 50, "percent": 50},
+            "4": {"count": 30, "percent": 30},
+            "3": {"count": 15, "percent": 15},
+            "2": {"count": 3, "percent": 3},
+            "1": {"count": 2, "percent": 2}
+        },
+        "specs": [],
+        "thumbnail": "",
+        "seller_id": "1"
+    }
+
+# ============================================================================
 # Task Processor
 # ============================================================================
 
@@ -222,12 +312,21 @@ def process_task(task_message: Dict[str, Any]) -> bool:
         
         logger.info(f"Starting task: {task_id}")
         
-        # Execute crawler
-        result = execute_crawler({
-            "category": task.category,
-            "sources": task_message.get("sources", ["tiki"]),
-            "attributes": task.attributes
-        })
+        # Route based on task type
+        if task.category == "single_product":
+            # Single product crawl with details + reviews
+            result = execute_single_product_crawl({
+                "product_id": task.category_id,
+                "seller_id": task.attributes.get("seller_id", "1"),
+                "crawl_reviews": task.attributes.get("crawl_reviews", True)
+            })
+        else:
+            # Multi-product crawl by category
+            result = execute_crawler({
+                "category": task.category,
+                "sources": task_message.get("sources", ["tiki"]),
+                "attributes": task.attributes
+            })
         
         # Update task with results
         task.status = "completed"

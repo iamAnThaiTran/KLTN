@@ -91,3 +91,59 @@ class GetComparisonHistoryRequest(BaseModel):
     limit: int = Field(default=10, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
     starred_only: bool = False
+
+
+# ============================================================================
+# COMPARE PRODUCTS ENDPOINT MODELS
+# ============================================================================
+
+class CompareProductsRequest(BaseModel):
+    """Request to compare multiple products"""
+    product_ids: List[int] = Field(..., min_items=2, max_items=4)
+    llm_model: str = Field(default="gpt-4o-mini")
+    seller_id: Optional[str] = None
+    save_history: bool = True
+
+
+class ProductSnapshot(BaseModel):
+    """Snapshot of a single product"""
+    product_id: int
+    spid: str
+    name: str
+    brand: Optional[str] = None
+    price: float
+    rating_avg: float
+    rating_count: int
+    reviews: List[Dict[str, Any]]
+    rating_breakdown: Dict[str, Any]
+    specs: Optional[List[Dict[str, Any]]] = None
+    image: Optional[str] = None
+    seller_id: str
+    
+    class Config:
+        extra = "allow"
+
+
+class CompareProductsResponse(BaseModel):
+    """Response with product comparison analysis - compatible with monolith and microservice"""
+    status: str  # "success" | "error"
+    
+    # For 2-4 products - compatible with monolith UI
+    snapshot_a: Optional[ProductSnapshot] = None
+    snapshot_b: Optional[ProductSnapshot] = None
+    snapshot_c: Optional[ProductSnapshot] = None
+    snapshot_d: Optional[ProductSnapshot] = None
+    
+    # Generic access for any number of products
+    snapshots: List[ProductSnapshot] = []
+    product_ids: List[int] = []
+    
+    # Comparison and analysis
+    comparison: Optional[str] = None  # LLM comparison in Markdown
+    prompt: Optional[str] = None  # For debugging
+    llm_model: Optional[str] = None
+    completed_at: Optional[str] = None
+    error: Optional[str] = None
+    
+    class Config:
+        extra = "allow"

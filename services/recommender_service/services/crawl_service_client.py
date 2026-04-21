@@ -134,6 +134,41 @@ class CrawlServiceClient:
             json=payload
         )
     
+    async def enqueue_single_crawl(
+        self,
+        product_id: int,
+        seller_id: str = "1",
+        priority: str = "normal",
+        max_retries: int = 3
+    ) -> str:
+        """
+        Enqueue a single product crawl task (for comparison/details)
+        
+        Args:
+            product_id: Product ID from products_db
+            seller_id: Seller ID (default: "1" for Tiki)
+            priority: Task priority (high, normal, low)
+            max_retries: Maximum retry attempts
+        
+        Returns:
+            task_id (str)
+        """
+        payload = {
+            "product_id": product_id,
+            "seller_id": seller_id,
+            "priority": priority,
+            "max_retries": max_retries,
+            "crawl_reviews": True,  # Always crawl reviews for comparison
+        }
+        
+        result = await self._request_with_retry(
+            "POST",
+            "/api/crawl/enqueue-single",
+            json=payload
+        )
+        
+        return result.get("task_id") or result.get("id")
+    
     async def get_task_status(self, task_id: str) -> Dict[str, Any]:
         """
         Get status of a crawl task
@@ -151,23 +186,29 @@ class CrawlServiceClient:
             f"/api/crawl/status/{task_id}"
         )
     
-    async def get_task_result(self, task_id: str) -> Dict[str, Any]:
+    async def get_task_result(self, task_id: str) -> Optional[Dict[str, Any]]:
         """
-        Get result of a completed crawl task
+        Get result of a crawl task (polling-safe - doesn't throw on 4xx)
         
         Returns:
             {
                 "task_id": str,
-                "products_found": int,
-                "products_saved": int,
-                "sources": {...},
-                "duration_seconds": int
+                "status": "pending" | "running" | "completed" | "failed",
+                "snapshot": {...} or None,
+                "error": str or None
             }
         """
-        return await self._request_with_retry(
-            "GET",
-            f"/api/crawl/result/{task_id}"
-        )
+        url = f"{self.base_url}/api/crawl/result/{task_id}"
+        client = await self._get_client()
+        
+        try:
+            logger.debug(f"CrawlServiceClient: GET {url}")
+            response = await client.get(url)
+            # Don't raise on 4xx - task might not be completed yet
+            return response.json()
+        except Exception as e:
+            logger.error(f"CrawlServiceClient.get_task_result failed: {e}")
+            return None
     
     async def cancel_task(self, task_id: str) -> Dict[str, Any]:
         """Cancel a pending or running crawl task"""

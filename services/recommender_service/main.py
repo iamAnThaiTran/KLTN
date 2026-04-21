@@ -35,6 +35,10 @@ from core.context_analyzer import get_context_analyzer
 from services.session_manager_factory import get_session_manager
 from services.job_manager import get_job_manager
 from services.analyze_processor import get_analyze_processor
+from services.crawl_service_client import CrawlServiceClient
+from services.llm_client import LLMClient
+from services.product_comparison_service import ProductComparisonService
+from models.comparison_schemas import CompareProductsRequest, CompareProductsResponse
 from config.database_orm import Base, engine, get_db
 
 # ============================================================================
@@ -73,6 +77,23 @@ job_manager = get_job_manager()
 processor = get_analyze_processor()
 orchestrator = RecommendationOrchestrator()
 context_analyzer = get_context_analyzer()
+
+# Initialize Crawl Service Client and Comparison Service
+try:
+    crawl_service_client = CrawlServiceClient(
+        base_url="http://crawl-service:8003",
+        timeout=60.0,
+        max_retries=3
+    )
+    llm_client = LLMClient()
+    comparison_service = ProductComparisonService(
+        crawl_service_client=crawl_service_client,
+        llm_utils=llm_client
+    )
+    logger.info("✅ ProductComparisonService initialized")
+except Exception as e:
+    logger.error(f"⚠️ Failed to initialize ProductComparisonService: {e}")
+    comparison_service = None
 
 logger.info(f"[Recommender] Session storage: {session_manager.get_storage_type()}")
 logger.info(f"[Recommender] Job storage: {job_manager.use_redis and 'Redis' or 'In-Memory'}")
@@ -270,6 +291,79 @@ async def clear_session(conversation_id: str):
     """Clear session"""
     session_manager.delete_session(conversation_id)
     return {"message": "Session cleared"}
+
+# ============================================================================
+# PRODUCT COMPARISON ENDPOINT
+# ============================================================================
+
+@app.post("/api/products/compare", response_model=CompareProductsResponse)
+async def compare_products(
+    request: CompareProductsRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Compare multiple products
+    
+    Flow:
+    1. Frontend sends product IDs
+    2. Recommender enqueues crawl tasks via CrawlService (RabbitMQ)
+    3. CrawlWorker processes crawl tasks and stores results
+    4. Recommender polls for results
+    5. Recommender calls LLM for comparison analysis
+    6. Returns comparison result to frontend
+    
+    Request: {"product_ids": [id1, id2, ...], "llm_model": "gpt-4o-mini"}
+    Response: {"status": "success", "snapshots": [...], "comparison": "..."}
+    """
+    try:
+        logger.info(f"🔍 [/api/products/compare] Comparing products: {request.product_ids}")
+        
+        if not comparison_service:
+            raise HTTPException(
+                status_code=503,
+                detail="ProductComparisonService not available"
+            )
+        
+        # Validate input
+        if len(request.product_ids) < 2 or len(request.product_ids) > 4:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Expected 2-4 product IDs, got {len(request.product_ids)}"
+            )
+        
+        # Call comparison service
+        result = await comparison_service.compare_products(
+            product_ids=request.product_ids,
+            llm_model=request.llm_model,
+            seller_id=request.seller_id
+        )
+        
+        if result["status"] == "error":
+            logger.error(f"❌ Comparison failed: {result.get('error')}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Comparison failed: {result.get('error')}"
+            )
+        
+        # Convert snapshots array to snapshot_a/b/c/d for UI compatibility
+        snapshots = result.get("snapshots", [])
+        if snapshots:
+            result["snapshot_a"] = snapshots[0] if len(snapshots) > 0 else None
+            result["snapshot_b"] = snapshots[1] if len(snapshots) > 1 else None
+            result["snapshot_c"] = snapshots[2] if len(snapshots) > 2 else None
+            result["snapshot_d"] = snapshots[3] if len(snapshots) > 3 else None
+        
+        logger.info("✅ Comparison completed successfully")
+        return CompareProductsResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ [/api/products/compare] Error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal error: {str(e)}"
+        )
 
 if __name__ == "__main__":
     import uvicorn
