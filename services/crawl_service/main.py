@@ -342,7 +342,7 @@ async def get_task_status(task_id: str):
 
 @app.get("/api/crawl/result/{task_id}")
 async def get_task_result(task_id: str):
-    """Get result of a crawl task - returns status + snapshot when completed"""
+    """Get result of a crawl task - returns status + products/snapshot when completed"""
     db = SessionLocal()
     try:
         task = db.query(CrawlTask).filter(CrawlTask.task_id == task_id).first()
@@ -360,18 +360,27 @@ async def get_task_result(task_id: str):
         elif isinstance(task.result, dict):
             result_data = task.result
         
-        # Extract snapshot from result
-        snapshot = result_data.get("snapshot", {})
-        
-        # Return response with status field for polling
-        return {
+        # Build response based on result type
+        response = {
             "task_id": task_id,
             "status": task.status,  # pending, running, completed, failed
-            "snapshot": snapshot if task.status == "completed" else None,
             "error": task.error_message if task.status == "failed" else None,
             "created_at": task.created_at.isoformat() if task.created_at else None,
             "completed_at": task.completed_at.isoformat() if task.completed_at else None
         }
+        
+        # If task completed, include results
+        if task.status == "completed":
+            # For multi-product crawls: return products list + metadata
+            if "products" in result_data:
+                response["products"] = result_data.get("products", [])
+                response["products_found"] = result_data.get("products_found", 0)
+                response["products_saved"] = result_data.get("products_saved", 0)
+            # For single-product crawls: return snapshot
+            if "snapshot" in result_data:
+                response["snapshot"] = result_data.get("snapshot")
+        
+        return response
     except HTTPException:
         # Re-raise HTTPException without catching it
         raise
