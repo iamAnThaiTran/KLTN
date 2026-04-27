@@ -2,7 +2,6 @@ import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import ShoeFinder from "../components/ShoeFinder";
 import Home from "../components/Home";
 import ProductDetailPage from "../common/ProductPageDetail";
-import ProductSearchPage from "../pages/ProductSearchPage";
 import { useAuth } from "../context/AuthContext";
 
 // Protected route wrapper for authenticated users

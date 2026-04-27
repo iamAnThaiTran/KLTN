@@ -28,3 +28,7 @@ Thumbs.db
 *.md
 !README.md
 *.pyc
+*.drawio.*
+*.drawio
+*.log
+kltn.drawio
