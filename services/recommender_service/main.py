@@ -13,7 +13,7 @@ Handles:
 import asyncio
 import logging
 import traceback
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
@@ -134,7 +134,8 @@ async def health_check():
 
 @app.post("/api/analyze")
 async def analyze_query(
-    request: QueryRequest,
+    request: Request,
+    payload: QueryRequest,
     db: Session = Depends(get_db)
 ):
     """
@@ -147,22 +148,38 @@ async def analyze_query(
     NOTE: User auth is handled at API Gateway level
     """
     try:
-        if not request.user_input or not request.user_input.strip():
+        # Extract user_id from Authorization header
+        current_user_id = None
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.replace("Bearer ", "")
+            try:
+                import jwt
+                import os
+                jwt_secret = os.getenv("JWT_SECRET", "your-secret-key")
+                decoded = jwt.decode(token, jwt_secret, algorithms=["HS256"])
+                current_user_id = decoded.get("user_id") or decoded.get("sub")
+                logger.info(f"[/api/analyze] 👤 Authenticated user: {current_user_id}")
+            except Exception as e:
+                logger.warning(f"[/api/analyze] ⚠️ Failed to decode JWT: {e}")
+                # Continue without user_id
+        
+        if not payload.user_input or not payload.user_input.strip():
             return {"success": False, "error": "user_input required"}
         
         # Create job
         job_id = job_manager.create_job(
-            user_input=request.user_input,
-            conversation_id=request.conversation_id
+            user_input=payload.user_input,
+            conversation_id=payload.conversation_id
         )
         
         # Start background processing (fire and forget)
         asyncio.create_task(
             processor.process_analyze_job(
                 job_id=job_id,
-                user_input=request.user_input,
-                conversation_id=request.conversation_id,
-                current_user_id=None
+                user_input=payload.user_input,
+                conversation_id=payload.conversation_id,
+                current_user_id=current_user_id
             )
         )
         

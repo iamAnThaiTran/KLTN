@@ -58,7 +58,7 @@ CREATE TABLE products (
     id SERIAL PRIMARY KEY,
     category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
     title VARCHAR(500) NOT NULL,
-    brand VARCHAR(100),
+    brand VARCHAR(500),
     description TEXT,
     product_url TEXT,
     thumbnail VARCHAR(500),
@@ -79,6 +79,8 @@ CREATE TABLE skus (
     original_price DECIMAL(12, 2),
     stock INTEGER DEFAULT 0,
     is_available BOOLEAN DEFAULT TRUE,
+    search_count INTEGER DEFAULT 0,
+    rating DECIMAL(3, 2) DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -99,6 +101,9 @@ CREATE INDEX idx_skus_product ON skus(product_id);
 CREATE INDEX idx_skus_price ON skus(price);
 CREATE INDEX idx_skus_stock ON skus(stock);
 CREATE INDEX idx_skus_available ON skus(is_available);
+CREATE INDEX idx_skus_search_count ON skus(search_count DESC);
+CREATE INDEX idx_skus_rating ON skus(rating DESC);
+CREATE INDEX idx_skus_rating_search ON skus(rating DESC, search_count DESC);
 
 -- Timestamp trigger for products_db
 CREATE OR REPLACE FUNCTION update_updated_at_column()

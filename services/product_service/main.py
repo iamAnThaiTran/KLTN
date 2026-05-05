@@ -8,7 +8,7 @@ Handles:
 - Category attribute configuration
 """
 
-from fastapi import FastAPI, HTTPException, Query, Body, Depends
+from fastapi import FastAPI, HTTPException, Query, Body, Depends, Request
 import logging
 from typing import Optional, List, Dict, Any
 from sqlalchemy import create_engine, inspect, text
@@ -116,7 +116,7 @@ class Product(Base):
     id = Column(Integer, primary_key=True)
     category_id = Column(Integer, nullable=False)  # Required!
     title = Column(String(500), nullable=False)  # Changed from 'name'
-    brand = Column(String(100))
+    brand = Column(String(500))
     description = Column(Text)
     product_url = Column(String(500))  # From crawler link
     thumbnail = Column(String(500))  # From crawler image
@@ -137,6 +137,8 @@ class SKU(Base):
     original_price = Column(Float)  # Original price before discount
     stock = Column(Integer, default=0)
     is_available = Column(Boolean, default=True)
+    search_count = Column(Integer, default=0)  # Track search popularity
+    rating = Column(Float, default=0)  # Product rating 0-5
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
     updated_at = Column(TIMESTAMP, default=datetime.utcnow)
 
@@ -787,14 +789,330 @@ async def update_sku_price(sku_id: str, price: float = Body(..., embed=True), st
         if original_price is not None:
             sku.original_price = original_price
         sku.updated_at = datetime.utcnow()
-        
         db.commit()
         
-        return {"status": "updated", "sku_code": sku_id, "new_price": price}
+        return {"status": "updated", "sku_id": sku_id}
     except Exception as e:
         db.rollback()
         logger.error(f"Update SKU price failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+# ============================================================================
+# Recommendations APIs
+# ============================================================================
+
+@app.get("/api/recommendations/homepage")
+async def get_homepage_recommendations(
+    request: Request,
+    limit: int = 20
+):
+    """
+    Get homepage recommendations - main orchestration endpoint.
+    
+    Microservices Flow:
+    - API Gateway routes here with/without Authorization header
+    
+    Authenticated User (has Authorization header):
+    1. Forward Authorization header to User Service
+    2. User Service validates token and returns criteria
+    3. Call /api/recommendations/by-criteria with criteria
+    4. Return personalized products
+    
+    Non-Authenticated User (no Authorization header):
+    1. Call /api/recommendations/public
+    2. Return trending products
+    """
+    db = SessionLocal()
+    try:
+        # Check for Authorization header
+        auth_header = request.headers.get("Authorization", "")
+        
+        if auth_header and auth_header.startswith("Bearer "):
+            # Authenticated user - get personalized recommendations
+            try:
+                import httpx
+                import os
+                
+                user_service_url = os.getenv("USER_SERVICE_URL", "http://user-service:8000")
+                
+                # Call User Service to get recommendation criteria
+                # Pass Authorization header for token validation
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.get(
+                        f"{user_service_url}/api/users/me/recommendation-criteria",
+                        headers={
+                            "Accept": "application/json",
+                            "Authorization": auth_header
+                        }
+                    )
+                    
+                    if response.status_code == 200:
+                        criteria_data = response.json()
+                        criteria = criteria_data.get("criteria", {})
+                        has_history = criteria_data.get("has_history", False)
+                        
+                        if has_history and (criteria.get("top_categories") or criteria.get("top_brands")):
+                            # Query products by criteria
+                            logger.info(f"[get_homepage_recommendations] Returning personalized recommendations")
+                            return await get_recommendations_by_criteria(
+                                criteria=criteria,
+                                limit=limit
+                            )
+                    
+                    logger.warning(f"[get_homepage_recommendations] User Service returned {response.status_code}")
+            except httpx.TimeoutException:
+                logger.warning(f"[get_homepage_recommendations] User Service timeout")
+            except httpx.ConnectError as e:
+                logger.warning(f"[get_homepage_recommendations] User Service connection error: {e}")
+            except Exception as e:
+                logger.warning(f"[get_homepage_recommendations] Failed to call User Service: {e}")
+            
+            # If we reach here, fallback to public recommendations
+            logger.info(f"[get_homepage_recommendations] Falling back to public recommendations")
+            return await get_public_recommendations(limit=limit)
+        else:
+            # Non-authenticated user - get trending recommendations
+            logger.info(f"[get_homepage_recommendations] Non-authenticated user - returning trending")
+            return await get_public_recommendations(limit=limit)
+            
+    except Exception as e:
+        logger.error(f"[get_homepage_recommendations] Error: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "products": [],
+            "recommendation_type": "error"
+        }
+    finally:
+        db.close()
+
+@app.get("/api/recommendations/public")
+async def get_public_recommendations(limit: int = 20):
+    """
+    Get public/trending recommendations for non-authenticated users.
+    
+    Returns trending products sorted by search_count and rating.
+    Joins SKU with Product and Category to get complete product info.
+    
+    Returns:
+    {
+        "status": "success",
+        "products": [...],
+        "recommendation_type": "trending",
+        "popular_categories": [...],
+        "popular_brands": [...],
+        "total_products": 20,
+        "message": "Recommended products based on trending/popularity"
+    }
+    """
+    db = SessionLocal()
+    try:
+        from sqlalchemy import desc, func
+        
+        # Query trending products by search_count and rating (with JOINs)
+        trending_results = db.query(SKU, Product, Category).join(
+            Product, SKU.product_id == Product.id
+        ).join(
+            Category, Product.category_id == Category.id
+        ).order_by(
+            desc(SKU.search_count),
+            desc(SKU.rating),
+            desc(SKU.created_at)
+        ).limit(limit).all()
+        
+        # Handle empty results
+        if not trending_results:
+            logger.warning(f"[get_public_recommendations] No products found in database")
+            return {
+                "status": "success",
+                "products": [],
+                "recommendation_type": "trending",
+                "popular_categories": [],
+                "popular_brands": [],
+                "total_products": 0,
+                "message": "No products available yet. Please add products to the catalog."
+            }
+        
+        products_data = [
+            {
+                "id": sku.id,
+                "sku_code": sku.sku_code,
+                "product_id": product.tiki_product_id,
+                "title": product.title,
+                "price": float(sku.price),
+                "original_price": float(sku.original_price) if sku.original_price else 0,
+                "brand": product.brand or "Unknown",
+                "category": category.name or "Other",
+                "thumbnail": product.thumbnail,
+                "rating": float(sku.rating) if sku.rating else 0,
+                "search_count": sku.search_count or 0,
+                "stock": sku.stock
+            }
+            for sku, product, category in trending_results
+        ]
+        
+        # Get popular categories by counting products
+        popular_categories = db.query(
+            Category.name,
+            func.count(SKU.id).label('count')
+        ).join(
+            Product, Category.id == Product.category_id
+        ).join(
+            SKU, Product.id == SKU.product_id
+        ).group_by(Category.name).order_by(
+            desc('count')
+        ).limit(5).all()
+        
+        # Get popular brands by counting products
+        popular_brands = db.query(
+            Product.brand,
+            func.count(SKU.id).label('count')
+        ).join(
+            SKU, Product.id == SKU.product_id
+        ).filter(
+            Product.brand.isnot(None)
+        ).group_by(Product.brand).order_by(
+            desc('count')
+        ).limit(5).all()
+        
+        return {
+            "status": "success",
+            "products": products_data,
+            "recommendation_type": "trending",
+            "popular_categories": [cat[0] for cat in popular_categories],
+            "popular_brands": [brand[0] for brand in popular_brands],
+            "total_products": len(products_data),
+            "message": f"Showing {len(products_data)} trending products"
+        }
+    except Exception as e:
+        logger.error(f"[get_public_recommendations] Error: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "products": [],
+            "recommendation_type": "error",
+            "popular_categories": [],
+            "popular_brands": [],
+            "total_products": 0
+        }
+    finally:
+        db.close()
+
+@app.post("/api/recommendations/by-criteria")
+async def get_recommendations_by_criteria(
+    criteria: Dict[str, Any] = Body(...),
+    limit: int = 20
+):
+    """
+    Get product recommendations based on criteria.
+    
+    This endpoint is called by Recommender Service after User Service builds criteria.
+    Joins SKU with Product and Category to apply filters and get complete info.
+    
+    Request:
+    {
+        "top_categories": ["Giày", "Đồng hồ"],
+        "top_brands": ["Nike", "Apple"],
+        "keywords": ["chạy bộ"],
+        "price_range": {"min": 1000000, "max": 50000000}
+    }
+    
+    Returns:
+    {
+        "status": "success",
+        "products": [...],
+        "recommendation_type": "personalized",
+        "total_products": 20,
+        "message": "..."
+    }
+    """
+    db = SessionLocal()
+    try:
+        from sqlalchemy import desc
+        
+        # Build query with JOINs
+        query = db.query(SKU, Product, Category).join(
+            Product, SKU.product_id == Product.id
+        ).join(
+            Category, Product.category_id == Category.id
+        )
+        
+        # Filter by categories if provided
+        categories = criteria.get("top_categories", [])
+        if categories:
+            query = query.filter(Category.name.in_(categories))
+        
+        # Filter by brands if provided
+        brands = criteria.get("top_brands", [])
+        if brands:
+            query = query.filter(Product.brand.in_(brands))
+        
+        # Filter by price range
+        price_range = criteria.get("price_range", {})
+        min_price = price_range.get("min", 0)
+        max_price = price_range.get("max", float('inf'))
+        
+        if min_price > 0 or max_price < float('inf'):
+            query = query.filter(
+                SKU.price.between(min_price, max_price)
+            )
+        
+        # Order by rating and search count (popularity)
+        query = query.order_by(
+            desc(SKU.rating),
+            desc(SKU.search_count),
+            desc(SKU.created_at)
+        )
+        
+        results = query.limit(limit).all()
+        
+        # Handle empty results
+        if not results:
+            logger.warning(f"[get_recommendations_by_criteria] No products found matching criteria: {criteria}")
+            return {
+                "status": "success",
+                "products": [],
+                "recommendation_type": "personalized",
+                "total_products": 0,
+                "message": f"No products found matching your criteria. Try adjusting: categories={categories}, brands={brands}, price_range={price_range}"
+            }
+        
+        products_data = [
+            {
+                "id": sku.id,
+                "sku_code": sku.sku_code,
+                "product_id": product.tiki_product_id,
+                "title": product.title,
+                "price": float(sku.price),
+                "original_price": float(sku.original_price) if sku.original_price else 0,
+                "brand": product.brand or "Unknown",
+                "category": category.name or "Other",
+                "thumbnail": product.thumbnail,
+                "rating": float(sku.rating) if sku.rating else 0,
+                "search_count": sku.search_count or 0,
+                "stock": sku.stock
+            }
+            for sku, product, category in results
+        ]
+        
+        return {
+            "status": "success",
+            "products": products_data,
+            "recommendation_type": "personalized",
+            "total_products": len(products_data),
+            "message": f"Showing {len(products_data)} personalized recommendations"
+        }
+    except Exception as e:
+        logger.error(f"[get_recommendations_by_criteria] Error: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "products": [],
+            "recommendation_type": "error",
+            "total_products": 0
+        }
     finally:
         db.close()
 

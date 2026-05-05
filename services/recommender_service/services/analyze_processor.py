@@ -13,7 +13,7 @@ from core.context_analyzer import get_context_analyzer
 from services.session_manager_factory import get_session_manager
 from db.sku_repository import SKURepository
 from config.database_orm import get_db
-from services.user_service import UserService
+from services.user_service_client import UserServiceClient
 from .job_manager import get_job_manager
 from services.product_service_client import ProductServiceClient
 
@@ -29,7 +29,7 @@ class AnalyzeProcessor:
         self.session_manager = get_session_manager()
         self.sku_repo = SKURepository()
         self.job_manager = get_job_manager()
-        self.user_service = UserService()
+        self.user_service_client = UserServiceClient()
         self.product_service_client = ProductServiceClient()
     
     async def process_analyze_job(
@@ -123,15 +123,15 @@ class AnalyzeProcessor:
             if current_user_id:
                 try:
                     category_for_db = conversation_state.get("category")
-                    self.user_service.save_search_query(
-                        user_id=current_user_id,
+                    await self.user_service_client.record_search(
+                        user_id=str(current_user_id),
                         query=user_input,
-                        category_name=category_for_db,
-                        session_id=conversation_id
+                        category=category_for_db,
+                        results_count=len(products) if products else 0
                     )
-                    logger.info(f"[Job {job_id}] ✅ Saved search history for user {current_user_id}")
+                    logger.info(f"[Job {job_id}] ✅ Saved search history for user {current_user_id} to UserService")
                 except Exception as e:
-                    logger.warning(f"[Job {job_id}] ⚠️ Failed to save search history: {e}")
+                    logger.warning(f"[Job {job_id}] ⚠️ Failed to save search history to UserService: {e}")
             
             # ====== STEP 6: Handle special status ======
             products = orch_result.get("products", [])

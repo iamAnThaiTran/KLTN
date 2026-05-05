@@ -187,7 +187,7 @@ class UserServiceClient:
     async def record_search(
         self,
         user_id: str,
-        query: str,
+        query: str, 
         category: Optional[str] = None,
         filters: Optional[Dict[str, Any]] = None,
         results_count: int = 0

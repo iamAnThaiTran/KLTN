@@ -79,7 +79,7 @@ def get_db():
 # Data Models (SQLAlchemy)
 # ============================================================================
 
-from sqlalchemy import Column, Integer, String, Float, Text, TIMESTAMP, Boolean, JSON, ARRAY, DECIMAL
+from sqlalchemy import Column, Integer, String, Float, Text, TIMESTAMP, Boolean, JSON, ARRAY, DECIMAL, func
 from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
@@ -120,20 +120,20 @@ class UserPreference(Base):
     notification_sms = Column(Boolean, default=False)
     dark_mode = Column(Boolean, default=False)
     comparison_limit = Column(Integer, default=5)
-    created_at = Column(TIMESTAMP, default=datetime.utcnow)
-    updated_at = Column(TIMESTAMP, default=datetime.utcnow)
+    created_at = Column(TIMESTAMP, default=func.now())
+    updated_at = Column(TIMESTAMP, default=func.now())
 
 class SearchHistory(Base):
     __tablename__ = "search_history"
     id = Column(Integer, primary_key=True)
-    user_id = Column(String(100))
+    user_id = Column(String(100), nullable=False)
     query = Column(String(500))
     category = Column(String(255))
     query_type = Column(String(50))
     filters = Column(JSON)
     results_count = Column(Integer)
     selected_product_id = Column(String(100))
-    searched_at = Column(TIMESTAMP, default=datetime.utcnow)
+    searched_at = Column(TIMESTAMP, default=func.now())
 
 class Favorite(Base):
     __tablename__ = "favorites"
@@ -144,7 +144,7 @@ class Favorite(Base):
     added_to_wishlist = Column(Boolean, default=False)
     price_when_added = Column(Float)
     current_price = Column(Float)
-    added_at = Column(TIMESTAMP, default=datetime.utcnow)
+    added_at = Column(TIMESTAMP, default=func.now())
 
 class PriceAlert(Base):
     __tablename__ = "price_alerts"
@@ -157,7 +157,7 @@ class PriceAlert(Base):
     is_active = Column(Boolean, default=True)
     triggered_count = Column(Integer, default=0)
     last_triggered = Column(TIMESTAMP)
-    created_at = Column(TIMESTAMP, default=datetime.utcnow)
+    created_at = Column(TIMESTAMP, default=func.now())
 
 class UserReview(Base):
     __tablename__ = "user_reviews"
@@ -172,8 +172,8 @@ class UserReview(Base):
     unhelpful_count = Column(Integer, default=0)
     verified_purchase = Column(Boolean, default=False)
     is_approved = Column(Boolean, default=True)
-    created_at = Column(TIMESTAMP, default=datetime.utcnow)
-    updated_at = Column(TIMESTAMP, default=datetime.utcnow)
+    created_at = Column(TIMESTAMP, default=func.now())
+    updated_at = Column(TIMESTAMP, default=func.now())
 
 class ComparisonHistory(Base):
     __tablename__ = "comparison_history"
@@ -181,7 +181,7 @@ class ComparisonHistory(Base):
     user_id = Column(String(100))
     comparison_id = Column(String(100))
     product_ids = Column(ARRAY(String))
-    comparison_date = Column(TIMESTAMP, default=datetime.utcnow)
+    comparison_date = Column(TIMESTAMP, default=func.now())
     winning_product_id = Column(String(100))
     action = Column(String(50))
     metadata_info = Column(JSON)
@@ -242,11 +242,11 @@ async def get_user(user_id: str):
 
 @app.post("/api/users")
 async def create_user(
-    email: str = Body(..., embed=True),
-    full_name: Optional[str] = Body(None, embed=True),
-    password: Optional[str] = Body(None, embed=True),
-    provider: str = Body("local", embed=True),
-    provider_id: Optional[str] = Body(None, embed=True)
+    email: str = Body(...),
+    full_name: Optional[str] = Body(None),
+    password: Optional[str] = Body(None),
+    provider: str = Body("local"),
+    provider_id: Optional[str] = Body(None)
 ):
     """Create a new user account"""
     db = SessionLocal()
@@ -376,10 +376,10 @@ async def update_preferences(user_id: str, preferences: Dict[str, Any] = Body(..
 @app.post("/api/users/{user_id}/search-history")
 async def record_search(
     user_id: str,
-    query: str = Body(..., embed=True),
-    category: Optional[str] = Body(None, embed=True),
-    filters: Optional[Dict[str, Any]] = Body(None, embed=True),
-    results_count: int = Body(0, embed=True)
+    query: str = Body(...),
+    category: Optional[str] = Body(None),
+    filters: Optional[Dict[str, Any]] = Body(None),
+    results_count: int = Body(0)
 ):
     """Record a search in user history"""
     db = SessionLocal()
@@ -434,9 +434,9 @@ async def get_search_history(user_id: str, limit: int = 20, offset: int = 0):
 @app.post("/api/users/{user_id}/favorites")
 async def add_favorite(
     user_id: str,
-    product_id: str = Body(..., embed=True),
-    sku_id: Optional[str] = Body(None, embed=True),
-    price: Optional[float] = Body(None, embed=True)
+    product_id: str = Body(...),
+    sku_id: Optional[str] = Body(None),
+    price: Optional[float] = Body(None)
 ):
     """Add product to user's favorites"""
     db = SessionLocal()
@@ -619,11 +619,11 @@ async def clear_favorites(user_id: str):
 @app.post("/api/users/{user_id}/reviews")
 async def submit_review(
     user_id: str,
-    product_id: str = Body(..., embed=True),
-    rating: int = Body(..., embed=True),
-    review_text: Optional[str] = Body(None, embed=True),
-    images: Optional[List[str]] = Body(None, embed=True),
-    sku_id: Optional[str] = Body(None, embed=True)
+    product_id: str = Body(...),
+    rating: int = Body(...),
+    review_text: Optional[str] = Body(None),
+    images: Optional[List[str]] = Body(None),
+    sku_id: Optional[str] = Body(None)
 ):
     """Submit a product review"""
     db = SessionLocal()
@@ -679,9 +679,9 @@ async def get_user_reviews(user_id: str, limit: int = 20, offset: int = 0):
 @app.post("/api/users/{user_id}/comparisons")
 async def record_comparison(
     user_id: str,
-    comparison_id: str = Body(..., embed=True),
-    product_ids: List[str] = Body(..., embed=True),
-    winning_product_id: Optional[str] = Body(None, embed=True)
+    comparison_id: str = Body(...),
+    product_ids: List[str] = Body(...),
+    winning_product_id: Optional[str] = Body(None)
 ):
     """Record a product comparison"""
     db = SessionLocal()
@@ -724,6 +724,147 @@ async def get_comparison_history(user_id: str, limit: int = 20, offset: int = 0)
         }
     except Exception as e:
         logger.error(f"Get comparison history failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+# ============================================================================
+# Recommendation Criteria APIs
+# ============================================================================
+
+@app.get("/api/users/me/recommendation-criteria")
+async def get_my_recommendation_criteria(
+    request,
+    days: int = 90
+):
+    """
+    Get recommendation criteria for authenticated user using Authorization header.
+    
+    This is simpler version of /api/users/{user_id}/recommendation-criteria
+    - Extracts user_id from Authorization header
+    - No need to pass user_id in URL
+    
+    For use by Product Service when it receives /api/recommendations/homepage with token
+    """
+    # Extract Authorization header
+    auth_header = request.headers.get("Authorization", "")
+    
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    
+    token = auth_header.replace("Bearer ", "")
+    
+    # Extract user_id from token
+    # In production, use proper JWT validation
+    try:
+        import jwt
+        import os
+        
+        jwt_secret = os.getenv("JWT_SECRET_KEY", "your-secret-key")
+        decoded_token = jwt.decode(token, jwt_secret, algorithms=["HS256"])
+        user_id = decoded_token.get("user_id") or decoded_token.get("sub")
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token format")
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Invalid token: {e}")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    except Exception as e:
+        logger.warning(f"Token parsing error: {e}")
+        raise HTTPException(status_code=401, detail="Token validation failed")
+    
+    # Now call the existing function with extracted user_id
+    return await get_recommendation_criteria(user_id, days)
+
+@app.get("/api/users/{user_id}/recommendation-criteria")
+async def get_recommendation_criteria(user_id: str, days: int = 90):
+    """
+    Get recommendation criteria for a user based on their behavior.
+    
+    This endpoint builds recommendation criteria from:
+    - Search history (top categories, keywords)
+    - Favorite products (preferred brands, categories)
+    - User preferences (price range, categories, brands)
+    
+    Returns:
+    {
+        "user_id": "user_123",
+        "criteria": {
+            "top_categories": ["Giày", "Đồng hồ"],
+            "top_brands": ["Nike", "Apple"],
+            "keywords": ["chạy bộ", "thông minh"],
+            "price_range": {"min": 1000000, "max": 50000000},
+            "count": {
+                "searches": 25,
+                "favorites": 5
+            }
+        },
+        "recommendation_type": "personalized",
+        "has_history": true
+    }
+    """
+    db = SessionLocal()
+    try:
+        # Get user preferences
+        prefs = db.query(UserPreference).filter(UserPreference.user_id == user_id).first()
+        
+        # Get recent search history (last N days)
+        cutoff_date = datetime.utcnow() - __import__('datetime').timedelta(days=days)
+        searches = db.query(SearchHistory).filter(
+            SearchHistory.user_id == user_id,
+            SearchHistory.searched_at >= cutoff_date
+        ).all()
+        
+        # Get favorites
+        favorites = db.query(Favorite).filter(Favorite.user_id == user_id).all()
+        
+        # Extract categories and keywords from search history
+        categories_count = {}
+        keywords = []
+        
+        for search in searches:
+            if search.category:
+                categories_count[search.category] = categories_count.get(search.category, 0) + 1
+            if search.query:
+                keywords.append(search.query.lower())
+        
+        # Get top categories
+        top_categories = sorted(categories_count.items(), key=lambda x: x[1], reverse=True)
+        top_categories_list = [cat[0] for cat in top_categories[:5]]
+        
+        # Extract brands from searches and preferences
+        brands_from_prefs = prefs.brands if prefs and prefs.brands else []
+        top_brands = list(set(brands_from_prefs))[:5]
+        
+        # Deduplicate keywords
+        unique_keywords = list(set(keywords))[:5]
+        
+        # Get price range from preferences
+        price_range = {
+            "min": float(prefs.price_range_min) if (prefs and prefs.price_range_min) else 0,
+            "max": float(prefs.price_range_max) if (prefs and prefs.price_range_max) else 1000000000
+        }
+        
+        # Check if user has any history
+        has_history = len(searches) > 0 or len(favorites) > 0
+        
+        return {
+            "user_id": user_id,
+            "criteria": {
+                "top_categories": top_categories_list,
+                "top_brands": top_brands,
+                "keywords": unique_keywords,
+                "price_range": price_range,
+                "count": {
+                    "searches": len(searches),
+                    "favorites": len(favorites)
+                }
+            },
+            "recommendation_type": "personalized" if has_history else "trending",
+            "has_history": has_history
+        }
+    except Exception as e:
+        logger.error(f"[get_recommendation_criteria] Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
