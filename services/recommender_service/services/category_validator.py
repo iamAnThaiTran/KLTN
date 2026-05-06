@@ -94,22 +94,30 @@ class CategoryValidator:
         text = re.sub(r'[^a-z0-9]+', '-', text)
         return text.strip('-')
     
-    async def validate_category(self, user_category: str) -> Dict[str, Any]:
+    async def validate_category(self, user_category: str, detected_attributes: list = None) -> Dict[str, Any]:
         """
         Validate category từ user input
         
         Flow:
         1. Try exact match with DB categories
         2. Try flexible match với UNIVERSAL_KEYWORDS
-        3. Nếu không match → call LLM để xác định category mới
+        3. Nếu không match → tạo category mới với detected_attributes (nếu có)
+           - Nếu có detected_attributes: dùng luôn, không cần call LLM
+           - Nếu không: call LLM để xác định category mới
         4. Return validated category info
+        
+        Args:
+            user_category: Tên category từ user
+            detected_attributes: Danh sách attributes đã được detect từ Comprehensive Analysis
+                                Format: ["ram", "cpu", "storage", ...] hoặc
+                                       [{"name": "ram", ...}, {"name": "cpu", ...}, ...]
         
         Returns:
             {
                 "success": bool,
                 "category": str,  # Category name tìm thấy hoặc tạo mới
                 "category_id": int | None,  # ID trong DB (None nếu mới)
-                "status": "found" | "normalized" | "created_from_llm",
+                "status": "found" | "normalized" | "created_from_api",
                 "reason": str
             }
         """
@@ -176,8 +184,97 @@ class CategoryValidator:
                                 }
         
         # STEP 3: Category not found in DB or keywords
-        # Try LLM to determine if it's a valid category or should map to existing one
-        logger.warning(f"⚠️ Category '{user_category}' not found in DB, calling LLM...")
+        # Check if we have pre-detected attributes from Comprehensive Analysis
+        logger.info(f"⚠️ Category '{user_category}' not found in DB")
+        logger.info(f"[validate_category] Detected attributes available: {detected_attributes is not None}")
+        
+        if detected_attributes:
+            # ✅ USE DETECTED ATTRIBUTES - Don't need LLM extraction
+            logger.info(f"[validate_category] Using pre-detected attributes from Comprehensive Analysis")
+            
+            # Extract attribute names from detected_attributes
+            # Handle both formats: list of strings or list of dicts
+            attribute_names = []
+            if detected_attributes and len(detected_attributes) > 0:
+                first_item = detected_attributes[0]
+                if isinstance(first_item, dict):
+                    # Format: [{"name": "ram", ...}, {"name": "cpu", ...}]
+                    attribute_names = [attr.get("name", attr) for attr in detected_attributes if isinstance(attr, dict)]
+                else:
+                    # Format: ["ram", "cpu", "storage", ...]
+                    attribute_names = [str(attr).strip() for attr in detected_attributes]
+            
+            logger.info(f"[validate_category] Extracted attribute names: {attribute_names}")
+            
+            if self.product_service_client is None:
+                logger.error("⚠️ ProductServiceClient not available - cannot create category")
+                return {
+                    "success": False,
+                    "category": user_category,
+                    "category_id": None,
+                    "status": "unknown_category",
+                    "reason": "ProductService client not available. Cannot create category."
+                }
+            
+            # Call ProductService API to create category with detected attributes
+            try:
+                logger.info(f"📤 Calling ProductService to create category '{user_category}' with {len(attribute_names)} attributes...")
+                
+                result = await self.product_service_client.create_category(
+                    name=user_category,
+                    description=f"Auto-created from detected attributes",
+                    category_type="general",
+                    attributes=attribute_names
+                )
+                
+                if result.get("success"):
+                    category_id = result.get("id")
+                    attributes_created = result.get("attributes_created", 0)
+                    logger.info(f"✅ Successfully created category '{user_category}' (id={category_id}, attributes={attributes_created})")
+                    
+                    return {
+                        "success": True,
+                        "category": user_category,
+                        "category_id": category_id,
+                        "status": "created_from_api",
+                        "reason": f"Created via ProductService API with {attributes_created} detected attributes"
+                    }
+                else:
+                    # Check if category already exists (not a failure!)
+                    reason = result.get("reason", "Failed to create category")
+                    if "already exists" in reason.lower():
+                        category_id = result.get("id")
+                        logger.info(f"✅ Category '{user_category}' already exists (id={category_id})")
+                        return {
+                            "success": True,
+                            "category": user_category,
+                            "category_id": category_id,
+                            "status": "existing",
+                            "reason": "Category already exists in ProductService"
+                        }
+                    
+                    logger.warning(f"⚠️ ProductService returned failure: {reason}")
+                    return {
+                        "success": False,
+                        "category": user_category,
+                        "category_id": None,
+                        "status": "creation_failed",
+                        "reason": reason
+                    }
+            
+            except Exception as e:
+                logger.error(f"❌ Failed to create category via ProductService: {str(e)}")
+                return {
+                    "success": False,
+                    "category": user_category,
+                    "category_id": None,
+                    "status": "api_error",
+                    "reason": f"ProductService API error: {str(e)}"
+                }
+        
+        # FALLBACK: No detected attributes, try LLM to determine category
+        logger.info(f"⚠️ No detected attributes provided, calling LLM for validation...")
+        
         
         llm_result = self._validate_with_llm(user_category, db_categories)
         

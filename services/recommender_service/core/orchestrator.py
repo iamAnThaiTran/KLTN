@@ -17,7 +17,6 @@ from .dynamic_schema import DynamicSchemaManager, AVAILABLE_CATEGORIES
 from .llm_utils import call_openai
 from .category_cache import CategoryCache
 from services.category_validator import CategoryValidator  # ✅ Use absolute import
-from services.product_repository import ProductRepository  # ✅ Use absolute import
 
 class RecommendationOrchestrator:
     """
@@ -40,7 +39,6 @@ class RecommendationOrchestrator:
         self.crawl_service_client = CrawlServiceClient()  # ✅ HTTP client to Crawl Service (8003)
         self.product_service_client = ProductServiceClient()  # ✅ HTTP client to Product Service (8001)
         self.category_validator = CategoryValidator(product_service_client=self.product_service_client)  # ✅ Pass ProductServiceClient
-        self.product_repository = ProductRepository()  # NEW: Query DB before crawl
         
         # Cache management (Lazada-style)
         self.enable_cache = True  # Set to False to disable caching
@@ -66,6 +64,146 @@ class RecommendationOrchestrator:
             "với", "hay", "or", "vs", "versus", "compare", "comparison",
             "nên chọn", "nên mua", "cái nào", "loại nào"
         ]
+    
+    # ====================================================================================
+    # HELPER METHODS
+    # ====================================================================================
+    
+    def _build_crawl_schema_from_attributes(
+        self,
+        category: str,
+        attributes: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Build crawl schema từ LLM extracted attributes (comprehensive_analysis).
+        
+        Input attributes format (từ LLM):
+            [
+                {"name": "công suất", "value": "700w"},
+                {"name": "dung tích", "value": "1.5 lít"},
+                {"name": "thương hiệu", "value": "philips"},
+            ]
+        
+        Output schema format (cho ProductDetailCrawler):
+            {
+                "category": "máy xay sinh tố",
+                "attributes": [
+                    {
+                        "name": "công suất",
+                        "keywords": ["công suất", "watt", "w"],
+                        "value_pattern": "(\\d+)\\s*(?:w|watt)"
+                    },
+                    ...
+                ]
+            }
+        """
+        # Keyword + pattern defaults theo tên attribute phổ biến
+        ATTRIBUTE_DEFAULTS = {
+            "công suất":  {"keywords": ["công suất", "watt", "w"],          "value_pattern": r"(\d+)\s*(?:w|watt)"},
+            "watt":       {"keywords": ["công suất", "watt", "w"],          "value_pattern": r"(\d+)\s*(?:w|watt)"},
+            "dung tích":  {"keywords": ["dung tích", "ml", "lít", "bình"],  "value_pattern": r"(\d+(?:\.\d+)?)\s*(?:ml|lít|l)\b"},
+            "dung lượng": {"keywords": ["dung lượng", "ml", "lít"],         "value_pattern": r"(\d+(?:\.\d+)?)\s*(?:ml|lít|l)\b"},
+            "ram":        {"keywords": ["ram", "bộ nhớ", "ddr"],            "value_pattern": r"(\d+)\s*(?:gb|ddr)"},
+            "pin":        {"keywords": ["pin", "battery", "mah"],           "value_pattern": r"(\d+)\s*(?:mah|milli)"},
+            "màn hình":   {"keywords": ["màn hình", "display", "inch"],     "value_pattern": r"(\d+(?:\.\d+)?)\s*(?:inch|\")"},
+            "trọng lượng":{"keywords": ["trọng lượng", "khối lượng", "kg"],"value_pattern": r"(\d+(?:\.\d+)?)\s*kg"},
+            "kích thước": {"keywords": ["kích thước", "cm", "mm"],          "value_pattern": r"(\d+(?:\.\d+)?)\s*(?:cm|mm)"},
+            "thương hiệu":{"keywords": ["thương hiệu", "hãng", "brand"],    "value_pattern": r"([a-záàảãạăắặẳẵằâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ\w]+)"},
+            "màu":        {"keywords": ["màu", "màu sắc", "color"],         "value_pattern": r"(đen|trắng|xanh|đỏ|vàng|hồng|bạc|xám|nâu)"},
+            "tốc độ":     {"keywords": ["tốc độ", "rpm", "vòng"],           "value_pattern": r"(\d+)\s*(?:rpm|vòng)"},
+            "nhiệt độ":   {"keywords": ["nhiệt độ", "độ c", "°c"],          "value_pattern": r"(\d+)\s*(?:°c|độ c?)"},
+            "bảo hành":   {"keywords": ["bảo hành", "warranty"],            "value_pattern": r"(\d+)\s*(?:tháng|năm|month|year)"},
+        }
+
+        schema_attributes = []
+
+        for attr in attributes:
+            # attr có thể là dict {"name": ..., "value": ...} hoặc string
+            if isinstance(attr, dict):
+                attr_name = (attr.get("name") or "").strip().lower()
+            else:
+                attr_name = str(attr).strip().lower()
+
+            if not attr_name:
+                continue
+
+            # Lookup defaults, fallback về generic nếu không có sẵn
+            defaults = ATTRIBUTE_DEFAULTS.get(attr_name)
+
+            if defaults:
+                schema_attributes.append({
+                    "name": attr_name,
+                    "keywords": defaults["keywords"],
+                    "value_pattern": defaults["value_pattern"],
+                })
+            else:
+                # Generic fallback: dùng tên attribute làm keyword, pattern bắt số hoặc chữ
+                schema_attributes.append({
+                    "name": attr_name,
+                    "keywords": [attr_name],
+                    "value_pattern": r"(\d+(?:\.\d+)?(?:\s*\w+)?)",
+                })
+                logger.debug(f"[CASE 1] ℹ️ No default pattern for '{attr_name}' → using generic pattern")
+
+        return {
+            "category": category,
+            "attributes": schema_attributes,
+        }
+    
+    def _convert_comprehensive_attributes_to_dict(
+        self,
+        comprehensive_analysis: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Convert extracted attributes from LLM comprehensive analysis to dict format
+        
+        Input format (from LLM):
+        {
+            "attributes": [
+                {"name": "ram", "keywords": [...], "value_pattern": "...", "user_value": ">=16GB"},
+                {"name": "storage", "keywords": [...], "value_pattern": "...", "user_value": "SSD"},
+                ...
+            ]
+        }
+        
+        Output format (for crawl service):
+        {
+            "ram": ">=16GB",
+            "storage": "SSD",
+            ...
+        }
+        
+        Returns:
+            Dict with {attribute_name: user_value} for non-None values
+        """
+        attributes_dict = {}
+        
+        # Try to get attributes from either "extracted_attributes" (new) or "attributes" (backward compat)
+        attributes_list = comprehensive_analysis.get("extracted_attributes") or comprehensive_analysis.get("attributes")
+        
+        # Handle new format from LLM (list of objects)
+        if isinstance(attributes_list, list):
+            for attr in attributes_list:
+                attr_name = attr.get("name", "").strip()
+                user_value = attr.get("user_value")
+                
+                if attr_name and user_value is not None:
+                    attributes_dict[attr_name] = user_value
+                    logger.info(f"[_convert_comprehensive_attributes_to_dict] {attr_name}: {user_value}")
+        
+        # Handle old format (direct dict) for compatibility
+        elif isinstance(attributes_list, dict):
+            for name, attr_obj in attributes_list.items():
+                if isinstance(attr_obj, dict):
+                    user_value = attr_obj.get("user_value")
+                    if user_value is not None:
+                        attributes_dict[name] = user_value
+                else:
+                    # Direct value
+                    attributes_dict[name] = attr_obj
+        
+        logger.info(f"[_convert_comprehensive_attributes_to_dict] Converted to: {attributes_dict}")
+        return attributes_dict
     
     # ====================================================================================
     # CENTRAL 7-CASE DISPATCHER SYSTEM
@@ -96,6 +234,15 @@ class RecommendationOrchestrator:
         is_new_category = detected_intent.get("is_new_category", False)
         
         logger.info(f"[classify_request_case] Classifying based on intent_type='{intent_type}', confidence={confidence:.2f}, categories={categories}, is_new={is_new_category}")
+        
+        # 🔧 Verify sync from comprehensive analysis
+        comprehensive_analysis = conversation_state.get("comprehensive_analysis", {})
+        if comprehensive_analysis.get("category"):
+            logger.info(f"[classify_request_case] 🔄 Comprehensive category: '{comprehensive_analysis['category']}' vs Detected categories: {categories}")
+            if categories and categories[0] != comprehensive_analysis.get("category"):
+                logger.warning(f"[classify_request_case] ⚠️ Category mismatch! Using detected: {categories[0]}")
+            elif comprehensive_analysis.get("category") in categories:
+                logger.info(f"[classify_request_case] ✅ Categories synced correctly")
         
         # ===== PRIORITY 0: Dynamic Category Creation (NEW categories not in DB) =====
         if is_new_category and categories:
@@ -270,9 +417,19 @@ class RecommendationOrchestrator:
         
         category = case_data["category"]
         
-        # NEW: Validate category before crawling
-        logger.info(f"[CASE 1] Validating category: '{category}'")
-        validation_result = await self.category_validator.validate_category(category)
+        # 🆕 Extract detected attributes from comprehensive analysis BEFORE validation
+        comprehensive_analysis = conversation_state.get("comprehensive_analysis", {})
+        # Check both 'extracted_attributes' and 'attributes' keys
+        detected_attributes = comprehensive_analysis.get("extracted_attributes") or comprehensive_analysis.get("attributes", [])
+        detected_attributes_names = [attr.get("name") if isinstance(attr, dict) else str(attr) for attr in detected_attributes] if detected_attributes else []
+        logger.info(f"[CASE 1] 📊 Detected attributes from analysis: {detected_attributes_names}")
+        
+        # NEW: Validate category before crawling (pass detected attributes)
+        logger.info(f"[CASE 1] Validating category: '{category}' with {len(detected_attributes_names)} detected attributes")
+        validation_result = await self.category_validator.validate_category(
+            user_category=category,
+            detected_attributes=detected_attributes_names if detected_attributes_names else None
+        )
         if not validation_result["success"]:
             logger.info(f"[CASE 1] ❌ Category validation failed: {validation_result['reason']}")
             return {
@@ -298,29 +455,34 @@ class RecommendationOrchestrator:
             "status": validation_status
         }
         
-        # Extract attributes using rule-based extractor (NO LLM)
+        # Get attributes from comprehensive analysis (LLM extraction)
+        comprehensive_analysis = conversation_state.get("comprehensive_analysis", {})
+        attributes_for_search = self._convert_comprehensive_attributes_to_dict(comprehensive_analysis)
+        
+        logger.info(f"[CASE 1] ✨ Extracted attributes from LLM: {attributes_for_search}")
+        
+        # Also store extracted for backward compatibility
         extract_result = self.attribute_extractor.extract(
             user_input,
             validated_category,
             use_llm=False  # CRITICAL: No LLM for Case 1
         )
-        
         conversation_state["extracted"] = extract_result["extracted"]
         
-        logger.info(f"[CASE 1] Extracted attributes: {extract_result['extracted']}")
-        
-        # ⭐ FALLBACK: If attributes empty, use product_name from IntentMapper as search hint
-        attributes_for_search = extract_result["extracted"].copy()
+        # ⭐ FALLBACK: If LLM attributes empty, use rule-based extraction
         if not attributes_for_search or len(attributes_for_search) == 0:
-            product_name = conversation_state.get("detected_intent", {}).get("product_name", "").strip()
-            if product_name and product_name.lower() != validated_category.lower():
-                # Use product_name as "loai" (type) for better search
-                attributes_for_search["loai"] = product_name
-                logger.info(f"[CASE 1] 💡 No attributes extracted → Using product_name as search hint: '{product_name}'")
+            logger.info(f"[CASE 1] 💡 LLM attributes empty → Using rule-based extraction")
+            attributes_for_search = extract_result["extracted"].copy()
+            
+            if not attributes_for_search or len(attributes_for_search) == 0:
+                product_name = conversation_state.get("detected_intent", {}).get("product_name", "").strip()
+                if product_name and product_name.lower() != validated_category.lower():
+                    attributes_for_search["loai"] = product_name
+                    logger.info(f"[CASE 1] 💡 No attributes → Using product_name as search hint: '{product_name}'")
         
-        # Query DB first before crawling
-        logger.info(f"[CASE 1] 🔍 Querying database for products...")
-        db_products = self.product_repository.query_by_category_and_attributes(
+        # Query Product Service first before crawling
+        logger.info(f"[CASE 1] 🔍 Querying Product Service for products...")
+        db_products = await self.product_service_client.get_products_by_category_and_attributes(
             category_id=category_id,
             attributes=attributes_for_search,
             limit=50
@@ -333,6 +495,7 @@ class RecommendationOrchestrator:
         
         # DB MISS: Products not in DB, crawl from external sources via Crawl Service (8003)
         logger.info(f"[CASE 1] ❌ DB MISS! Crawling from external sources (Lazada/Tiki/Shopee) via CrawlService...")
+        logger.info(f"[CASE 1] 📤 Sending to CrawlService with attributes: {attributes_for_search}")
         crawled_products = await self.crawl_service_client.crawl(
             category=validated_category,
             category_id=category_id,
@@ -346,7 +509,6 @@ class RecommendationOrchestrator:
                 "case": 1,
                 "state": conversation_state
             }
-        
         # ✅ Save crawled products to Product Service (not directly to DB)
         logger.info(f"[CASE 1] 💾 Saving {len(crawled_products)} crawled products via Product Service...")
         try:
@@ -357,6 +519,70 @@ class RecommendationOrchestrator:
             )
         except Exception as e:
             logger.warning(f"[CASE 1] ⚠️ Failed to save products via Product Service: {e}")
+            
+            
+        # 🆕 STEP: Enqueue product detail crawl task to RabbitMQ (via CrawlService)
+        logger.info(f"[CASE 1] 🔍 Enqueuing product detail crawl for {len(crawled_products)} products via RabbitMQ...")
+        
+        # Extract product IDs (Tiki product_id)
+        product_ids_to_crawl = []
+        for product in crawled_products:
+            product_id = product.get("product_id")
+            if product_id:
+                product_ids_to_crawl.append(product_id)
+        
+        if product_ids_to_crawl:
+            try:
+                # Get dynamic schema for detailed extraction (optional)
+                # Build dynamic schema từ comprehensive_analysis (LLM đã extract sẵn)
+                crawl_schema = None
+                try:
+                    comprehensive_analysis = conversation_state.get("comprehensive_analysis", {})
+                    detected_attributes = (
+                        comprehensive_analysis.get("extracted_attributes")
+                        or comprehensive_analysis.get("attributes")
+                        or []
+                    )
+                    
+                    if detected_attributes:
+                        crawl_schema = self._build_crawl_schema_from_attributes(
+                            category=validated_category,
+                            attributes=detected_attributes
+                        )
+                        logger.info(f"[CASE 1] 📐 Built crawl schema from LLM attributes: {[a.get('name') for a in detected_attributes]}")
+                    else:
+                        logger.info(f"[CASE 1] ℹ️ No LLM attributes → crawl without schema (no attribute extraction)")
+
+                except Exception as e:
+                    logger.warning(f"[CASE 1] ⚠️ Could not build crawl schema: {e}")
+                
+                # Only crawl details for top 10 products (to avoid timeout)
+                products_to_detail_crawl = product_ids_to_crawl[:10]
+                logger.info(f"[CASE 1] 📤 Enqueuing product details crawl for top {len(products_to_detail_crawl)} products...")
+                
+                # Enqueue product detail crawl task to RabbitMQ
+                task_id = await self.crawl_service_client.enqueue_product_detail_crawl(
+                    product_ids=products_to_detail_crawl,
+                    schema=crawl_schema,
+                    max_concurrent=3,
+                    priority="high"
+                )
+                
+                logger.info(f"[CASE 1] ✅ Product detail crawl enqueued: {task_id}")
+                
+                # Store task_id in conversation state for later polling (optional)
+                conversation_state["product_detail_crawl_task_id"] = task_id
+                
+                # 🆕 ASYNC: Don't wait for product detail crawl - return products now
+                # The CrawlService worker will process attributes in background
+                # Attributes will be saved directly to Product Service by the worker
+                logger.info(f"[CASE 1] ⏳ Product detail crawl will complete in background (task_id: {task_id})")
+            
+            except Exception as e:
+                logger.warning(f"[CASE 1] ⚠️ Failed to enqueue product details crawl: {e}")
+                # Continue - don't fail the entire flow if enqueue fails
+        
+        
         
         # Return crawled products directly (already complete from CrawlService)
         return await self._process_crawl_results(crawled_products, conversation_state, case=1, source="crawl")
@@ -401,7 +627,6 @@ class RecommendationOrchestrator:
         # Validate category before proceeding
         logger.info(f"[CASE 2] Validating category: '{category}'")
         validation_result = await self.category_validator.validate_category(category)
-        logger.info(f"[CASE 2] Category validation result: {validation_result}")
         
         if not validation_result["success"]:
             logger.info(f"[CASE 2] ❌ Category validation failed: {validation_result['reason']}")
@@ -411,17 +636,6 @@ class RecommendationOrchestrator:
                 "case": 2,
                 "state": conversation_state
             }
-        
-        # Use validated category
-        validated_category = validation_result["category"]
-        category_id = validation_result["category_id"]
-        logger.error(f"[CASE 2] ❌ Category validation failed: {validation_result['reason']}")
-        return {
-            "status": "error",
-            "message": f"Không thể xác định danh mục sản phẩm '{category}'. {validation_result['reason']}",
-            "case": 2,
-            "state": conversation_state
-        }
         
         # Use validated category
         validated_category = validation_result["category"]
@@ -438,7 +652,13 @@ class RecommendationOrchestrator:
             "status": validation_result["status"]
         }
         
-        # Extract what we can from input (rule-based)
+        # Get attributes from comprehensive analysis (LLM extraction)
+        comprehensive_analysis = conversation_state.get("comprehensive_analysis", {})
+        attributes_for_search = self._convert_comprehensive_attributes_to_dict(comprehensive_analysis)
+        
+        logger.info(f"[CASE 2] ✨ Extracted attributes from LLM: {attributes_for_search}")
+        
+        # Also store extracted for backward compatibility
         extract_result = self.attribute_extractor.extract(
             user_input,
             validated_category,
@@ -447,16 +667,21 @@ class RecommendationOrchestrator:
         
         conversation_state["extracted"].update(extract_result["extracted"])
         
+        # If LLM attributes empty, use rule-based extraction
+        if not attributes_for_search or len(attributes_for_search) == 0:
+            logger.info(f"[CASE 2] 💡 LLM attributes empty → Using rule-based extraction")
+            attributes_for_search = extract_result["extracted"].copy()
+        
         # lấy schema và required attributes cho category đã được validate
         schema = get_schema(validated_category)
         schema_attrs = self.schema_manager.get_attributes_for_category(validated_category)
         
-        # If no schema, we don't have required attributes list, so proceed to DB query
+        # If no schema, we don't have required attributes list, so proceed to Product Service query
         if schema is None:
-            logger.info(f"[CASE 2] No schema found for '{validated_category}', querying database...")
-            db_products = self.product_repository.query_by_category_and_attributes(
+            logger.info(f"[CASE 2] No schema found for '{validated_category}', querying Product Service...")
+            db_products = await self.product_service_client.get_products_by_category_and_attributes(
                 category_id=category_id,
-                attributes=conversation_state["extracted"],
+                attributes=attributes_for_search,
                 limit=50
             )
             
@@ -465,11 +690,12 @@ class RecommendationOrchestrator:
                 return await self._process_crawl_results(db_products, conversation_state, case=2, source="db")
             
             # No schema, no products in DB → Crawl via Crawl Service (8003)
-            logger.info(f"[CASE 2] Crawling from external sources via CrawlService...")
+            logger.info(f"[CASE 2] ❌ DB MISS! Crawling from external sources via CrawlService...")
+            logger.info(f"[CASE 2] 📤 Sending to CrawlService with attributes: {attributes_for_search}")
             crawled_products = await self.crawl_service_client.crawl(
                 category=validated_category,
                 category_id=category_id,
-                attributes=conversation_state["extracted"]
+                attributes=attributes_for_search
             )
             if not crawled_products:
                 return {
@@ -496,16 +722,16 @@ class RecommendationOrchestrator:
         
         missing = [
             attr for attr in required_attrs
-            if attr not in conversation_state["extracted"]
+            if attr not in attributes_for_search
             and attr not in conversation_state.get("attributes_asked", [])
         ]
         
         if not missing:
-            # All required attributes provided → Query DB first
-            logger.info(f"[CASE 2] All required attributes provided, querying database...")
-            db_products = self.product_repository.query_by_category_and_attributes(
+            # All required attributes provided → Query Product Service first
+            logger.info(f"[CASE 2] All required attributes provided, querying Product Service...")
+            db_products = await self.product_service_client.get_products_by_category_and_attributes(
                 category_id=category_id,
-                attributes=conversation_state["extracted"],
+                attributes=attributes_for_search,
                 limit=50
             )
             
@@ -516,10 +742,11 @@ class RecommendationOrchestrator:
             
             # DB MISS → Crawl via Crawl Service (8003)
             logger.info(f"[CASE 2] ❌ DB MISS! Crawling from external sources via CrawlService...")
+            logger.info(f"[CASE 2] 📤 Sending to CrawlService with attributes: {attributes_for_search}")
             crawled_products = await self.crawl_service_client.crawl(
                 category=validated_category,
                 category_id=category_id,
-                attributes=conversation_state["extracted"]
+                attributes=attributes_for_search
             )
             
             if not crawled_products:
@@ -553,7 +780,7 @@ class RecommendationOrchestrator:
         question = self.dialogue_manager.generate_question({
             "has_category": True,
             "category": validated_category,  # Use validated category
-            "extracted": conversation_state["extracted"],
+            "extracted": attributes_for_search,
             "missing_required": [next_attr],
             "user_input": user_input
         })
@@ -566,6 +793,7 @@ class RecommendationOrchestrator:
             "case": 2,
             "state": conversation_state
         }
+
     
     async def handle_case_3_unclear_no_schema(
         self,
@@ -712,7 +940,7 @@ Be practical and culturally relevant for Vietnamese shopping."""
         Flow:
         1. Save previous search in history
         2. Validate new category
-        3. Extract from new category
+        3. Extract from new category (use LLM comprehensive analysis)
         4. Query DB → crawl if needed
         """
         # Ensure state structure
@@ -731,8 +959,19 @@ Be practical and culturally relevant for Vietnamese shopping."""
         
         # Validate new category
         new_category = case_data["new_category"]
-        logger.info(f"[CASE 5] Validating new category: '{new_category}'")
-        validation_result = await self.category_validator.validate_category(new_category)
+        
+        # 🆕 Extract detected attributes from comprehensive analysis BEFORE validation
+        comprehensive_analysis = conversation_state.get("comprehensive_analysis", {})
+        # Check both 'extracted_attributes' and 'attributes' keys
+        detected_attributes = comprehensive_analysis.get("extracted_attributes") or comprehensive_analysis.get("attributes", [])
+        detected_attributes_names = [attr.get("name") if isinstance(attr, dict) else str(attr) for attr in detected_attributes] if detected_attributes else []
+        logger.info(f"[CASE 5] 📊 Detected attributes from analysis: {detected_attributes_names}")
+        
+        logger.info(f"[CASE 5] Validating new category: '{new_category}' with {len(detected_attributes_names)} detected attributes")
+        validation_result = await self.category_validator.validate_category(
+            user_category=new_category,
+            detected_attributes=detected_attributes_names if detected_attributes_names else None
+        )
         
         if not validation_result["success"]:
             logger.info(f"[CASE 5] ❌ Category validation failed")
@@ -754,24 +993,36 @@ Be practical and culturally relevant for Vietnamese shopping."""
             "extracted": {},
             "missing_required": [],
             "search_history": conversation_state.get("search_history", []),
-            "attributes_asked": []
+            "attributes_asked": [],
+            "comprehensive_analysis": conversation_state.get("comprehensive_analysis", {})  # Preserve comprehensive analysis
         }
         
-        # Restart detection for new category
+        # Get attributes from comprehensive analysis (LLM extraction)
+        comprehensive_analysis = conversation_state.get("comprehensive_analysis", {})
+        attributes_for_search = self._convert_comprehensive_attributes_to_dict(comprehensive_analysis)
+        
+        logger.info(f"[CASE 5] ✨ Extracted attributes from LLM: {attributes_for_search}")
+        
+        # Also extract rule-based for fallback
         extract_result = self.attribute_extractor.extract(user_input, validated_category, use_llm=False)
         conversation_state["extracted"] = extract_result["extracted"]
+        
+        # If LLM attributes empty, use rule-based extraction
+        if not attributes_for_search or len(attributes_for_search) == 0:
+            logger.info(f"[CASE 5] 💡 LLM attributes empty → Using rule-based extraction")
+            attributes_for_search = extract_result["extracted"].copy()
         
         # Determine if we have enough to query/crawl or need to ask
         schema_attrs = self.schema_manager.get_attributes_for_category(validated_category)
         required_attrs = [attr for attr, constraint in schema_attrs.items() if constraint.required]
-        missing = [attr for attr in required_attrs if attr not in conversation_state["extracted"]]
+        missing = [attr for attr in required_attrs if attr not in attributes_for_search]
         
-        if len(conversation_state["extracted"]) >= 2 or not missing:
-            # Enough info → Query DB first
-            logger.info(f"[CASE 5] Enough attributes, querying database...")
-            db_products = self.product_repository.query_by_category_and_attributes(
+        if len(attributes_for_search) >= 2 or not missing:
+            # Enough info → Query Product Service first
+            logger.info(f"[CASE 5] Enough attributes, querying Product Service...")
+            db_products = await self.product_service_client.get_products_by_category_and_attributes(
                 category_id=category_id,
-                attributes=conversation_state["extracted"],
+                attributes=attributes_for_search,
                 limit=50
             )
             
@@ -782,10 +1033,11 @@ Be practical and culturally relevant for Vietnamese shopping."""
             
             # DB MISS → Crawl via Crawl Service (8003)
             logger.info(f"[CASE 5] ❌ DB MISS, crawling via CrawlService...")
+            logger.info(f"[CASE 5] 📤 Sending to CrawlService with attributes: {attributes_for_search}")
             crawled_products = await self.crawl_service_client.crawl(
                 category=validated_category,
                 category_id=category_id,
-                attributes=conversation_state["extracted"]
+                attributes=attributes_for_search
             )
             
             if not crawled_products:
@@ -818,7 +1070,7 @@ Be practical and culturally relevant for Vietnamese shopping."""
                 question = self.dialogue_manager.generate_question({
                     "has_category": True,
                     "category": validated_category,
-                    "extracted": conversation_state["extracted"],
+                    "extracted": attributes_for_search,
                     "missing_required": [next_attr],
                     "user_input": user_input
                 })
@@ -829,6 +1081,7 @@ Be practical and culturally relevant for Vietnamese shopping."""
                     "case": 5,
                     "state": conversation_state
                 }
+
     
     async def handle_case_6_incremental_refinement(
         self,
@@ -839,6 +1092,7 @@ Be practical and culturally relevant for Vietnamese shopping."""
         """
         CASE 6: Incremental refinement
         Merge new attributes into existing context, avoid redundant questions
+        Uses comprehensive analysis attributes from LLM
         """
         # Ensure state structure
         conversation_state = self._ensure_state_structure(conversation_state)
@@ -847,21 +1101,35 @@ Be practical and culturally relevant for Vietnamese shopping."""
         
         category = conversation_state["category"]
         
-        # Extract new attributes
+        # Get comprehensive attributes
+        comprehensive_analysis = conversation_state.get("comprehensive_analysis", {})
+        attributes_for_search = self._convert_comprehensive_attributes_to_dict(comprehensive_analysis)
+        
+        logger.info(f"[CASE 6] ✨ Current attributes from LLM: {attributes_for_search}")
+        
+        # Also extract rule-based new attributes from current input
         new_attrs = self.attribute_extractor.extract(user_input, category, use_llm=False)
         
-        if case_data["intent_type"] == "switch_attribute":
+        logger.info(f"[CASE 6] 🆕 New rule-based attributes: {new_attrs['extracted']}")
+        
+        # Merge: new attributes refine existing ones
+        if case_data.get("intent_type") == "switch_attribute":
             # Replace conflicting attributes
             for attr, value in new_attrs["extracted"].items():
-                if attr in conversation_state["extracted"]:
-                    logger.info(f"[CASE 6] Replacing {attr}: '{conversation_state['extracted'][attr]}' → '{value}'")
-                conversation_state["extracted"][attr] = value
+                if attr in attributes_for_search:
+                    logger.info(f"[CASE 6] Replacing {attr}: '{attributes_for_search[attr]}' → '{value}'")
+                attributes_for_search[attr] = value
         else:
-            # Merge (refine) - don't overwrite existing
+            # Merge (refine) - add new attributes without overwriting
             for attr, value in new_attrs["extracted"].items():
-                if attr not in conversation_state["extracted"]:
-                    conversation_state["extracted"][attr] = value
+                if attr not in attributes_for_search:
+                    attributes_for_search[attr] = value
                     logger.info(f"[CASE 6] Adding {attr}: '{value}'")
+        
+        # Also update conversation_state["extracted"] for backward compatibility
+        conversation_state["extracted"].update(new_attrs["extracted"])
+        
+        logger.info(f"[CASE 6] 📤 Final merged attributes: {attributes_for_search}")
         
         # Use smart crawl with caching
         # Track cache state before crawl
@@ -870,9 +1138,9 @@ Be practical and culturally relevant for Vietnamese shopping."""
         
         products = await self._smart_crawl(
             category, 
-            conversation_state["extracted"], 
+            attributes_for_search,  # ✅ Use merged comprehensive attributes
             conversation_state,
-            category_id=conversation_state.get("category_id")  # ✅ Pass category_id to _smart_crawl
+            category_id=conversation_state.get("category_id")
         )
         
         # Determine if products came from DB cache or crawl
@@ -882,6 +1150,7 @@ Be practical and culturally relevant for Vietnamese shopping."""
         logger.info(f"[CASE 6] Source: {source} (db_hit={db_hit}, cache_hits={conversation_state.get('cache_hits')})")
         
         return await self._process_crawl_results(products, conversation_state, case=6, source=source)
+
     
     async def handle_case_7_comparison_advisory(
         self,
@@ -1040,16 +1309,25 @@ Format:
             logger.error(f"[CASE 8] ⚠️  Warning: Failed to register in schema manager: {e}")
             # Don't fail - we can still crawl without schema registration
         
-        # ===== STEP 3: Crawl from external sources =====
+        # ===== STEP 3: Get attributes from comprehensive analysis or use extracted from schema =====
+        logger.info(f"[CASE 8] Getting attributes for crawl...")
+        
+        comprehensive_analysis = conversation_state.get("comprehensive_analysis", {})
+        attributes_for_search = self._convert_comprehensive_attributes_to_dict(comprehensive_analysis)
+        
+        logger.info(f"[CASE 8] ✨ Using attributes from LLM: {attributes_for_search}")
+        
+        # ===== STEP 4: Crawl from external sources =====
         logger.info(f"[CASE 8] 🔍 Crawling for products in category '{category_name}' via CrawlService...")
         
         try:
             # Crawl using the new category name via Crawl Service (8003)
-            # Note: category_id will be created in STEP 4, so use placeholder for now
+            # Note: category_id will be created in STEP 5, so use placeholder for now
+            logger.info(f"[CASE 8] 📤 Sending to CrawlService with attributes: {attributes_for_search}")
             crawled_products = await self.crawl_service_client.crawl(
                 category=category_name,
                 category_id=0,  # Will be assigned after category creation
-                attributes={}
+                attributes=attributes_for_search
             )
             
             if not crawled_products:
@@ -1072,15 +1350,17 @@ Format:
                 "state": conversation_state
             }
         
-        # ===== STEP 4: Save to database with new category =====
+        # ===== STEP 5: Save to Product Service with new category =====
         try:
-            # Create category record in DB
-            category_id = self.product_repository.create_category(
-                category_name=category_name,
-                display_name=display_name,
-                schema={"attributes": attributes}
+            # Create category record via Product Service
+            category_response = await self.product_service_client.create_category(
+                name=category_name,
+                description="",
+                category_type="general",
+                attributes=[attr["name"] for attr in attributes]
             )
-            logger.info(f"[CASE 8] ✅ Created category in DB: id={category_id}")
+            category_id = category_response.get("id", 0)
+            logger.info(f"[CASE 8] ✅ Created category via Product Service: id={category_id}")
             
             # Save crawled products to Product Service
             try:
@@ -1098,11 +1378,11 @@ Format:
             category_id = 0
             # Don't fail - we can still return results even if DB save failed
         
-        # ===== STEP 5: Update conversation state =====
+        # ===== STEP 6: Update conversation state =====
         conversation_state["has_category"] = True
         conversation_state["category"] = category_name
         conversation_state["category_id"] = category_id if category_id else None
-        conversation_state["extracted"] = {}  # No attributes extracted yet
+        conversation_state["extracted"] = attributes_for_search  # Store extracted attributes
         
         # Return crawled products directly (already complete from CrawlService)
         return await self._process_crawl_results(crawled_products, conversation_state, case=8, source="crawl")
@@ -1308,22 +1588,103 @@ Return ONLY valid JSON, no markdown."""
         
         categories_text = ", ".join(AVAILABLE_CATEGORIES)
         
-        prompt = f"""User wants: "{user_input}"
+        prompt = f"""
+You are a STRICT PRODUCT CATEGORY CLASSIFIER for an e-commerce system.
 
-Available categories: {categories_text}
+Your task is ONLY to classify the DIRECT product category mentioned in the query.
 
-Suggest 3-5 best matching categories with reasons and key attributes for filtering.
+==================================================
+USER QUERY
+==================================================
 
-Format your response as JSON:
+"{user_input}"
+
+==================================================
+AVAILABLE CATEGORIES
+==================================================
+
+{categories_text}
+
+==================================================
+CRITICAL RULES
+==================================================
+
+- Choose ONLY categories from AVAILABLE CATEGORIES
+- DO NOT invent new categories
+- DO NOT suggest related products
+- DO NOT suggest complementary products
+- DO NOT use associative reasoning
+- The category must represent the literal product mentioned
+
+BAD EXAMPLES:
+- "tivi" -> điện thoại ❌
+- "chảo" -> bột giặt ❌
+- "iphone" -> tai nghe ❌
+
+GOOD EXAMPLES:
+- "tivi" -> điện tử ✅
+- "chảo" -> đồ gia dụng ✅
+- "iphone" -> điện thoại ✅
+
+==================================================
+TASK
+==================================================
+
+1. Find the SINGLE BEST matching category
+2. Optionally return 2-3 backup category candidates
+3. Suggest practical filtering attributes
+
+==================================================
+ATTRIBUTE RULES
+==================================================
+
+GOOD attributes:
+- brand
+- size
+- color
+- material
+- ram
+- storage
+- screen_size
+- battery
+- capacity
+
+BAD attributes:
+- phù_hợp_học_tập
+- chất_lượng_tốt
+- tiện_lợi
+- usage
+- purpose
+
+==================================================
+OUTPUT FORMAT
+==================================================
+
+Return ONLY valid JSON.
+
 {{
   "suggestions": [
-    {{"name": "category_name", "reason": "why this matches", "attributes": ["attr1", "attr2", ...]}},
-    ...
+    {{
+      "name": "category_name",
+      "reason": "short literal classification reason",
+      "attributes": ["brand", "size", "color"]
+    }}
   ],
-  "best_match": "best_category"
+  "best_match": "best_category",
+  "confidence": 0.95
 }}
 
-Be concise. Attributes should be practical filtering criteria."""
+==================================================
+IMPORTANT
+==================================================
+
+- Return ONLY JSON
+- No markdown
+- No explanations
+- No extra text
+- best_match MUST exist in AVAILABLE_CATEGORIES
+- suggestions MUST contain ONLY AVAILABLE_CATEGORIES
+"""
         
         try:
             response = call_openai(
@@ -1389,7 +1750,332 @@ Be concise. Attributes should be practical filtering criteria."""
         except Exception as e:
             logger.info(f"DEBUG: LLM detection error: {e}")
             return {"suggested_categories": [], "best_match": None, "confidence": 0.0, "method": "llm"}
-        
+    
+    def _comprehensive_intent_analysis(
+    self,
+    merged_intent: str,
+    conversation_state: Dict[str, Any] = None
+) -> Dict[str, Any]:
+        """
+        Single-pass comprehensive intent analysis.
+
+        ONE LLM CALL ONLY:
+        - Category classification
+        - Attribute extraction
+        - Confidence estimation
+
+        Returns:
+        {
+            "merged_intent": str,
+            "category": str,
+            "extracted_attributes": list,
+            "confidence": float,
+            "category_changed": bool,
+            "method": "comprehensive_llm"
+        }
+        """
+
+        import json
+        import re
+
+        logger.info(
+            f"[Orchestrator] 🧠 Comprehensive analysis for intent: '{merged_intent}'"
+        )
+
+        categories_text = ", ".join(AVAILABLE_CATEGORIES)
+
+        prompt = f"""
+You are an AI system for E-COMMERCE PRODUCT UNDERSTANDING.
+
+Your task is to identify:
+1. The literal/concrete product category mentioned by the user
+2. Useful filterable product attributes
+3. Realistic user constraints/preferences
+
+==================================================
+USER QUERY
+==================================================
+
+"{merged_intent}"
+
+==================================================
+KNOWN CATEGORIES (REFERENCE ONLY)
+==================================================
+
+{categories_text}
+
+IMPORTANT:
+- KNOWN CATEGORIES are only references/examples
+- You MAY create a NEW category if needed
+- DO NOT force the query into an unrelated existing category
+- Prefer literal product categories
+
+==================================================
+CATEGORY RULES
+==================================================
+
+If the user mentions a CONCRETE PRODUCT TYPE,
+the category MUST be that product itself.
+
+GOOD EXAMPLES:
+- "tivi samsung" -> "tivi"
+- "iphone 15" -> "điện thoại"
+- "macbook air" -> "laptop"
+- "chảo chống dính" -> "chảo"
+- "nồi cơm điện" -> "nồi cơm điện"
+
+BAD EXAMPLES:
+- "tivi" -> "điện thoại"
+- "chảo" -> "bột giặt"
+- "iphone" -> "tai nghe"
+
+Use broad/general categories ONLY for abstract queries.
+
+ABSTRACT QUERY EXAMPLES:
+- "đồ công nghệ"
+- "quà cho mẹ"
+- "đồ học tập"
+
+==================================================
+ATTRIBUTE RULES
+==================================================
+
+Attributes must be:
+- practical
+- searchable
+- filterable
+- product-specific
+
+Prefer:
+- technical attributes
+- physical properties
+- measurable values
+
+GOOD ATTRIBUTES:
+- ram
+- storage
+- cpu
+- screen_size
+- battery
+- material
+- color
+- size
+- weight
+- capacity
+- resolution
+- refresh_rate
+
+BAD ATTRIBUTES:
+- good_quality
+- usage
+- purpose
+- target_user
+- phù_hợp_học_tập
+
+==================================================
+VALUE RULES
+==================================================
+
+- Preserve explicitly mentioned values
+- Infer only broad realistic constraints
+- DO NOT hallucinate exact specs
+
+GOOD:
+- ">=16GB"
+- "55 inch"
+- "OLED"
+- "15-25 triệu"
+
+BAD:
+- "Intel i7-13700H"
+- "RTX 4070"
+
+unless explicitly mentioned.
+
+==================================================
+KEYWORD RULES
+==================================================
+
+- Include Vietnamese + English variants
+- Keywords should be short and searchable
+
+GOOD:
+["tivi", "tv", "smart tv"]
+
+==================================================
+REGEX RULES
+==================================================
+
+- value_pattern must be SIMPLE regex only
+- Keep regex practical for text matching
+- Avoid complex regex syntax
+
+GOOD:
+"[0-9]+\\\\s?gb"
+
+==================================================
+OUTPUT FORMAT
+==================================================
+
+Return ONLY valid JSON.
+
+{{
+  "category": "literal product category",
+  "attributes": [
+    {{
+      "name": "screen_size",
+      "keywords": ["inch", "screen", "màn hình"],
+      "value_pattern": "[0-9]+\\\\s?inch",
+      "user_value": "55 inch"
+    }}
+  ],
+  "confidence": 0.95,
+  "category_changed": false,
+  "is_new_category": false
+}}
+
+==================================================
+IMPORTANT
+==================================================
+
+- Return ONLY JSON
+- No markdown
+- No explanations
+- No comments
+- No extra text
+- category should represent the literal product type
+- If category is not in KNOWN CATEGORIES,
+  you may still return it as a NEW category
+"""
+
+        try:
+            response = call_openai(
+                prompt,
+                model="gpt-4o-mini",
+                temperature=0.0,
+                max_tokens=500
+            )
+
+            if not response:
+                logger.warning(
+                    "[Orchestrator] OpenAI returned empty response"
+                )
+
+                return {
+                    "merged_intent": merged_intent,
+                    "category": "",
+                    "extracted_attributes": [],
+                    "confidence": 0.0,
+                    "category_changed": False,
+                    "method": "comprehensive_llm"
+                }
+
+            response_text = response.strip()
+
+            logger.info(
+                f"[Orchestrator] 🔍 Raw LLM Response:\n{response_text}"
+            )
+
+            # Remove markdown code block if exists
+            json_text = response_text
+
+            if json_text.startswith("```"):
+                json_text = re.sub(
+                    r"^```(?:json)?\n",
+                    "",
+                    json_text
+                )
+
+                json_text = re.sub(
+                    r"\n```$",
+                    "",
+                    json_text
+                )
+
+            data = json.loads(json_text)
+
+            # ===== VALIDATION =====
+
+            category = data.get("category", "").strip()
+            confidence = float(data.get("confidence", 0.0))
+            attributes = data.get("attributes", [])
+
+            # Validate attributes structure
+            valid_attributes = []
+
+            if isinstance(attributes, list):
+                for attr in attributes:
+
+                    if not isinstance(attr, dict):
+                        continue
+
+                    name = attr.get("name")
+
+                    if not name:
+                        continue
+
+                    valid_attributes.append({
+                        "name": str(name).strip().lower(),
+                        "keywords": attr.get("keywords", []),
+                        "value_pattern": attr.get("value_pattern", ""),
+                        "user_value": attr.get("user_value")
+                    })
+
+            logger.info("[Orchestrator] 📊 Parsed Analysis:")
+            logger.info(f"  - Category: {category}")
+            logger.info(f"  - Confidence: {confidence}")
+            logger.info(f"  - Attributes Count: {len(valid_attributes)}")
+
+            for attr in valid_attributes:
+                logger.info(
+                    f"    • {attr['name']} = {attr.get('user_value')}"
+                )
+
+            return {
+                "merged_intent": merged_intent,
+                "category": category,
+                "extracted_attributes": valid_attributes,
+                "confidence": confidence,
+                "category_changed": bool(
+                    data.get("category_changed", False)
+                ),
+                "method": "comprehensive_llm"
+            }
+
+        except json.JSONDecodeError as e:
+
+            logger.warning(
+                f"[Orchestrator] JSON parse error: {e}"
+            )
+
+            logger.warning(
+                f"[Orchestrator] Raw response causing parse failure:\n{response_text}"
+            )
+
+            return {
+                "merged_intent": merged_intent,
+                "category": "",
+                "extracted_attributes": [],
+                "confidence": 0.0,
+                "category_changed": False,
+                "method": "comprehensive_llm"
+            }
+
+        except Exception as e:
+
+            logger.error(
+                f"[Orchestrator] Comprehensive analysis error: {e}",
+                exc_info=True
+            )
+
+            return {
+                "merged_intent": merged_intent,
+                "category": "",
+                "extracted_attributes": [],
+                "confidence": 0.0,
+                "category_changed": False,
+                "method": "comprehensive_llm"
+            }
     
     async def process_query(
         self,
@@ -1439,6 +2125,31 @@ Be concise. Attributes should be practical filtering criteria."""
             conversation_state["last_user_input"] = user_input  # Track for intent shift detection
         else:
             logger.info(f"[Orchestrator] ℹ️  Using cached detected_intent (has_category=True)")
+        
+        # STEP 0.5: ⭐ Comprehensive Intent Analysis (extract category + attributes via LLM)
+        # For first query: use user_input
+        # For follow-up: use merged_intent from analyze_processor (already in conversation_state)
+        merged_intent = conversation_state.get("merged_intent", user_input)
+        
+        logger.info(f"\n[Orchestrator] 🧠 Extracting category + attributes (LLM call)...")
+        comprehensive = self._comprehensive_intent_analysis(merged_intent, conversation_state)
+        conversation_state["comprehensive_analysis"] = comprehensive
+        logger.info(f"[Orchestrator] ✅ Extraction done:")
+        logger.info(f"  - Category: {comprehensive['category']}")
+        # Handle both list (from LLM) and dict formats
+        attrs = comprehensive.get('extracted_attributes', [])
+        attrs_display = list(attrs.keys()) if isinstance(attrs, dict) else [attr.get('name') for attr in attrs] if isinstance(attrs, list) else []
+        logger.info(f"  - Extracted Attributes: {attrs_display}")
+        
+        # Store merged_intent for use by handlers
+        conversation_state["merged_intent"] = comprehensive.get("merged_intent", user_input)
+        
+        # 🔧 CRITICAL FIX: Sync detected_intent with comprehensive analysis category
+        # _comprehensive_intent_analysis returns MORE ACCURATE category (e.g., "điện thoại" vs "công nghệ")
+        # Update detected_intent so classify_request_case() and handlers use the correct category
+        if comprehensive.get("category"):
+            conversation_state["detected_intent"]["categories"] = [comprehensive["category"]]
+            logger.info(f"[Orchestrator] 🔄 Updated detected_intent.categories: {[comprehensive['category']]}")
         
         # STEP 1: Classify request into one of 7 cases
         case_info = self.classify_request_case(user_input, conversation_state)
@@ -1491,7 +2202,8 @@ Be concise. Attributes should be practical filtering criteria."""
         self,
         category: str,
         attributes: Dict[str, Any],
-        conversation_state: Dict[str, Any]
+        conversation_state: Dict[str, Any],
+        category_id: int = None
     ) -> List[Dict[str, Any]]:
         """
         Smart crawl: Query DB first → in-memory filter → crawl if needed
@@ -1502,16 +2214,22 @@ Be concise. Attributes should be practical filtering criteria."""
         3. If not found → crawl from external sources
         4. Save crawled results to DB for future queries
         
+        Args:
+            category: Product category
+            attributes: Filtering attributes
+            conversation_state: Conversation state (for cache tracking)
+            category_id: Optional category ID (if not in conversation_state)
+        
         Returns:
             List of products (from DB or crawl)
         """
         
-        category_id = conversation_state.get("category_id")
+        category_id = category_id or conversation_state.get("category_id")
         
-        # Step 1: Try DB first (fast!)
+        # Step 1: Try Product Service first (fast!)
         if category_id:
-            logger.info(f"[SMART_CRAWL] 🔍 Querying database (category_id={category_id})...")
-            db_products = self.product_repository.query_by_category_and_attributes(
+            logger.info(f"[SMART_CRAWL] 🔍 Querying Product Service (category_id={category_id})...")
+            db_products = await self.product_service_client.get_products_by_category_and_attributes(
                 category_id=category_id,
                 attributes=attributes,
                 limit=100
@@ -1530,6 +2248,7 @@ Be concise. Attributes should be practical filtering criteria."""
         logger.info(f"[SMART_CRAWL] ❌ DB MISS! Crawling from external sources via CrawlService...")
         conversation_state["cache_misses"] = conversation_state.get("cache_misses", 0) + 1
         
+        logger.info(f"[SMART_CRAWL] 📤 Sending to CrawlService with attributes: {attributes}")
         crawled_products = await self.crawl_service_client.crawl(
             category=category,
             category_id=category_id if category_id else 0,
@@ -1552,6 +2271,7 @@ Be concise. Attributes should be practical filtering criteria."""
                 logger.warning(f"[SMART_CRAWL] ⚠️ Failed to save products via Product Service: {e}")
         
         return crawled_products
+
     
     def _filter_products_in_memory(
         self,

@@ -311,6 +311,92 @@ async def enqueue_single_crawl(
     finally:
         db.close()
 
+@app.post("/api/crawl/enqueue-product-details")
+async def enqueue_product_details_crawl(
+    product_ids: List[str] = Body(..., embed=True),
+    schema: Optional[Dict[str, Any]] = Body(None, embed=True),
+    max_concurrent: int = Body(3, embed=True),
+    priority: str = Body("normal", embed=True),
+    max_retries: int = Body(3, embed=True)
+):
+    """
+    Enqueue product details crawl task with attribute extraction
+    
+    Example:
+    {
+        "product_ids": ["276183351", "276183352", "276183353"],
+        "schema": {
+            "category": "laptop",
+            "attributes": [
+                {
+                    "name": "RAM",
+                    "keywords": ["ram", "bộ nhớ"],
+                    "value_pattern": "(\\d+)\\s*(?:gb|ddr)"
+                }
+            ]
+        },
+        "max_concurrent": 3,
+        "priority": "normal",
+        "max_retries": 3
+    }
+    
+    Returns:
+        {
+            "task_id": "product_detail_...",
+            "status": "pending",
+            "products_count": 3
+        }
+    """
+    db = SessionLocal()
+    try:
+        # Generate unique task ID
+        task_id = f"product_detail_{uuid.uuid4().hex[:12]}"
+        
+        # Create task record in database
+        task = CrawlTask(
+            task_id=task_id,
+            category="product_details",
+            category_id=0,  # Not used for this task type
+            attributes={
+                "product_ids": product_ids,
+                "schema": schema,
+                "max_concurrent": max_concurrent
+            },
+            status="pending",
+            priority=priority,
+            max_retries=max_retries,
+            retry_count=0
+        )
+        db.add(task)
+        db.commit()
+        
+        # Enqueue to RabbitMQ
+        producer = get_rabbitmq_producer()
+        if producer:
+            task_data = {
+                "product_ids": product_ids,
+                "schema": schema,
+                "max_concurrent": max_concurrent,
+                "task_type": "product_details"
+            }
+            producer.enqueue_task(task_id, task_data, priority)
+            logger.info(f"🚀 Product details crawl task enqueued: {task_id} for {len(product_ids)} products")
+        else:
+            logger.warning(f"RabbitMQ producer not available, task saved locally: {task_id}")
+        
+        return {
+            "task_id": task_id,
+            "status": "pending",
+            "products_count": len(product_ids),
+            "estimated_completion": (datetime.utcnow() + timedelta(minutes=3)).isoformat()
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ Enqueue product details crawl failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
 @app.get("/api/crawl/status/{task_id}")
 async def get_task_status(task_id: str):
     """Get status of a crawl task"""

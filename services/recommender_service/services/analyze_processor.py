@@ -83,12 +83,17 @@ class AnalyzeProcessor:
             is_new_query = not conversation_id or "search_history" not in conversation_state
             
             if not is_new_query and conversation_state.get("search_history"):
-                logger.info(f"[Job {job_id}] 🔄 RECONSTRUCTING INTENT")
+                logger.info(f"[Job {job_id}] 🔄 RECONSTRUCTING INTENT (merge only)")
                 result_dict = self.context_analyzer.reconstruct_intent(
                     user_input=user_input,
                     conversation_state=conversation_state
                 )
-                user_input_to_process = result_dict["intent"]
+                merged_intent = result_dict["intent"]
+                user_input_to_process = merged_intent
+                
+                # ⭐ Store merged intent for orchestrator to use (orchestrator will extract attributes)
+                conversation_state["merged_intent"] = merged_intent
+                logger.info(f"[Job {job_id}] ✅ Intent merged: {merged_intent}")
                 
                 if result_dict.get("category_changed"):
                     logger.info(f"[Job {job_id}] 🔄 CATEGORY CHANGE DETECTED")
@@ -98,7 +103,7 @@ class AnalyzeProcessor:
                     conversation_state["has_category"] = False
             
             # ====== STEP 3: Process with orchestrator ======
-            logger.info(f"[Job {job_id}] Processing: '{user_input_to_process}'")
+            logger.info(f"[Job {job_id}] Processing: '{user_input_to_process}' (orchestrator will extract attributes)")
             
             orch_result = await self.orchestrator.process_query(
                 user_input=user_input_to_process,

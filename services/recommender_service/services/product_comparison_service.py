@@ -41,7 +41,7 @@ class ProductComparisonService:
         self.llm_utils = llm_utils
         self.crawl_timeout = int(os.getenv("CRAWL_TIMEOUT", "60"))  # seconds
 
-    async def compare_products(
+    async def  compare_products(
         self,
         product_ids: List[int],
         llm_model: str = "gpt-4o-mini",

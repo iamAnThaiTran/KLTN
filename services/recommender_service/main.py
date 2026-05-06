@@ -244,27 +244,6 @@ async def get_job_status(job_id: str):
             "status": "unknown"
         }
 
-@app.post("/api/query")
-async def process_query(
-    request: QueryRequest,
-    db: Session = Depends(get_db)
-):
-    """Process user query"""
-    logger.info(f"[/api/query] Processing: {request.user_input}")
-    
-    conversation_id = request.conversation_id or session_manager.create_session()
-    conversation_state = session_manager.get_session(conversation_id)
-    
-    result = await orchestrator.process_query(
-        user_input=request.user_input,
-        conversation_state=conversation_state
-    )
-    
-    session_manager.set_session(conversation_id, result.get("state"))
-    result["conversation_id"] = conversation_id
-    
-    return result
-
 @app.post("/api/respond")
 async def respond_to_question(request: ResponseUpdate):
     """User responds to clarification question"""

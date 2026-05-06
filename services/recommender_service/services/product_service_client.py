@@ -253,6 +253,32 @@ class ProductServiceClient:
             json=payload
         )
     
+    async def save_sku_attributes(
+        self,
+        sku_code: str,
+        attributes: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Save/update attributes for a specific SKU
+        
+        Args:
+            sku_code: SKU code/ID (e.g., spid from Tiki)
+            attributes: Dictionary of attribute name-value pairs
+            Example: {"RAM": "8GB", "CPU": "Intel i5", "Storage": "512GB SSD"}
+        
+        Returns:
+            {
+                "status": "saved",
+                "sku_code": "...",
+                "attributes_count": 3
+            }
+        """
+        return await self._request_with_retry(
+            "POST",
+            f"/api/skus/{sku_code}/attributes",
+            json={"attributes": attributes}
+        )
+    
     # ========================================================================
     # Filter/Attribute APIs
     # ========================================================================
@@ -278,6 +304,51 @@ class ProductServiceClient:
             f"/api/categories/{category_id}/filter",
             json=filters
         )
+    
+    async def get_products_by_category_and_attributes(
+        self,
+        category_id: int,
+        attributes: Optional[Dict[str, Any]] = None,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Query products by category_id + optional attributes/filters
+        
+        ✅ RECOMMENDED: Use this instead of direct DB queries
+        Properly integrates with Product Service via HTTP
+        
+        Args:
+            category_id: Category ID from database
+            attributes: Filter attributes (brand, color, size, price_min, price_max, etc.)
+            limit: Max results (default 50)
+        
+        Returns:
+            List of matching products with SKU details
+        
+        Example:
+            products = await client.get_products_by_category_and_attributes(
+                category_id=5,
+                attributes={"brand": "Nike", "color": "đen", "price_max": 5000000},
+                limit=50
+            )
+        """
+        if attributes is None:
+            attributes = {}
+        
+        payload = {
+            "category_id": category_id,
+            "attributes": attributes,
+            "limit": limit
+        }
+        
+        response = await self._request_with_retry(
+            "POST",
+            "/api/products/query-by-category",
+            json=payload
+        )
+        
+        # Extract products list from response
+        return response.get("products", [])
     
     async def get_filters(self, category_name: str) -> List[Dict[str, Any]]:
         """

@@ -11,12 +11,14 @@ from typing import Dict, Any
 import json
 import time
 import asyncio
+import httpx
 
 # Add service directory to path
 service_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, service_dir)
 
 from crawlers.multi_crawler import MultiCrawler
+from crawlers.tiki.product_detail_crawler import ProductDetailCrawler
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -42,6 +44,9 @@ RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
 RABBITMQ_PORT = int(os.getenv("RABBITMQ_PORT", "5672"))
 RABBITMQ_USER = os.getenv("RABBITMQ_USER", "guest")
 RABBITMQ_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "guest")
+
+PRODUCT_SERVICE_HOST = os.getenv("PRODUCT_SERVICE_HOST", "product-service")
+PRODUCT_SERVICE_PORT = int(os.getenv("PRODUCT_SERVICE_PORT", "8001"))
 
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
@@ -252,34 +257,127 @@ def execute_single_product_crawl(task_data: Dict[str, Any]) -> Dict[str, Any]:
         }
 
 
-def _mock_product_snapshot(product_id: int) -> Dict[str, Any]:
-    """Create mock product snapshot for testing"""
-    return {
-        "product_id": product_id,
-        "name": f"Mock Product {product_id}",
-        "brand": "Mock Brand",
-        "price": 1000000,
-        "rating_avg": 4.5,
-        "rating_count": 100,
-        "reviews": [
-            {
-                "rating": 5,
-                "title": "Sản phẩm tốt",
-                "content": "Chất lượng rất tốt, đáng tiền",
-                "is_purchased": True
-            }
-        ],
-        "rating_breakdown": {
-            "5": {"count": 50, "percent": 50},
-            "4": {"count": 30, "percent": 30},
-            "3": {"count": 15, "percent": 15},
-            "2": {"count": 3, "percent": 3},
-            "1": {"count": 2, "percent": 2}
-        },
-        "specs": [],
-        "thumbnail": "",
-        "seller_id": "1"
-    }
+def execute_product_details_crawl(task_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Execute product details crawl with attribute extraction
+    
+    Args:
+        task_data: {
+            "product_ids": ["276183351", "276183352", ...],
+            "schema": {...},
+            "max_concurrent": 3
+        }
+    
+    Returns:
+        Dictionary with crawl results and extracted attributes
+    """
+    try:
+        product_ids = task_data.get("product_ids", [])
+        schema = task_data.get("schema")
+        max_concurrent = task_data.get("max_concurrent", 3)
+        logger.info(
+    f"""
+📦 execute_product_details_crawl called
+- product_ids_count: {len(product_ids)}
+- product_ids_sample: {product_ids[:5]}
+- schema_exists: {bool(schema)}
+- max_concurrent: {max_concurrent}
+- full_task_data: {task_data}
+"""
+)
+        
+        logger.info(f"📦 Product details crawl: {len(product_ids)} products, schema={bool(schema)}")
+        
+        # Run async crawler
+        crawler = ProductDetailCrawler()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        results = loop.run_until_complete(
+            crawler.crawl_multiple_products(
+                product_ids=product_ids,
+                schema=schema,
+                max_concurrent=max_concurrent
+            )
+        )
+        
+        loop.run_until_complete(crawler.close())
+        loop.close()
+        
+        # Process results
+        success_count = sum(1 for r in results if r.get("status") == "success")
+        error_count = len(results) - success_count
+        
+        logger.info(f"✅ Product details crawl complete: {success_count} success, {error_count} errors")
+        
+        return {
+            "status": "success",
+            "results": results,
+            "total": len(results),
+            "success_count": success_count,
+            "error_count": error_count,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    
+    except Exception as e:
+        logger.error(f"❌ Product details crawl error: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e),
+            "results": []
+        }
+
+
+# ============================================================================
+# Product Service Integration - Save Attributes
+# ============================================================================
+
+def save_sku_attributes_to_product_service(
+    sku_code: str,
+    attributes: Dict[str, Any],
+    product_service_host: str = None,
+    product_service_port: int = None,
+    timeout: float = 10.0
+) -> bool:
+    """
+    Save SKU attributes to Product Service via HTTP
+    
+    Args:
+        sku_code: SKU code (e.g., spid from Tiki)
+        attributes: Dictionary of attribute name-value pairs
+        product_service_host: Product Service hostname (defaults to env var)
+        product_service_port: Product Service port (defaults to env var)
+        timeout: HTTP request timeout
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # Use environment variables if not provided
+        host = product_service_host or PRODUCT_SERVICE_HOST
+        port = product_service_port or PRODUCT_SERVICE_PORT
+        
+        url = f"http://{host}:{port}/api/skus/{sku_code}/attributes"
+        payload = {"attributes": attributes}
+        
+        # Synchronous HTTP call
+        response = httpx.post(
+            url,
+            json=payload,
+            timeout=timeout
+        )
+        
+        if response.status_code == 200:
+            logger.info(f"✅ Saved {len(attributes)} attributes for SKU: {sku_code}")
+            return True
+        else:
+            logger.warning(f"⚠️ Failed to save attributes for SKU {sku_code}: HTTP {response.status_code}")
+            return False
+    
+    except Exception as e:
+        logger.error(f"❌ Error saving attributes for SKU {sku_code}: {e}")
+        return False
+
 
 # ============================================================================
 # Task Processor
@@ -311,9 +409,52 @@ def process_task(task_message: Dict[str, Any]) -> bool:
         db.commit()
         
         logger.info(f"Starting task: {task_id}")
+        logger.info(f"🔍 Task category: {task.category!r} | attributes: {list(task.attributes.keys()) if task.attributes else 'None'}")
         
         # Route based on task type
-        if task.category == "single_product":
+        if task.category == "product_details":
+            # 🆕 Product details crawl with attribute extraction
+            result = execute_product_details_crawl({
+                "product_ids": task.attributes.get("product_ids", []),
+                "schema": task.attributes.get("schema"),
+                "max_concurrent": task.attributes.get("max_concurrent", 3)
+            })
+            
+            # 🆕 Save extracted attributes to Product Service
+            if result.get("status") == "success":
+                logger.info(f"💾 Saving extracted attributes to Product Service...")
+                attributes_saved = 0
+                attributes_failed = 0
+                
+                for crawl_result in result.get("results", []):
+                    if crawl_result.get("status") == "success":
+                        # Bug 2 fix: lấy product_id từ product, không phải top-level spid
+                        product_id = crawl_result.get("product", {}).get("product_id")
+                        spid = crawl_result.get("product", {}).get("spid")
+                        extracted_attrs = crawl_result.get("extracted_attributes", {})
+
+                        logger.info(f"🔍 product_id={product_id}, attrs keys={list(extracted_attrs.keys())}")
+
+                        # Bug 1 sẽ thấy rõ qua log này: attrs keys=[] nếu schema=None
+
+                        if spid and extracted_attrs:
+                            success = save_sku_attributes_to_product_service(
+                                sku_code=str(spid),
+                                attributes=extracted_attrs
+                            )
+                            if success:
+                                attributes_saved += 1
+                            else:
+                                attributes_failed += 1
+
+                
+                logger.info(f"📊 Attributes saved: {attributes_saved} success, {attributes_failed} failed")
+                
+                # Add summary to result
+                result["attributes_saved"] = attributes_saved
+                result["attributes_failed"] = attributes_failed
+        
+        elif task.category == "single_product":
             # Single product crawl with details + reviews
             result = execute_single_product_crawl({
                 "product_id": task.category_id,

@@ -17,6 +17,7 @@ import os
 from datetime import datetime
 import unicodedata
 import re
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -795,6 +796,253 @@ async def update_sku_price(sku_id: str, price: float = Body(..., embed=True), st
     except Exception as e:
         db.rollback()
         logger.error(f"Update SKU price failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+@app.post("/api/skus/{sku_code}/attributes")
+async def save_sku_attributes(sku_code: str, body: Dict[str, Any] = Body(...)):
+    """
+    Save/update attributes for a specific SKU
+    
+    Args:
+        sku_code: SKU code (e.g., spid from Tiki)
+        body: {
+            "attributes": {
+                "RAM": "8GB",
+                "CPU": "Intel i5",
+                "Storage": "512GB SSD",
+                ...
+            }
+        }
+    
+    Returns:
+        {
+            "status": "saved",
+            "sku_code": "...",
+            "attributes_count": 3
+        }
+    """
+    db = SessionLocal()
+    try:
+        # Find SKU by sku_code
+        sku = db.query(SKU).filter(SKU.sku_code == sku_code).first()
+        if not sku:
+            logger.warning(f"SKU not found: {sku_code}")
+            raise HTTPException(status_code=404, detail=f"SKU not found: {sku_code}")
+        
+        attributes = body.get("attributes", {})
+        if not attributes:
+            return {
+                "status": "no_attributes",
+                "sku_code": sku_code,
+                "message": "No attributes provided"
+            }
+        
+        # Delete existing attributes first
+        from sqlalchemy import text as sql_text
+        db.execute(
+            sql_text("DELETE FROM sku_attributes WHERE sku_id = :sku_id"),
+            {"sku_id": sku.id}
+        )
+        
+        # Insert new attributes
+        for attr_name, attr_value in attributes.items():
+            # Convert value to string if it's a list or dict
+            if isinstance(attr_value, (list, dict)):
+                attr_value = json.dumps(attr_value, ensure_ascii=False)
+            else:
+                attr_value = str(attr_value)
+            
+            db.execute(
+                sql_text("""
+                    INSERT INTO sku_attributes (sku_id, attribute_name, attribute_value)
+                    VALUES (:sku_id, :attr_name, :attr_value)
+                """),
+                {
+                    "sku_id": sku.id,
+                    "attr_name": str(attr_name),
+                    "attr_value": attr_value
+                }
+            )
+        
+        sku.updated_at = datetime.utcnow()
+        db.commit()
+        
+        logger.info(f"✅ Saved {len(attributes)} attributes for SKU: {sku_code}")
+        
+        return {
+            "status": "saved",
+            "sku_code": sku_code,
+            "attributes_count": len(attributes)
+        }
+    
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ Error saving SKU attributes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+# ============================================================================
+# Product Query by Category & Attributes (for Recommender Service)
+# ============================================================================
+
+@app.post("/api/products/query-by-category")
+async def query_products_by_category(
+    body: Dict[str, Any] = Body(...)
+):
+    """
+    Query products by category_id + optional attributes/filters
+    
+    Called by Recommender Service to check DB before crawling.
+    If found in DB → return products
+    If NOT found in DB → return empty list, Recommender will crawl from external sources
+    
+    Request body:
+    {
+        "category_id": 5,
+        "attributes": {
+            "brand": "Nike",
+            "color": "đen",
+            "size": "42",
+            "price_min": 1000000,
+            "price_max": 5000000,
+            ...
+        },
+        "limit": 50
+    }
+    
+    Returns:
+    {
+        "products": [
+            {
+                "id": 123,
+                "product_id": "276183351",
+                "spid": "276183355",
+                "title": "Giày thể thao nam...",
+                "brand": "Nike",
+                "price": 620000,
+                "original_price": 1000000,
+                "stock": 10,
+                "thumbnail": "https://...",
+                "category_id": 5,
+                ...
+            },
+            ...
+        ]
+    }
+    """
+    db = SessionLocal()
+    try:
+        category_id = body.get("category_id")
+        attributes = body.get("attributes", {})
+        limit = body.get("limit", 50)
+        
+        if not category_id:
+            logger.warning("❌ category_id is required")
+            raise HTTPException(status_code=400, detail="category_id is required")
+        
+        # Verify category exists
+        category = db.query(Category).filter(Category.id == category_id).first()
+        if not category:
+            logger.warning(f"❌ Category {category_id} not found")
+            return {"products": []}  # Return empty list - will trigger crawl
+        
+        logger.info(f"🔍 Querying products: category={category.name} (id={category_id}), attributes={attributes}")
+        
+        # Start with products in this category
+        query = db.query(Product, SKU).join(
+            SKU, Product.id == SKU.product_id
+        ).filter(
+            Product.category_id == category_id
+        )
+        
+        # Apply attribute filters
+        
+        # Filter by brand if provided
+        if "brand" in attributes and attributes["brand"]:
+            brand_filter = attributes["brand"]
+            if isinstance(brand_filter, list):
+                query = query.filter(Product.brand.in_(brand_filter))
+            else:
+                query = query.filter(Product.brand == brand_filter)
+            logger.info(f"  Applied brand filter: {brand_filter}")
+        
+        # Filter by price range
+        price_min = attributes.get("price_min")
+        price_max = attributes.get("price_max")
+        
+        # Handle alternative price keys: 'gia', 'price', 'price_range'
+        if not price_min and not price_max:
+            for price_key in ["gia", "price", "price_range"]:
+                if price_key in attributes:
+                    price_value = attributes[price_key]
+                    if isinstance(price_value, list) and price_value:
+                        if isinstance(price_value[0], dict):
+                            price_min = price_value[0].get("min", price_min)
+                            price_max = price_value[0].get("max", price_max)
+                    elif isinstance(price_value, dict):
+                        price_min = price_value.get("min", price_min)
+                        price_max = price_value.get("max", price_max)
+        
+        if price_min is not None or price_max is not None:
+            if price_min and price_max:
+                query = query.filter(SKU.price.between(price_min, price_max))
+                logger.info(f"  Applied price filter: {price_min}-{price_max}")
+            elif price_min:
+                query = query.filter(SKU.price >= price_min)
+                logger.info(f"  Applied min price filter: >= {price_min}")
+            elif price_max:
+                query = query.filter(SKU.price <= price_max)
+                logger.info(f"  Applied max price filter: <= {price_max}")
+        
+        # Apply other attribute filters (exact match for now)
+        # These would be things like color, size, type, etc.
+        for attr_name, attr_value in attributes.items():
+            if attr_name not in ["brand", "price_min", "price_max", "gia", "price", "price_range"] and attr_value:
+                # Note: This requires sku_attributes table for dynamic attributes
+                # For now, just log and skip
+                logger.info(f"  ℹ️ Attribute filter '{attr_name}': {attr_value} (requires sku_attributes table)")
+        
+        # Execute query and limit results
+        results = query.order_by(SKU.id).limit(limit).all()
+        
+        if not results:
+            logger.info(f"✅ No products found in DB for category {category.name}")
+            return {"products": []}  # Return empty list - will trigger crawl
+        
+        # Format results
+        products_list = []
+        for product, sku in results:
+            products_list.append({
+                "id": product.id,
+                "product_id": product.tiki_product_id,
+                "spid": product.tiki_spid,
+                "title": product.title,
+                "brand": product.brand,
+                "price": float(sku.price),
+                "original_price": float(sku.original_price) if sku.original_price else None,
+                "stock": sku.stock,
+                "is_available": sku.is_available,
+                "thumbnail": product.thumbnail,
+                "product_url": product.product_url,
+                "category_id": product.category_id,
+                "source": product.source,
+                "rating": float(sku.rating) if sku.rating else 0,
+                "search_count": sku.search_count or 0
+            })
+        
+        logger.info(f"✅ Found {len(products_list)} products in DB")
+        return {"products": products_list}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Query products by category failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()

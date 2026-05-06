@@ -169,6 +169,45 @@ class CrawlServiceClient:
         
         return result.get("task_id") or result.get("id")
     
+    async def enqueue_product_detail_crawl(
+        self,
+        product_ids: List[str],
+        schema: Optional[Dict[str, Any]] = None,
+        max_concurrent: int = 3,
+        priority: str = "normal",
+        max_retries: int = 3
+    ) -> str:
+        """
+        Enqueue product details crawl task with attribute extraction via RabbitMQ
+        
+        🆕 Replaces direct ProductDetailCrawler usage - offloads to CrawlService
+        
+        Args:
+            product_ids: List of Tiki product IDs to crawl details for
+            schema: Optional dynamic schema for attribute extraction
+            max_concurrent: Max concurrent crawls
+            priority: Task priority (high, normal, low)
+            max_retries: Maximum retry attempts
+        
+        Returns:
+            task_id (str) - Use get_task_result() to poll for completion
+        """
+        payload = {
+            "product_ids": product_ids,
+            "schema": schema,
+            "max_concurrent": max_concurrent,
+            "priority": priority,
+            "max_retries": max_retries
+        }
+        
+        result = await self._request_with_retry(
+            "POST",
+            "/api/crawl/enqueue-product-details",
+            json=payload
+        )
+        
+        return result.get("task_id")
+    
     async def get_task_status(self, task_id: str) -> Dict[str, Any]:
         """
         Get status of a crawl task
