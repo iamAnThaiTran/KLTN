@@ -70,86 +70,230 @@ class RecommendationOrchestrator:
     # ====================================================================================
     
     def _build_crawl_schema_from_attributes(
-        self,
-        category: str,
-        attributes: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+    self,
+    category: str,
+    attributes: List[Dict[str, Any]]
+) -> Dict[str, Any]:
         """
-        Build crawl schema từ LLM extracted attributes (comprehensive_analysis).
-        
-        Input attributes format (từ LLM):
-            [
-                {"name": "công suất", "value": "700w"},
-                {"name": "dung tích", "value": "1.5 lít"},
-                {"name": "thương hiệu", "value": "philips"},
-            ]
-        
-        Output schema format (cho ProductDetailCrawler):
+        Build crawl schema từ LLM extracted attributes.
+
+        Hỗ trợ nhiều format input:
+
+        Format 1 (advanced LLM output):
+        [
             {
-                "category": "máy xay sinh tố",
-                "attributes": [
-                    {
-                        "name": "công suất",
-                        "keywords": ["công suất", "watt", "w"],
-                        "value_pattern": "(\\d+)\\s*(?:w|watt)"
-                    },
-                    ...
-                ]
+                "name": "power",
+                "keywords": ["watt", "công suất"],
+                "value_pattern": "[0-9]+\\s?watt",
+                "user_value": null
             }
+        ]
+
+        Format 2 (simple extracted attrs):
+        [
+            {"name": "công suất", "value": "700w"},
+            {"name": "dung tích", "value": "1.5 lít"}
+        ]
+
+        Format 3:
+        [
+            "công suất",
+            "dung tích"
+        ]
+
+        Output:
+        {
+            "category": "...",
+            "attributes": [
+                {
+                    "name": "...",
+                    "keywords": [...],
+                    "value_pattern": "..."
+                }
+            ]
+        }
         """
-        # Keyword + pattern defaults theo tên attribute phổ biến
+
+        logger.info(f"[Schema Builder] Raw attributes: {attributes}")
+
         ATTRIBUTE_DEFAULTS = {
-            "công suất":  {"keywords": ["công suất", "watt", "w"],          "value_pattern": r"(\d+)\s*(?:w|watt)"},
-            "watt":       {"keywords": ["công suất", "watt", "w"],          "value_pattern": r"(\d+)\s*(?:w|watt)"},
-            "dung tích":  {"keywords": ["dung tích", "ml", "lít", "bình"],  "value_pattern": r"(\d+(?:\.\d+)?)\s*(?:ml|lít|l)\b"},
-            "dung lượng": {"keywords": ["dung lượng", "ml", "lít"],         "value_pattern": r"(\d+(?:\.\d+)?)\s*(?:ml|lít|l)\b"},
-            "ram":        {"keywords": ["ram", "bộ nhớ", "ddr"],            "value_pattern": r"(\d+)\s*(?:gb|ddr)"},
-            "pin":        {"keywords": ["pin", "battery", "mah"],           "value_pattern": r"(\d+)\s*(?:mah|milli)"},
-            "màn hình":   {"keywords": ["màn hình", "display", "inch"],     "value_pattern": r"(\d+(?:\.\d+)?)\s*(?:inch|\")"},
-            "trọng lượng":{"keywords": ["trọng lượng", "khối lượng", "kg"],"value_pattern": r"(\d+(?:\.\d+)?)\s*kg"},
-            "kích thước": {"keywords": ["kích thước", "cm", "mm"],          "value_pattern": r"(\d+(?:\.\d+)?)\s*(?:cm|mm)"},
-            "thương hiệu":{"keywords": ["thương hiệu", "hãng", "brand"],    "value_pattern": r"([a-záàảãạăắặẳẵằâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ\w]+)"},
-            "màu":        {"keywords": ["màu", "màu sắc", "color"],         "value_pattern": r"(đen|trắng|xanh|đỏ|vàng|hồng|bạc|xám|nâu)"},
-            "tốc độ":     {"keywords": ["tốc độ", "rpm", "vòng"],           "value_pattern": r"(\d+)\s*(?:rpm|vòng)"},
-            "nhiệt độ":   {"keywords": ["nhiệt độ", "độ c", "°c"],          "value_pattern": r"(\d+)\s*(?:°c|độ c?)"},
-            "bảo hành":   {"keywords": ["bảo hành", "warranty"],            "value_pattern": r"(\d+)\s*(?:tháng|năm|month|year)"},
+            "công suất": {
+                "keywords": ["công suất", "watt", "w"],
+                "value_pattern": r"(\d+)\s*(?:w|watt)"
+            },
+            "power": {
+                "keywords": ["công suất", "watt", "w", "power"],
+                "value_pattern": r"(\d+)\s*(?:w|watt)"
+            },
+
+            "dung tích": {
+                "keywords": ["dung tích", "ml", "lít", "bình"],
+                "value_pattern": r"(\d+(?:\.\d+)?)\s*(?:ml|lít|l)\b"
+            },
+
+            "dung lượng": {
+                "keywords": ["dung lượng", "ml", "lít", "gb"],
+                "value_pattern": r"(\d+(?:\.\d+)?)\s*(?:ml|lít|l|gb)\b"
+            },
+
+            "ram": {
+                "keywords": ["ram", "bộ nhớ", "ddr"],
+                "value_pattern": r"(\d+)\s*(?:gb|ddr)"
+            },
+
+            "pin": {
+                "keywords": ["pin", "battery", "mah"],
+                "value_pattern": r"(\d+)\s*(?:mah|milli)"
+            },
+
+            "màn hình": {
+                "keywords": ["màn hình", "display", "inch"],
+                "value_pattern": r"(\d+(?:\.\d+)?)\s*(?:inch|\")"
+            },
+
+            "size": {
+                "keywords": ["inch", "màn hình", "kích thước", "size"],
+                "value_pattern": r"(\d+(?:\.\d+)?)\s*(?:inch|\")"
+            },
+
+            "kích thước": {
+                "keywords": ["kích thước", "cm", "mm"],
+                "value_pattern": r"(\d+(?:\.\d+)?)\s*(?:cm|mm)"
+            },
+
+            "trọng lượng": {
+                "keywords": ["trọng lượng", "khối lượng", "kg"],
+                "value_pattern": r"(\d+(?:\.\d+)?)\s*kg"
+            },
+
+            "thương hiệu": {
+                "keywords": ["thương hiệu", "hãng", "brand"],
+                "value_pattern": r"([a-záàảãạăắặẳẵằâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ\w]+)"
+            },
+
+            "brand": {
+                "keywords": ["thương hiệu", "hãng", "brand"],
+                "value_pattern": r"([a-zA-Z0-9\s]+)"
+            },
+
+            "màu": {
+                "keywords": ["màu", "màu sắc", "color"],
+                "value_pattern": r"(đen|trắng|xanh|đỏ|vàng|hồng|bạc|xám|nâu)"
+            },
+
+            "color": {
+                "keywords": ["màu", "color"],
+                "value_pattern": r"(black|white|blue|red|yellow|pink|silver|gray)"
+            },
+
+            "tốc độ": {
+                "keywords": ["tốc độ", "rpm", "vòng"],
+                "value_pattern": r"(\d+)\s*(?:rpm|vòng)"
+            },
+
+            "nhiệt độ": {
+                "keywords": ["nhiệt độ", "độ c", "°c"],
+                "value_pattern": r"(\d+)\s*(?:°c|độ c?)"
+            },
+
+            "bảo hành": {
+                "keywords": ["bảo hành", "warranty"],
+                "value_pattern": r"(\d+)\s*(?:tháng|năm|month|year)"
+            },
+
+            "type": {
+                "keywords": ["loại", "type"],
+                "value_pattern": None
+            }
         }
 
         schema_attributes = []
 
         for attr in attributes:
-            # attr có thể là dict {"name": ..., "value": ...} hoặc string
+
+            # =========================
+            # CASE 1: attr là dict
+            # =========================
             if isinstance(attr, dict):
+
                 attr_name = (attr.get("name") or "").strip().lower()
+
+                if not attr_name:
+                    logger.warning(f"[Schema Builder] Skip invalid attr: {attr}")
+                    continue
+
+                llm_keywords = attr.get("keywords")
+                llm_value_pattern = attr.get("value_pattern")
+
+                # Nếu LLM đã trả full schema → ưu tiên dùng luôn
+                if llm_keywords or llm_value_pattern:
+
+                    schema_attr = {
+                        "name": attr_name,
+                        "keywords": llm_keywords or [attr_name],
+                        "value_pattern": llm_value_pattern
+                    }
+
+                    schema_attributes.append(schema_attr)
+
+                    logger.info(
+                        f"[Schema Builder] Using LLM-provided schema for '{attr_name}'"
+                    )
+
+                    continue
+
+            # =========================
+            # CASE 2: attr là string
+            # =========================
             else:
                 attr_name = str(attr).strip().lower()
 
-            if not attr_name:
-                continue
+                if not attr_name:
+                    continue
 
-            # Lookup defaults, fallback về generic nếu không có sẵn
+            # =========================
+            # FALLBACK DEFAULTS
+            # =========================
             defaults = ATTRIBUTE_DEFAULTS.get(attr_name)
 
             if defaults:
-                schema_attributes.append({
+
+                schema_attr = {
                     "name": attr_name,
                     "keywords": defaults["keywords"],
                     "value_pattern": defaults["value_pattern"],
-                })
+                }
+
+                schema_attributes.append(schema_attr)
+
+                logger.info(
+                    f"[Schema Builder] Using default schema for '{attr_name}'"
+                )
+
             else:
-                # Generic fallback: dùng tên attribute làm keyword, pattern bắt số hoặc chữ
-                schema_attributes.append({
+
+                # Generic fallback
+                schema_attr = {
                     "name": attr_name,
                     "keywords": [attr_name],
                     "value_pattern": r"(\d+(?:\.\d+)?(?:\s*\w+)?)",
-                })
-                logger.debug(f"[CASE 1] ℹ️ No default pattern for '{attr_name}' → using generic pattern")
+                }
 
-        return {
+                schema_attributes.append(schema_attr)
+
+                logger.warning(
+                    f"[Schema Builder] No default schema for '{attr_name}' "
+                    f"→ using generic fallback"
+                )
+
+        final_schema = {
             "category": category,
             "attributes": schema_attributes,
         }
-    
+
+        logger.info(f"[Schema Builder] Final schema: {final_schema}")
+
+        return final_schema
     def _convert_comprehensive_attributes_to_dict(
         self,
         comprehensive_analysis: Dict[str, Any]
@@ -526,10 +670,13 @@ class RecommendationOrchestrator:
         
         # Extract product IDs (Tiki product_id)
         product_ids_to_crawl = []
+        product_spids_to_crawl = []
         for product in crawled_products:
             product_id = product.get("product_id")
+            spid = product.get("spid")
             if product_id:
                 product_ids_to_crawl.append(product_id)
+                product_spids_to_crawl.append(str(spid) if spid is not None else "")
         
         if product_ids_to_crawl:
             try:
@@ -563,6 +710,7 @@ class RecommendationOrchestrator:
                 # Enqueue product detail crawl task to RabbitMQ
                 task_id = await self.crawl_service_client.enqueue_product_detail_crawl(
                     product_ids=products_to_detail_crawl,
+                    spids=product_spids_to_crawl[: len(products_to_detail_crawl)],
                     schema=crawl_schema,
                     max_concurrent=3,
                     priority="high"
@@ -1589,103 +1737,372 @@ Return ONLY valid JSON, no markdown."""
         categories_text = ", ".join(AVAILABLE_CATEGORIES)
         
         prompt = f"""
-You are a STRICT PRODUCT CATEGORY CLASSIFIER for an e-commerce system.
+You are an AI system for E-COMMERCE PRODUCT UNDERSTANDING
+AND ATTRIBUTE EXTRACTION SCHEMA GENERATION.
 
-Your task is ONLY to classify the DIRECT product category mentioned in the query.
+Your task is to:
+1. Identify the literal/concrete product category
+2. Generate ONLY realistic, extractable product attributes
+3. Preserve explicit user constraints/preferences when present
+
+The generated schema will be used by a RULE-BASED
+ATTRIBUTE EXTRACTION ENGINE operating on raw Vietnamese
+e-commerce product descriptions.
 
 ==================================================
 USER QUERY
 ==================================================
 
-"{user_input}"
+"{merged_intent}"
 
 ==================================================
-AVAILABLE CATEGORIES
+KNOWN CATEGORIES (REFERENCE ONLY)
 ==================================================
 
 {categories_text}
 
+IMPORTANT:
+- KNOWN CATEGORIES are references/examples only
+- You MAY create a NEW category if needed
+- DO NOT force unrelated categories
+- Prefer literal/concrete product types
+
 ==================================================
-CRITICAL RULES
+CATEGORY RULES
 ==================================================
 
-- Choose ONLY categories from AVAILABLE CATEGORIES
-- DO NOT invent new categories
-- DO NOT suggest related products
-- DO NOT suggest complementary products
-- DO NOT use associative reasoning
-- The category must represent the literal product mentioned
-
-BAD EXAMPLES:
-- "tivi" -> điện thoại ❌
-- "chảo" -> bột giặt ❌
-- "iphone" -> tai nghe ❌
+If the user mentions a CONCRETE PRODUCT TYPE,
+the category MUST be that exact product type.
 
 GOOD EXAMPLES:
-- "tivi" -> điện tử ✅
-- "chảo" -> đồ gia dụng ✅
-- "iphone" -> điện thoại ✅
+- "tivi samsung" -> "tivi"
+- "iphone 15" -> "điện thoại"
+- "macbook air" -> "laptop"
+- "chảo chống dính" -> "chảo"
+- "nồi cơm điện" -> "nồi cơm điện"
+- "tai nghe bluetooth" -> "tai nghe"
+
+BAD EXAMPLES:
+- "tivi" -> "điện thoại"
+- "iphone" -> "tai nghe"
+- "tai nghe" -> "điện thoại"
+
+Use broad/general categories ONLY for abstract queries.
+
+ABSTRACT QUERY EXAMPLES:
+- "đồ công nghệ"
+- "quà cho mẹ"
+- "đồ học tập"
 
 ==================================================
-TASK
+ATTRIBUTE GENERATION RULES
 ==================================================
 
-1. Find the SINGLE BEST matching category
-2. Optionally return 2-3 backup category candidates
-3. Suggest practical filtering attributes
+Generate ONLY attributes that satisfy ALL conditions:
 
-==================================================
-ATTRIBUTE RULES
-==================================================
+1. Commonly written EXPLICITLY in Vietnamese
+   e-commerce product descriptions
 
-GOOD attributes:
-- brand
-- size
-- color
-- material
+2. Extractable using:
+   - regex matching
+   - keyword matching
+   - simple text parsing
+
+3. Useful for:
+   - product filtering
+   - comparison
+   - ranking
+   - matching
+
+4. Usually appear in:
+   - specifications
+   - product details
+   - technical information
+
+Prefer attributes with:
+- numeric values
+- measurable values
+- standardized units
+- finite enumerated values
+- technical specifications
+- physical properties
+
+GOOD ATTRIBUTES:
 - ram
 - storage
-- screen_size
+- cpu
+- gpu
 - battery
+- battery_capacity
+- screen_size
+- refresh_rate
+- resolution
+- material
+- color
+- weight
+- dimensions
 - capacity
+- wattage
+- voltage
+- bluetooth
+- wireless
+- jack_type
+- driver_size
+- impedance
+- frequency_range
 
-BAD attributes:
-- phù_hợp_học_tập
-- chất_lượng_tốt
-- tiện_lợi
+BAD ATTRIBUTES:
+- good_quality
+- premium
+- comfort
+- gaming_experience
+- suitable_for_students
 - usage
 - purpose
+- target_user
+- performance
+- đẹp
+- sang_trọng
+- hot
+- bán_chạy
+
+DO NOT generate:
+- subjective qualities
+- marketing language
+- inferred properties
+- emotional concepts
+- vague attributes
+- abstract shopping preferences
+
+==================================================
+USER VALUE RULES
+==================================================
+
+- Preserve explicitly mentioned values
+- Infer ONLY broad realistic constraints
+- DO NOT hallucinate exact specifications
+
+GOOD:
+- "16GB"
+- ">=16GB"
+- "55 inch"
+- "OLED"
+- "5000mAh"
+- "144Hz"
+- "3.5mm"
+- "15-25 triệu"
+
+BAD:
+- "Intel i7-13700H"
+- "RTX 4070"
+- "Sony WH-1000XM6"
+
+unless explicitly mentioned by the user.
+
+==================================================
+KEYWORD RULES
+==================================================
+
+- Include Vietnamese + English variants
+- Keywords should be:
+  - short
+  - searchable
+  - realistic
+  - commonly used in product descriptions
+
+GOOD:
+["tivi", "tv", "smart tv"]
+["pin", "battery", "mah"]
+["bluetooth", "không dây"]
+
+BAD:
+["âm thanh cực đỉnh"]
+["siêu bền"]
+["trải nghiệm gaming"]
+
+==================================================
+ATTRIBUTE TYPES
+==================================================
+
+Every attribute MUST declare an "attr_type".
+Choose from:
+
+  "numeric"    — has a measurable numeric value
+                 MUST have a specific value_pattern
+                 value_pattern must match the unit
+                 Examples: ram, storage, battery, screen_size, khối lượng
+
+  "enum"       — exactly ONE value from a fixed list
+                 MUST have a "vocabulary" list
+                 Set value_pattern to null
+                 Examples: color, loại da, loại tóc, chất liệu
+
+  "multi_enum" — MULTIPLE values from a fixed list
+                 MUST have a "vocabulary" list
+                 Set value_pattern to null
+                 Examples: thành phần, kết nối, tính năng, công dụng
+
+  "regex"      — free text with a SPECIFIC pattern
+                 MUST have a non-generic value_pattern
+                 Use ONLY when numeric/enum/multi_enum do not fit
+                 Examples: model_number, bluetooth_version
+
+CRITICAL:
+- NEVER set value_pattern to ".*" or ".+" for ANY attr_type
+- If you want to match free text → use multi_enum + vocabulary instead
+- If attr_type is "enum" or "multi_enum" → vocabulary is REQUIRED
+- If attr_type is "numeric" → value_pattern is REQUIRED and must be specific
+- If attr_type is "regex" → value_pattern is REQUIRED and must be specific
+
+==================================================
+VOCABULARY RULES
+==================================================
+
+For enum and multi_enum attributes, provide realistic
+vocabulary lists based on the product category.
+
+Keep vocabulary:
+- Realistic for the product category
+- 5-20 terms per attribute
+- Vietnamese preferred, English variants allowed
+- Lowercase only
+
+GOOD vocabulary for "thành phần" (dầu xả / skincare):
+["vitamin e", "keratin", "collagen", "argan oil", "biotin",
+ "protein", "caffeine", "niacinamide", "chiết xuất dừa",
+ "chiết xuất bơ", "panthenol", "axit amin", "tinh dầu"]
+
+GOOD vocabulary for "loại tóc":
+["tóc thường", "tóc khô", "tóc dầu", "tóc hư tổn",
+ "tóc nhuộm", "tóc uốn", "mọi loại tóc"]
+
+GOOD vocabulary for "mùi hương":
+["hoa hồng", "cam", "chanh", "bạc hà", "dừa",
+ "vanilla", "hoa nhài", "không mùi", "thảo mộc", "trái cây"]
+
+GOOD vocabulary for "loại da":
+["da dầu", "da khô", "da hỗn hợp", "da nhạy cảm",
+ "da thường", "mọi loại da"]
+
+GOOD vocabulary for "màu sắc" (điện tử):
+["đen", "trắng", "xanh", "đỏ", "bạc", "vàng",
+ "black", "white", "silver", "gold", "xanh navy", "xanh mint"]
+
+GOOD vocabulary for "kết nối" (tai nghe / điện tử):
+["bluetooth", "wifi", "usb-c", "jack 3.5mm", "nfc",
+ "không dây", "có dây", "usb", "lightning"]
+
+==================================================
+REGEX RULES
+==================================================
+
+Use "regex" attr_type ONLY for attributes that are:
+- numeric with units (prefer "numeric" instead)
+- structured codes or identifiers
+
+value_pattern must be SIMPLE and SPECIFIC.
+Avoid complex syntax. Minimize false positives.
+
+GOOD patterns:
+"[0-9]+\\\\s?gb"
+"[0-9]+\\\\s?(mah|mAh)"
+"[0-9]+\\\\s?(hz|Hz)"
+"[0-9]+\\\\s?inch"
+"[0-9]+\\\\s?ml"
+"[0-9]+\\\\s?(mg|g|kg)"
+"bluetooth\\\\s?[0-9]+\\\\.?[0-9]*"
+
+BAD patterns (NEVER use):
+".*"
+".+"
+"[a-zA-Z]+"
+"\\\\w+"
+"\\\\S+"
+
+==================================================
+ATTRIBUTE QUALITY RULES
+==================================================
+
+If an attribute cannot be reliably extracted
+from raw product text, DO NOT include it.
+
+Prefer FEWER high-quality attributes
+over MANY noisy attributes.
+
+Target:
+- high precision
+- realistic extraction
+- low hallucination
+- practical matching
 
 ==================================================
 OUTPUT FORMAT
 ==================================================
 
-Return ONLY valid JSON.
+Return ONLY valid JSON. No markdown. No explanation.
 
 {{
-  "suggestions": [
+  "category": "literal product category",
+  "attributes": [
     {{
-      "name": "category_name",
-      "reason": "short literal classification reason",
-      "attributes": ["brand", "size", "color"]
+      "name": "khối lượng",
+      "attr_type": "numeric",
+      "keywords": ["ml", "gram", "g", "khối lượng", "dung tích"],
+      "value_pattern": "[0-9]+\\\\s?ml",
+      "user_value": null
+    }},
+    {{
+      "name": "loại tóc",
+      "attr_type": "enum",
+      "keywords": ["loại tóc", "tóc", "phù hợp"],
+      "vocabulary": [
+        "tóc thường", "tóc khô", "tóc dầu",
+        "tóc hư tổn", "tóc nhuộm", "tóc uốn", "mọi loại tóc"
+      ],
+      "value_pattern": null,
+      "user_value": null
+    }},
+    {{
+      "name": "thành phần",
+      "attr_type": "multi_enum",
+      "keywords": ["thành phần", "ingredients", "chứa", "chiết xuất"],
+      "vocabulary": [
+        "keratin", "collagen", "vitamin e", "argan oil",
+        "protein", "panthenol", "chiết xuất dừa", "biotin",
+        "axit amin", "tinh dầu", "niacinamide"
+      ],
+      "value_pattern": null,
+      "user_value": null
+    }},
+    {{
+      "name": "mùi hương",
+      "attr_type": "enum",
+      "keywords": ["mùi", "hương", "mùi hương"],
+      "vocabulary": [
+        "hoa hồng", "cam", "chanh", "bạc hà", "dừa",
+        "vanilla", "hoa nhài", "không mùi", "thảo mộc", "trái cây"
+      ],
+      "value_pattern": null,
+      "user_value": null
     }}
   ],
-  "best_match": "best_category",
-  "confidence": 0.95
+  "confidence": 0.95,
+  "category_changed": false,
+  "is_new_category": false
 }}
 
 ==================================================
-IMPORTANT
+REMEMBER
 ==================================================
 
 - Return ONLY JSON
-- No markdown
-- No explanations
-- No extra text
-- best_match MUST exist in AVAILABLE_CATEGORIES
-- suggestions MUST contain ONLY AVAILABLE_CATEGORIES
-"""
-        
+- No markdown, no backticks, no explanations
+- Every attribute MUST have "attr_type"
+- "enum" and "multi_enum" MUST have "vocabulary"
+- "numeric" and "regex" MUST have a specific "value_pattern"
+- NEVER use ".*" or ".+" as value_pattern
+- vocabulary terms must be lowercase
+"""        
         try:
             response = call_openai(
                 prompt,
@@ -1785,12 +2202,17 @@ IMPORTANT
         categories_text = ", ".join(AVAILABLE_CATEGORIES)
 
         prompt = f"""
-You are an AI system for E-COMMERCE PRODUCT UNDERSTANDING.
+You are an AI system for E-COMMERCE PRODUCT UNDERSTANDING
+AND ATTRIBUTE EXTRACTION SCHEMA GENERATION.
 
-Your task is to identify:
-1. The literal/concrete product category mentioned by the user
-2. Useful filterable product attributes
-3. Realistic user constraints/preferences
+Your task is to:
+1. Identify the literal/concrete product category
+2. Generate ONLY realistic, extractable product attributes
+3. Preserve explicit user constraints/preferences when present
+
+The generated schema will be used by a RULE-BASED
+ATTRIBUTE EXTRACTION ENGINE operating on raw Vietnamese
+e-commerce product descriptions.
 
 ==================================================
 USER QUERY
@@ -1805,17 +2227,17 @@ KNOWN CATEGORIES (REFERENCE ONLY)
 {categories_text}
 
 IMPORTANT:
-- KNOWN CATEGORIES are only references/examples
+- KNOWN CATEGORIES are references/examples only
 - You MAY create a NEW category if needed
-- DO NOT force the query into an unrelated existing category
-- Prefer literal product categories
+- DO NOT force unrelated categories
+- Prefer literal/concrete product types
 
 ==================================================
 CATEGORY RULES
 ==================================================
 
 If the user mentions a CONCRETE PRODUCT TYPE,
-the category MUST be that product itself.
+the category MUST be that exact product type.
 
 GOOD EXAMPLES:
 - "tivi samsung" -> "tivi"
@@ -1823,11 +2245,12 @@ GOOD EXAMPLES:
 - "macbook air" -> "laptop"
 - "chảo chống dính" -> "chảo"
 - "nồi cơm điện" -> "nồi cơm điện"
+- "tai nghe bluetooth" -> "tai nghe"
 
 BAD EXAMPLES:
 - "tivi" -> "điện thoại"
-- "chảo" -> "bột giặt"
 - "iphone" -> "tai nghe"
+- "tai nghe" -> "điện thoại"
 
 Use broad/general categories ONLY for abstract queries.
 
@@ -1837,70 +2260,132 @@ ABSTRACT QUERY EXAMPLES:
 - "đồ học tập"
 
 ==================================================
-ATTRIBUTE RULES
+ATTRIBUTE GENERATION RULES
 ==================================================
 
-Attributes must be:
-- practical
-- searchable
-- filterable
-- product-specific
+Generate ONLY attributes that satisfy ALL conditions:
 
-Prefer:
-- technical attributes
-- physical properties
+1. Commonly written EXPLICITLY in Vietnamese
+   e-commerce product descriptions
+
+2. Extractable using:
+   - regex matching
+   - keyword matching
+   - simple text parsing
+
+3. Useful for:
+   - product filtering
+   - comparison
+   - ranking
+   - matching
+
+4. Usually appear in:
+   - specifications
+   - product details
+   - technical information
+
+Prefer attributes with:
+- numeric values
 - measurable values
+- standardized units
+- finite enumerated values
+- technical specifications
+- physical properties
 
 GOOD ATTRIBUTES:
 - ram
 - storage
 - cpu
-- screen_size
+- gpu
 - battery
+- battery_capacity
+- screen_size
+- refresh_rate
+- resolution
 - material
 - color
-- size
 - weight
+- dimensions
 - capacity
-- resolution
-- refresh_rate
+- wattage
+- voltage
+- bluetooth
+- wireless
+- jack_type
+- driver_size
+- impedance
+- frequency_range
 
 BAD ATTRIBUTES:
 - good_quality
+- premium
+- comfort
+- gaming_experience
+- suitable_for_students
 - usage
 - purpose
 - target_user
-- phù_hợp_học_tập
+- performance
+- đẹp
+- sang_trọng
+- hot
+- bán_chạy
+
+DO NOT generate:
+- subjective qualities
+- marketing language
+- inferred properties
+- emotional concepts
+- vague attributes
+- abstract shopping preferences
 
 ==================================================
-VALUE RULES
+USER VALUE RULES
 ==================================================
 
 - Preserve explicitly mentioned values
-- Infer only broad realistic constraints
-- DO NOT hallucinate exact specs
+- Infer ONLY broad realistic constraints
+- DO NOT hallucinate exact specifications
 
 GOOD:
+- "16GB"
 - ">=16GB"
 - "55 inch"
 - "OLED"
+- "5000mAh"
+- "144Hz"
+- "3.5mm"
 - "15-25 triệu"
 
 BAD:
 - "Intel i7-13700H"
 - "RTX 4070"
+- "Sony WH-1000XM6"
 
-unless explicitly mentioned.
+unless explicitly mentioned by the user.
 
 ==================================================
 KEYWORD RULES
 ==================================================
 
 - Include Vietnamese + English variants
-- Keywords should be short and searchable
+- Keywords should be:
+  - short
+  - searchable
+  - realistic
+  - commonly used in product descriptions
 
 GOOD:
 ["tivi", "tv", "smart tv"]
+
+["pin", "battery", "mah"]
+
+["bluetooth", "không dây"]
+
+BAD:
+["âm thanh cực đỉnh"]
+["siêu bền"]
+["trải nghiệm gaming"]
 
 ==================================================
 REGEX RULES
@@ -1909,9 +2394,38 @@ REGEX RULES
 - value_pattern must be SIMPLE regex only
 - Keep regex practical for text matching
 - Avoid complex regex syntax
+- Avoid overly generic matching
+- Minimize false positives
+- Match realistic Vietnamese e-commerce wording
 
 GOOD:
 "[0-9]+\\\\s?gb"
+
+"[0-9]+\\\\s?(mah|mAh)"
+
+"[0-9]+\\\\s?(hz|Hz)"
+
+"(đen|trắng|xanh|đỏ|black|white)"
+
+BAD:
+".*"
+"[a-zA-Z]+"
+
+==================================================
+ATTRIBUTE QUALITY RULES
+==================================================
+
+If an attribute cannot be reliably extracted
+from raw product text, DO NOT include it.
+
+Prefer FEWER high-quality attributes
+over MANY noisy attributes.
+
+Target:
+- high precision
+- realistic extraction
+- low hallucination
+- practical matching
 
 ==================================================
 OUTPUT FORMAT
@@ -1943,11 +2457,13 @@ IMPORTANT
 - No explanations
 - No comments
 - No extra text
-- category should represent the literal product type
-- If category is not in KNOWN CATEGORIES,
+- category must represent the literal product type
+- If category is not in KNOWN_CATEGORIES,
   you may still return it as a NEW category
+- Generate ONLY extractable attributes
+- Think like an INFORMATION EXTRACTION ENGINE,
+  NOT a shopping assistant
 """
-
         try:
             response = call_openai(
                 prompt,

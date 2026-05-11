@@ -172,6 +172,7 @@ class CrawlServiceClient:
     async def enqueue_product_detail_crawl(
         self,
         product_ids: List[str],
+        spids: Optional[List[str]] = None,
         schema: Optional[Dict[str, Any]] = None,
         max_concurrent: int = 3,
         priority: str = "normal",
@@ -194,6 +195,7 @@ class CrawlServiceClient:
         """
         payload = {
             "product_ids": product_ids,
+            "spids": spids,
             "schema": schema,
             "max_concurrent": max_concurrent,
             "priority": priority,

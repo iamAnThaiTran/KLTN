@@ -20,6 +20,13 @@ sys.path.insert(0, service_dir)
 from crawlers.multi_crawler import MultiCrawler
 from crawlers.tiki.product_detail_crawler import ProductDetailCrawler
 
+try:
+    from extraction import LLMAttributeExtractor
+    HAS_LLM_SUPPORT = True
+except ImportError:
+    HAS_LLM_SUPPORT = False
+    logger.warning("⚠️ LLM extraction not available")
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
@@ -47,6 +54,12 @@ RABBITMQ_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "guest")
 
 PRODUCT_SERVICE_HOST = os.getenv("PRODUCT_SERVICE_HOST", "product-service")
 PRODUCT_SERVICE_PORT = int(os.getenv("PRODUCT_SERVICE_PORT", "8001"))
+
+# === LLM Configuration ===
+USE_LLM = os.getenv("USE_LLM", "true").lower() == "true"
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
+LLM_BATCH_SIZE = int(os.getenv("LLM_BATCH_SIZE", "5"))
+FALLBACK_TO_REGEX = os.getenv("FALLBACK_TO_REGEX", "true").lower() == "true"
 
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
@@ -260,21 +273,25 @@ def execute_single_product_crawl(task_data: Dict[str, Any]) -> Dict[str, Any]:
 def execute_product_details_crawl(task_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Execute product details crawl with attribute extraction
+    Uses LLM-assisted extraction as primary method with optional regex fallback
     
     Args:
         task_data: {
             "product_ids": ["276183351", "276183352", ...],
             "schema": {...},
-            "max_concurrent": 3
+            "max_concurrent": 3,
+            "use_llm": true (optional, defaults to USE_LLM env)
         }
     
     Returns:
-        Dictionary with crawl results and extracted attributes
+        Dictionary with crawl results and extracted attributes + extraction method
     """
     try:
         product_ids = task_data.get("product_ids", [])
         schema = task_data.get("schema")
         max_concurrent = task_data.get("max_concurrent", 3)
+        use_llm = task_data.get("use_llm", USE_LLM and HAS_LLM_SUPPORT)
+        
         logger.info(
     f"""
 📦 execute_product_details_crawl called
@@ -282,24 +299,37 @@ def execute_product_details_crawl(task_data: Dict[str, Any]) -> Dict[str, Any]:
 - product_ids_sample: {product_ids[:5]}
 - schema_exists: {bool(schema)}
 - max_concurrent: {max_concurrent}
-- full_task_data: {task_data}
+- use_llm: {use_llm}
+- llm_available: {HAS_LLM_SUPPORT}
 """
 )
         
-        logger.info(f"📦 Product details crawl: {len(product_ids)} products, schema={bool(schema)}")
+        extraction_method = "llm" if use_llm else "regex"
+        logger.info(f"📦 Product details crawl: {len(product_ids)} products, schema={bool(schema)}, method={extraction_method}")
         
         # Run async crawler
-        crawler = ProductDetailCrawler()
+        crawler = ProductDetailCrawler(use_llm=use_llm)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
-        results = loop.run_until_complete(
-            crawler.crawl_multiple_products(
-                product_ids=product_ids,
-                schema=schema,
-                max_concurrent=max_concurrent
+        # Use LLM extraction if enabled, otherwise fallback to regex
+        if use_llm and HAS_LLM_SUPPORT:
+            results = loop.run_until_complete(
+                crawler.crawl_multiple_products_with_llm(
+                    product_ids=product_ids,
+                    schema=schema,
+                    max_concurrent=max_concurrent,
+                    fallback_to_regex=FALLBACK_TO_REGEX
+                )
             )
-        )
+        else:
+            results = loop.run_until_complete(
+                crawler.crawl_multiple_products(
+                    product_ids=product_ids,
+                    schema=schema,
+                    max_concurrent=max_concurrent
+                )
+            )
         
         loop.run_until_complete(crawler.close())
         loop.close()
@@ -308,7 +338,12 @@ def execute_product_details_crawl(task_data: Dict[str, Any]) -> Dict[str, Any]:
         success_count = sum(1 for r in results if r.get("status") == "success")
         error_count = len(results) - success_count
         
+        # Track extraction methods (LLM vs regex)
+        llm_count = sum(1 for r in results if r.get("extraction_method") == "llm")
+        regex_count = sum(1 for r in results if r.get("extraction_method") == "regex")
+        
         logger.info(f"✅ Product details crawl complete: {success_count} success, {error_count} errors")
+        logger.info(f"🔧 Extraction methods: {llm_count} LLM, {regex_count} regex")
         
         return {
             "status": "success",
@@ -316,6 +351,9 @@ def execute_product_details_crawl(task_data: Dict[str, Any]) -> Dict[str, Any]:
             "total": len(results),
             "success_count": success_count,
             "error_count": error_count,
+            "extraction_method": extraction_method,
+            "llm_count": llm_count,
+            "regex_count": regex_count,
             "timestamp": datetime.utcnow().isoformat()
         }
     
@@ -410,12 +448,14 @@ def process_task(task_message: Dict[str, Any]) -> bool:
         
         logger.info(f"Starting task: {task_id}")
         logger.info(f"🔍 Task category: {task.category!r} | attributes: {list(task.attributes.keys()) if task.attributes else 'None'}")
-        
         # Route based on task type
         if task.category == "product_details":
             # 🆕 Product details crawl with attribute extraction
+            product_ids = task.attributes.get("product_ids", [])
+            spids = task.attributes.get("spids", []) or []
             result = execute_product_details_crawl({
-                "product_ids": task.attributes.get("product_ids", []),
+                "product_ids": product_ids,
+                "spids": spids,
                 "schema": task.attributes.get("schema"),
                 "max_concurrent": task.attributes.get("max_concurrent", 3)
             })
@@ -423,19 +463,30 @@ def process_task(task_message: Dict[str, Any]) -> bool:
             # 🆕 Save extracted attributes to Product Service
             if result.get("status") == "success":
                 logger.info(f"💾 Saving extracted attributes to Product Service...")
+                logger.info(f"🔧 Extraction method: {result.get('extraction_method', 'unknown')} (LLM: {result.get('llm_count', 0)}, Regex: {result.get('regex_count', 0)})")
+                
                 attributes_saved = 0
                 attributes_failed = 0
                 
-                for crawl_result in result.get("results", []):
+                for index, crawl_result in enumerate(result.get("results", [])):
                     if crawl_result.get("status") == "success":
-                        # Bug 2 fix: lấy product_id từ product, không phải top-level spid
+                        # Get product_id from product object
                         product_id = crawl_result.get("product", {}).get("product_id")
                         spid = crawl_result.get("product", {}).get("spid")
+
+                        if not spid and index < len(spids):
+                            spid = spids[index]
+
                         extracted_attrs = crawl_result.get("extracted_attributes", {})
+                        extraction_method = crawl_result.get("extraction_method", "unknown")
+                        confidence = crawl_result.get("confidence", 0.0)
 
-                        logger.info(f"🔍 product_id={product_id}, attrs keys={list(extracted_attrs.keys())}")
-
-                        # Bug 1 sẽ thấy rõ qua log này: attrs keys=[] nếu schema=None
+                        logger.info(
+                            f"🔍 product_id={product_id}, spid={spid}, "
+                            f"attrs_count={len(extracted_attrs)}, "
+                            f"method={extraction_method}, "
+                            f"confidence={confidence:.1%}"
+                        )
 
                         if spid and extracted_attrs:
                             success = save_sku_attributes_to_product_service(

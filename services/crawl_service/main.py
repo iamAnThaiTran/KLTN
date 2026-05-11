@@ -314,6 +314,7 @@ async def enqueue_single_crawl(
 @app.post("/api/crawl/enqueue-product-details")
 async def enqueue_product_details_crawl(
     product_ids: List[str] = Body(..., embed=True),
+    spids: Optional[List[str]] = Body(None, embed=True),
     schema: Optional[Dict[str, Any]] = Body(None, embed=True),
     max_concurrent: int = Body(3, embed=True),
     priority: str = Body("normal", embed=True),
@@ -325,6 +326,7 @@ async def enqueue_product_details_crawl(
     Example:
     {
         "product_ids": ["276183351", "276183352", "276183353"],
+        "spids": ["123", "124", "125"],
         "schema": {
             "category": "laptop",
             "attributes": [
@@ -359,6 +361,7 @@ async def enqueue_product_details_crawl(
             category_id=0,  # Not used for this task type
             attributes={
                 "product_ids": product_ids,
+                "spids": spids,
                 "schema": schema,
                 "max_concurrent": max_concurrent
             },
@@ -375,6 +378,7 @@ async def enqueue_product_details_crawl(
         if producer:
             task_data = {
                 "product_ids": product_ids,
+                "spids": spids,
                 "schema": schema,
                 "max_concurrent": max_concurrent,
                 "task_type": "product_details"
