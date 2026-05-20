@@ -18,8 +18,43 @@ from datetime import datetime
 import unicodedata
 import re
 import json
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# ============================================================================
+# Pydantic Models (Request/Response)
+# ============================================================================
+
+class AddCategoryAttributesRequest(BaseModel):
+    """Request model for adding category attributes"""
+    attributes: List[str] = Field(..., description="List of attribute names to add")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "attributes": ["khả năng chống nước", "tính năng mới"]
+            }
+        }
+
+class SyncSKUAttributesRequest(BaseModel):
+    """Request model for syncing SKU attributes"""
+    attributes: List[str] = Field(..., description="List of attributes to sync")
+    only_missing: bool = Field(True, description="Only add missing attributes")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "attributes": ["khả năng chống nước"],
+                "only_missing": True
+            }
+        }
 
 # ============================================================================
 # Helper Functions
@@ -109,6 +144,8 @@ class Category(Base):
     parent_category_id = Column(Integer, nullable=True)
     category_type = Column(String(50))
     is_active = Column(Boolean, default=True)
+    schema_version = Column(Integer, default=1)
+    last_updated_attributes = Column(TIMESTAMP, default=datetime.utcnow)
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
     updated_at = Column(TIMESTAMP, default=datetime.utcnow)
 
@@ -126,6 +163,7 @@ class Product(Base):
     tiki_spid = Column(String(100))  # From crawler spid
     seller_id = Column(String(100), default='1')
     is_active = Column(Boolean, default=True)  # Changed from is_available
+    last_schema_version = Column(Integer, default=1)
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
     updated_at = Column(TIMESTAMP, default=datetime.utcnow)
 
@@ -153,6 +191,22 @@ class CategoryAttribute(Base):
     values = Column(ARRAY(String))
     display_order = Column(Integer)
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
+
+class ProductCategory(Base):
+    """Many-to-Many relationship between products and categories"""
+    __tablename__ = "product_categories"
+    id = Column(Integer, primary_key=True)
+    product_id = Column(Integer, nullable=False)
+    category_id = Column(Integer, nullable=False)
+    is_primary = Column(Boolean, default=False)
+    added_at = Column(TIMESTAMP, default=datetime.utcnow)
+
+class SKUAttribute(Base):
+    """Flexible attribute storage for SKUs (variants)"""
+    __tablename__ = "sku_attributes"
+    sku_id = Column(Integer, primary_key=True)
+    attribute_name = Column(String(100), primary_key=True)
+    attribute_value = Column(Text, nullable=False, default="")
 
 # ============================================================================
 # Health Check
@@ -242,6 +296,7 @@ async def search_products(
             "offset": offset,
             "products": [
                 {
+                    "id": p.id,  # ✅ Internal database ID for React keys
                     "product_id": p.tiki_product_id,
                     "spid": p.tiki_spid,  # ✅ Include spid in search results
                     "title": p.title,
@@ -334,6 +389,7 @@ async def list_categories():
     db = SessionLocal()
     try:
         categories = db.query(Category).filter(Category.is_active == True).all()
+        logger.info(f"✅ Retrieved {len(categories)} active categories")
         return {
             "categories": [
                 {
@@ -418,12 +474,15 @@ async def create_category(
         ).first()
         
         if existing:
-            logger.warning(f"Category '{category_name}' already exists")
+            logger.info(f"✅ Category '{category_name}' already exists (id={existing.id})")
             return {
-                "success": False,
+                "success": True,
                 "id": existing.id,
                 "name": existing.name,
-                "reason": "Category already exists"
+                "description": existing.description,
+                "type": existing.category_type,
+                "reason": "Category already exists",
+                "attributes_created": 0
             }
         
         # Create new category
@@ -489,32 +548,26 @@ async def get_category_filters(category_slug: str):
     """
     Get available filters (attributes) for a category by slug
     
-    Args:
-        category_slug: Category slug (e.g., "giay", "dien-thoai")
-    
-    Returns:
-    {
-        "filters": [
-            {
-                "name": "brand",
-                "display_name": "Thương hiệu",
-                "type": "text",
-                "values": ["Nike", "Adidas", ...]
-            }
-        ]
-    }
+    ✅ FIXED: Lấy giá trị thực từ sku_attributes (không từ category_attributes.values)
+    - Lấy danh sách attribute names từ category_attributes
+    - Lấy giá trị thực từ sku_attributes của các SKU trong category
     """
     db = SessionLocal()
     try:
+        logger.info(f"🔍 get_category_filters called with slug: '{category_slug}'")
+        
         # Find category by slug
         category = db.query(Category).filter(
             Category.slug == category_slug
         ).first()
         
+        logger.info(f"Query by slug result: {category}")
+        
         # Fallback: if not found by slug, search all categories and match by slugified name
         if not category:
             logger.info(f"Slug '{category_slug}' not found, searching by name...")
             all_categories = db.query(Category).all()
+            logger.info(f"Found {len(all_categories)} total categories")
             for cat in all_categories:
                 if slugify(cat.name) == category_slug:
                     category = cat
@@ -525,51 +578,81 @@ async def get_category_filters(category_slug: str):
             logger.warning(f"Category not found: {category_slug}")
             raise HTTPException(status_code=404, detail=f"Category '{category_slug}' not found")
         
+        logger.info(f"✅ Found category: id={category.id}, name={category.name}, slug={category.slug}")
+        
         # Update slug if missing (data migration)
         if not category.slug:
             category.slug = slugify(category.name)
             db.commit()
             logger.info(f"✅ Updated category '{category.name}' with slug: {category.slug}")
         
-        # Query category attributes for this category using raw SQL
-        # (fallback for different schema versions)
-        try:
-            result = db.execute(text("""
-                SELECT id, category_id, attribute_name, 
-                       COALESCE(attribute_type, 'text') as attribute_type,
-                       is_filterable, values, display_order
-                FROM category_attributes
-                WHERE category_id = :category_id AND is_filterable = true
-                ORDER BY COALESCE(display_order, 0)
-            """), {"category_id": category.id})
-            attributes = result.fetchall()
-        except Exception as e:
-            logger.warning(f"Raw SQL query failed, trying ORM: {e}")
-            attributes = db.query(CategoryAttribute).filter(
-                CategoryAttribute.category_id == category.id,
-                CategoryAttribute.is_filterable == True
-            ).order_by(CategoryAttribute.display_order).all()
+        # Query category attributes for this category
+        logger.info(f"Querying attributes for category_id={category.id}...")
+        category_attrs = db.query(CategoryAttribute).filter(
+            CategoryAttribute.category_id == category.id,
+            CategoryAttribute.is_filterable == True
+        ).order_by(CategoryAttribute.display_order).all()
+        
+        logger.info(f"Found {len(category_attrs)} category attributes")
         
         filters = []
-        for attr in attributes:
-            # Handle both tuple (raw query) and object (ORM) results
-            if hasattr(attr, 'keys'):  # Row object from raw query
-                filter_obj = {
-                    "name": attr['attribute_name'],
-                    "display_name": attr['attribute_name'],
-                    "type": attr['attribute_type'] or "text",
-                }
-                if attr['values']:
-                    filter_obj["values"] = list(attr['values'])
-            else:  # ORM object
-                filter_obj = {
-                    "name": attr.attribute_name,
-                    "display_name": attr.attribute_name,
-                    "type": attr.attribute_type or "text",
-                }
-                if attr.values:
-                    filter_obj["values"] = list(attr.values)
+        
+        # For each category attribute, get actual values from sku_attributes
+        for attr_def in category_attrs:
+            logger.info(f"Processing attribute: {attr_def.attribute_name}")
+            
+            # Get all products in this category
+            products_in_category = db.query(Product.id).filter(
+                Product.category_id == category.id
+            ).all()
+            product_ids = [p[0] for p in products_in_category]
+            
+            if not product_ids:
+                logger.info(f"  No products in category {category.id}")
+                filters.append({
+                    "name": attr_def.attribute_name,
+                    "display_name": attr_def.attribute_name,
+                    "type": attr_def.attribute_type or "text",
+                    "values": []
+                })
+                continue
+            
+            # Get all SKUs for products in this category
+            skus_in_category = db.query(SKU.id).filter(
+                SKU.product_id.in_(product_ids)
+            ).all()
+            sku_ids = [s[0] for s in skus_in_category]
+            
+            if not sku_ids:
+                logger.info(f"  No SKUs in category {category.id}")
+                filters.append({
+                    "name": attr_def.attribute_name,
+                    "display_name": attr_def.attribute_name,
+                    "type": attr_def.attribute_type or "text",
+                    "values": []
+                })
+                continue
+            
+            # Get distinct values of this attribute from sku_attributes
+            # ✅ Lấy giá trị thực từ sku_attributes (không từ category_attributes.values)
+            distinct_values = db.query(SKUAttribute.attribute_value).filter(
+                SKUAttribute.sku_id.in_(sku_ids),
+                SKUAttribute.attribute_name == attr_def.attribute_name
+            ).distinct().all()
+            
+            values = [v[0] for v in distinct_values if v[0]]  # Remove None/empty values
+            values = sorted(list(set(values)))  # Remove duplicates and sort
+            
+            logger.info(f"  Found {len(values)} distinct values for '{attr_def.attribute_name}': {values[:5]}{'...' if len(values) > 5 else ''}")
+            
+            filter_obj = {
+                "name": attr_def.attribute_name,
+                "display_name": attr_def.attribute_name,
+                "type": attr_def.attribute_type or "text",
+                "values": values
+            }
             filters.append(filter_obj)
+            logger.info(f"  ✅ Added filter: {filter_obj['name']} with {len(values)} values")
         
         logger.info(f"✅ Retrieved {len(filters)} filters for category '{category.name}'")
         return {
@@ -581,13 +664,420 @@ async def get_category_filters(category_slug: str):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Get category filters failed: {e}")
+        logger.error(f"Get category filters failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get filters: {str(e)}")
     finally:
         db.close()
 
 # ============================================================================
-# Product Save & Update APIs
+# Schema Evolution APIs (NEW)
+# ============================================================================
+
+@app.get("/api/categories/{category_id}/details")
+async def get_category_details(category_id: int):
+    """
+    Get category details with all attributes and schema information
+    
+    Returns:
+    {
+        "id": 5,
+        "name": "Laptop",
+        "slug": "laptop",
+        "description": "Máy tính xách tay",
+        "category_type": "electronics",
+        "schema_version": 2,
+        "last_updated_attributes": "2026-05-13T...",
+        "attributes": [
+            {
+                "id": 1,
+                "attribute_name": "brand",
+                "attribute_type": "text",
+                "is_filterable": true,
+                "display_order": 1
+            },
+            ...
+        ]
+    }
+    """
+    db = SessionLocal()
+    try:
+        category = db.query(Category).filter(Category.id == category_id).first()
+        if not category:
+            raise HTTPException(status_code=404, detail="Category not found")
+        
+        # Get all attributes for this category
+        attributes = db.query(CategoryAttribute).filter(
+            CategoryAttribute.category_id == category_id
+        ).order_by(CategoryAttribute.display_order).all()
+        
+        return {
+            "id": category.id,
+            "name": category.name,
+            "slug": category.slug,
+            "description": category.description,
+            "category_type": category.category_type,
+            "schema_version": category.schema_version,
+            "last_updated_attributes": category.last_updated_attributes.isoformat() if category.last_updated_attributes else None,
+            "attributes": [
+                {
+                    "id": attr.id,
+                    "attribute_name": attr.attribute_name,
+                    "attribute_type": attr.attribute_type or "text",
+                    "is_filterable": attr.is_filterable,
+                    "display_order": attr.display_order or 0
+                }
+                for attr in attributes
+            ]
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get category details failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+@app.put("/api/categories/{category_id}/attributes")
+async def add_category_attributes(category_id: int, request: AddCategoryAttributesRequest):
+    """
+    Add (append) new attributes to an existing category
+    
+    Request body:
+    {
+        "attributes": ["khả năng chống nước", "tính năng mới"]
+    }
+    
+    Response:
+    {
+        "success": true,
+        "category_id": 5,
+        "attributes_added": ["khả năng chống nước", "tính năng mới"],
+        "attributes_count": 5,
+        "products_synced": 1250,
+        "schema_version": 3
+    }
+    """
+    db = SessionLocal()
+    try:
+        category = db.query(Category).filter(Category.id == category_id).first()
+        if not category:
+            raise HTTPException(status_code=404, detail="Category not found")
+        
+        new_attributes = request.attributes if request.attributes else []
+        if not new_attributes:
+            return {
+                "success": False,
+                "category_id": category_id,
+                "attributes_added": [],
+                "reason": "No attributes provided"
+            }
+        
+        # Get existing attributes (normalize for comparison)
+        existing_attrs = db.query(CategoryAttribute).filter(
+            CategoryAttribute.category_id == category_id
+        ).all()
+        existing_names = {attr.attribute_name.lower().strip() for attr in existing_attrs}
+        
+        # Find new attributes (avoid duplicates)
+        attrs_to_add = []
+        for attr in new_attributes:
+            attr_clean = str(attr).strip()
+            if attr_clean.lower() not in existing_names:
+                attrs_to_add.append(attr_clean)
+                existing_names.add(attr_clean.lower())
+        
+        if not attrs_to_add:
+            logger.info(f"No new attributes to add for category {category_id}")
+            return {
+                "success": True,
+                "category_id": category_id,
+                "attributes_added": [],
+                "attributes_count": len(existing_attrs),
+                "products_synced": 0,
+                "schema_version": category.schema_version,
+                "reason": "All attributes already exist"
+            }
+        
+        # Add new attributes
+        max_order = max([attr.display_order or 0 for attr in existing_attrs]) if existing_attrs else 0
+        
+        for idx, attr_name in enumerate(attrs_to_add, 1):
+            cat_attr = CategoryAttribute(
+                category_id=category_id,
+                attribute_name=attr_name,
+                attribute_type="text",
+                is_filterable=True,
+                display_order=max_order + idx
+            )
+            db.add(cat_attr)
+        
+        # Update category schema version
+        category.schema_version += 1
+        category.last_updated_attributes = datetime.utcnow()
+        
+        db.commit()
+        
+        logger.info(f"✅ Added {len(attrs_to_add)} attributes to category {category_id}")
+        
+        return {
+            "success": True,
+            "category_id": category_id,
+            "attributes_added": attrs_to_add,
+            "attributes_count": len(existing_attrs) + len(attrs_to_add),
+            "products_synced": 0,  # Will be updated by sync endpoint
+            "schema_version": category.schema_version
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Add category attributes failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+@app.post("/api/categories/{category_id}/sync-sku-attributes")
+async def sync_sku_attributes(category_id: int, request: SyncSKUAttributesRequest):
+    """
+    Sync SKU attributes for all products in a category
+    Add missing attributes with empty values (user can fill in later)
+    
+    Request body:
+    {
+        "attributes": ["khả năng chống nước"],
+        "only_missing": true
+    }
+    
+    Response:
+    {
+        "success": true,
+        "category_id": 5,
+        "products_synced": 1250,
+        "sku_attributes_added": 1250
+    }
+    """
+    db = SessionLocal()
+    try:
+        category = db.query(Category).filter(Category.id == category_id).first()
+        if not category:
+            raise HTTPException(status_code=404, detail="Category not found")
+        
+        attributes = request.attributes if request.attributes else []
+        only_missing = request.only_missing
+        
+        if not attributes:
+            return {
+                "success": False,
+                "category_id": category_id,
+                "products_synced": 0,
+                "sku_attributes_added": 0,
+                "reason": "No attributes provided"
+            }
+        
+        # Get all products in this category
+        products = db.query(Product).filter(Product.category_id == category_id).all()
+        
+        if not products:
+            logger.info(f"No products found in category {category_id}")
+            return {
+                "success": True,
+                "category_id": category_id,
+                "products_synced": 0,
+                "sku_attributes_added": 0,
+                "reason": "No products in category"
+            }
+        
+        # For each product, get its SKUs and add missing attributes
+        total_synced = 0
+        total_attrs_added = 0
+        
+        for product in products:
+            skus = db.query(SKU).filter(SKU.product_id == product.id).all()
+            
+            for sku in skus:
+                # Get existing attributes for this SKU using ORM
+                existing_attrs = db.query(SKUAttribute).filter(
+                    SKUAttribute.sku_id == sku.id
+                ).all()
+                existing_names = {attr.attribute_name.lower() for attr in existing_attrs}
+                
+                # Add missing attributes
+                for attr in attributes:
+                    attr_clean = str(attr).strip()
+                    if attr_clean.lower() not in existing_names:
+                        # Create new SKU attribute with empty value
+                        sku_attr = SKUAttribute(
+                            sku_id=sku.id,
+                            attribute_name=attr_clean,
+                            attribute_value=""  # Empty value - user can fill in later
+                        )
+                        db.add(sku_attr)
+                        total_attrs_added += 1
+                        existing_names.add(attr_clean.lower())
+                        logger.debug(f"  Added attribute '{attr_clean}' to SKU {sku.id}")
+            
+            total_synced += 1
+        
+        db.commit()
+        
+        logger.info(f"✅ Synced {total_synced} products, added {total_attrs_added} attribute entries")
+        
+        return {
+            "success": True,
+            "category_id": category_id,
+            "products_synced": total_synced,
+            "sku_attributes_added": total_attrs_added
+        }
+    
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Sync SKU attributes failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+@app.post("/api/products/{product_id}/add-category")
+async def add_product_to_category(product_id: str, body: Dict[str, Any] = Body(...)):
+    """
+    Add a product to an additional category (many-to-many)
+    
+    Request body:
+    {
+        "category_id": 10,
+        "is_primary": false
+    }
+    
+    Response:
+    {
+        "success": true,
+        "product_id": 123,
+        "category_id": 10,
+        "categories": [5, 10],
+        "message": "Product added to category"
+    }
+    """
+    db = SessionLocal()
+    try:
+        product = db.query(Product).filter(Product.tiki_product_id == product_id).first()
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        
+        category_id = body.get("category_id")
+        is_primary = body.get("is_primary", False)
+        
+        if not category_id:
+            raise HTTPException(status_code=400, detail="category_id is required")
+        
+        # Verify category exists
+        category = db.query(Category).filter(Category.id == category_id).first()
+        if not category:
+            raise HTTPException(status_code=404, detail="Category not found")
+        
+        # Check if product-category mapping already exists
+        existing = db.query(ProductCategory).filter(
+            ProductCategory.product_id == product.id,
+            ProductCategory.category_id == category_id
+        ).first()
+        
+        if existing:
+            logger.warning(f"Product {product_id} already belongs to category {category_id}")
+            return {
+                "success": False,
+                "product_id": product.id,
+                "category_id": category_id,
+                "reason": "Product already belongs to this category"
+            }
+        
+        # Add product to category
+        product_cat = ProductCategory(
+            product_id=product.id,
+            category_id=category_id,
+            is_primary=is_primary
+        )
+        db.add(product_cat)
+        db.commit()
+        
+        # Get all categories for this product
+        categories = db.query(ProductCategory.category_id).filter(
+            ProductCategory.product_id == product.id
+        ).all()
+        
+        logger.info(f"✅ Product {product_id} added to category {category_id}")
+        
+        return {
+            "success": True,
+            "product_id": product.id,
+            "category_id": category_id,
+            "categories": [cat[0] for cat in categories],
+            "message": "Product added to category successfully"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Add product to category failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+@app.get("/api/products/{product_id}/categories")
+async def get_product_categories(product_id: str):
+    """
+    Get all categories for a product (many-to-many)
+    
+    Response:
+    {
+        "product_id": 123,
+        "categories": [
+            {
+                "id": 5,
+                "name": "Laptop",
+                "is_primary": true
+            },
+            {
+                "id": 10,
+                "name": "Thiết bị công nghệ",
+                "is_primary": false
+            }
+        ]
+    }
+    """
+    db = SessionLocal()
+    try:
+        product = db.query(Product).filter(Product.tiki_product_id == product_id).first()
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        
+        # Get all categories for this product
+        categories = db.query(ProductCategory, Category).join(
+            Category, ProductCategory.category_id == Category.id
+        ).filter(
+            ProductCategory.product_id == product.id
+        ).all()
+        
+        return {
+            "product_id": product.id,
+            "categories": [
+                {
+                    "id": cat.id,
+                    "name": cat.name,
+                    "is_primary": prod_cat.is_primary
+                }
+                for prod_cat, cat in categories
+            ]
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get product categories failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
 # ============================================================================
 
 @app.post("/api/products/batch")
@@ -898,19 +1388,23 @@ async def query_products_by_category(
     """
     Query products by category_id + optional attributes/filters
     
-    Called by Recommender Service to check DB before crawling.
-    If found in DB → return products
-    If NOT found in DB → return empty list, Recommender will crawl from external sources
+    ✅ STRATEGY: Return products with attributes, let Recommender rank
+    
+    Called by Recommender Service to get products for a category.
+    - Applies STRICT filtering: brand, price range only (DB-level)
+    - Returns ALL matching products + their attributes
+    - Recommender Service ranks by attribute match score
+    - UI always has products to display (even if not exact attribute match)
     
     Request body:
     {
         "category_id": 5,
         "attributes": {
             "brand": "Nike",
-            "color": "đen",
-            "size": "42",
-            "price_min": 1000000,
-            "price_max": 5000000,
+            "color": "đen",              ← Not filtered in DB
+            "size": "42",                ← Not filtered in DB
+            "price_min": 1000000,        ← Filtered in DB
+            "price_max": 5000000,        ← Filtered in DB
             ...
         },
         "limit": 50
@@ -930,6 +1424,13 @@ async def query_products_by_category(
                 "stock": 10,
                 "thumbnail": "https://...",
                 "category_id": 5,
+                "rating": 4.5,
+                "search_count": 150,
+                "attributes": [           ← ✅ For Recommender to rank
+                    {"name": "color", "value": "đen"},
+                    {"name": "size", "value": "42"},
+                    {"name": "material", "value": "da"}
+                ],
                 ...
             },
             ...
@@ -938,6 +1439,8 @@ async def query_products_by_category(
     """
     db = SessionLocal()
     try:
+        from sqlalchemy import text as sql_text
+        
         category_id = body.get("category_id")
         attributes = body.get("attributes", {})
         limit = body.get("limit", 50)
@@ -953,6 +1456,10 @@ async def query_products_by_category(
             return {"products": []}  # Return empty list - will trigger crawl
         
         logger.info(f"🔍 Querying products: category={category.name} (id={category_id}), attributes={attributes}")
+        
+        # Identify which attributes are dynamic (stored in sku_attributes table)
+        # vs fixed (brand, price, etc.) - for logging purposes
+        dynamic_attribute_filters = {}
         
         # Start with products in this category
         query = db.query(Product, SKU).join(
@@ -1000,24 +1507,45 @@ async def query_products_by_category(
                 query = query.filter(SKU.price <= price_max)
                 logger.info(f"  Applied max price filter: <= {price_max}")
         
-        # Apply other attribute filters (exact match for now)
-        # These would be things like color, size, type, etc.
+        # Collect dynamic attribute filters for logging (not for DB filtering)
+        # Recommender Service will use these to rank products by attribute match
         for attr_name, attr_value in attributes.items():
             if attr_name not in ["brand", "price_min", "price_max", "gia", "price", "price_range"] and attr_value:
-                # Note: This requires sku_attributes table for dynamic attributes
-                # For now, just log and skip
-                logger.info(f"  ℹ️ Attribute filter '{attr_name}': {attr_value} (requires sku_attributes table)")
+                dynamic_attribute_filters[attr_name] = attr_value
         
-        # Execute query and limit results
+        # Execute query and get results (only apply brand/price filters)
+        # Don't filter by other attributes here - let Recommender Service rank by match score
         results = query.order_by(SKU.id).limit(limit).all()
         
         if not results:
             logger.info(f"✅ No products found in DB for category {category.name}")
             return {"products": []}  # Return empty list - will trigger crawl
         
-        # Format results
+        # Extract SKU IDs to fetch attributes
+        sku_ids = [sku.id for product, sku in results]
+        
+        # Fetch all attributes for these SKUs
+        sku_attributes_raw = db.query(SKUAttribute).filter(
+            SKUAttribute.sku_id.in_(sku_ids)
+        ).all()
+        
+        # Organize attributes by SKU ID
+        sku_attrs_map = {}
+        for attr in sku_attributes_raw:
+            if attr.sku_id not in sku_attrs_map:
+                sku_attrs_map[attr.sku_id] = []
+            sku_attrs_map[attr.sku_id].append({
+                "name": attr.attribute_name,
+                "value": attr.attribute_value
+            })
+        
+        # Format all results with attributes
+        # Recommender Service will handle ranking based on requested attributes
         products_list = []
         for product, sku in results:
+            # Get attributes for this SKU
+            attrs = sku_attrs_map.get(sku.id, [])
+            
             products_list.append({
                 "id": product.id,
                 "product_id": product.tiki_product_id,
@@ -1033,10 +1561,15 @@ async def query_products_by_category(
                 "category_id": product.category_id,
                 "source": product.source,
                 "rating": float(sku.rating) if sku.rating else 0,
-                "search_count": sku.search_count or 0
+                "search_count": sku.search_count or 0,
+                "attributes": attrs  # ✅ Include SKU attributes for Recommender to rank
             })
         
-        logger.info(f"✅ Found {len(products_list)} products in DB")
+        # Log requested attributes for reference (Recommender will rank by these)
+        if dynamic_attribute_filters:
+            logger.info(f"  📊 Requested attribute filters (for Recommender ranking): {dynamic_attribute_filters}")
+        
+        logger.info(f"✅ Found {len(products_list)} products in DB with attributes (Recommender will rank by requested filters)")
         return {"products": products_list}
     
     except HTTPException:
@@ -1185,7 +1718,7 @@ async def get_public_recommendations(limit: int = 20):
         
         products_data = [
             {
-                "id": sku.id,
+                "id": product.id,  # ✅ Use Product ID, not SKU ID
                 "sku_code": sku.sku_code,
                 "product_id": product.tiki_product_id,
                 "title": product.title,
@@ -1329,7 +1862,7 @@ async def get_recommendations_by_criteria(
         
         products_data = [
             {
-                "id": sku.id,
+                "id": product.id,  # ✅ Use Product ID, not SKU ID
                 "sku_code": sku.sku_code,
                 "product_id": product.tiki_product_id,
                 "title": product.title,
@@ -1363,6 +1896,189 @@ async def get_recommendations_by_criteria(
         }
     finally:
         db.close()
+
+# ============================================================================
+# Filter & Ranking API (for Frontend UI)
+# ============================================================================
+
+@app.post("/api/products/filter-with-ranking")
+async def filter_products_with_ranking(body: Dict[str, Any] = Body(...)):
+    """
+    Filter products by category + attributes, then rank by degree of match.
+    
+    ✅ STRATEGY: Return ALL products of category, ranked by attribute match score
+    
+    Request body:
+    {
+        "category_id": 5,              # Either category_id or category_name
+        "category_name": "Giày",       # Will find category by name
+        "attributes": {
+            "brand": ["Nike"],           # Multi-select values
+            "size": ["42", "43"],        # Multiple values to match
+            "color": ["đen"]
+        },
+        "limit": 50
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "category_id": 5,
+        "category_name": "Giày",
+        "products": [
+            {
+                "id": 123,
+                "product_id": "276183351",
+                "title": "Giày thể thao nam...",
+                "brand": "Nike",
+                "price": 620000,
+                "stock": 10,
+                "thumbnail": "...",
+                "match_score": 3,              ← How many attributes matched
+                "matched_attributes": {         ← Which attributes matched
+                    "brand": "Nike",
+                    "size": "42"
+                },
+                "attributes": [...]            ← All attributes of product
+            },
+            ...
+        ],
+        "total": 15
+    }
+    """
+    db = SessionLocal()
+    try:
+        category_id = body.get("category_id")
+        category_name = body.get("category_name")
+        attributes_filter = body.get("attributes", {})
+        limit = body.get("limit", 50)
+        
+        # Find category by ID or name
+        category = None
+        if category_id:
+            category = db.query(Category).filter(Category.id == category_id).first()
+        elif category_name:
+            # Search by name (case-insensitive)
+            category = db.query(Category).filter(
+                Category.name.ilike(category_name)
+            ).first()
+        
+        if not category:
+            logger.warning(f"❌ Category not found: id={category_id}, name={category_name}")
+            raise HTTPException(status_code=404, detail="Category not found")
+        
+        logger.info(f"🔍 Filter with ranking: category={category.name} (id={category.id})")
+        logger.info(f"   Requested attributes: {attributes_filter}")
+        
+        # Query all products + SKUs of this category
+        products_skus = db.query(Product, SKU).join(
+            SKU, Product.id == SKU.product_id
+        ).filter(
+            Product.category_id == category.id
+        ).all()
+        
+        if not products_skus:
+            logger.info(f"✅ No products found in category {category.name}")
+            return {
+                "success": True,
+                "category_id": category.id,
+                "category_name": category.name,
+                "products": [],
+                "total": 0
+            }
+        
+        # Extract SKU IDs to fetch attributes
+        sku_ids = [sku.id for _, sku in products_skus]
+        
+        # Fetch all attributes for these SKUs
+        sku_attributes_raw = db.query(SKUAttribute).filter(
+            SKUAttribute.sku_id.in_(sku_ids)
+        ).all()
+        
+        # Organize attributes by SKU ID
+        sku_attrs_map = {}
+        for attr in sku_attributes_raw:
+            if attr.sku_id not in sku_attrs_map:
+                sku_attrs_map[attr.sku_id] = {}
+            sku_attrs_map[attr.sku_id][attr.attribute_name] = attr.attribute_value
+        
+        # Calculate match score for each product
+        products_with_scores = []
+        
+        for product, sku in products_skus:
+            sku_attrs = sku_attrs_map.get(sku.id, {})
+            
+            # Calculate match score
+            match_score = 0
+            matched_attrs = {}
+            
+            # Check each requested attribute
+            for attr_name, requested_values in attributes_filter.items():
+                if not isinstance(requested_values, list):
+                    requested_values = [requested_values]
+                
+                # Get product's actual value for this attribute
+                actual_value = sku_attrs.get(attr_name)
+                
+                if actual_value and actual_value in requested_values:
+                    match_score += 1
+                    matched_attrs[attr_name] = actual_value
+            
+            # Format product with match info
+            product_data = {
+                "id": product.id,
+                "product_id": product.tiki_product_id,
+                "spid": product.tiki_spid,
+                "title": product.title,
+                "brand": product.brand,
+                "price": float(sku.price),
+                "original_price": float(sku.original_price) if sku.original_price else None,
+                "stock": sku.stock,
+                "is_available": sku.is_available,
+                "thumbnail": product.thumbnail,
+                "product_url": product.product_url,
+                "category_id": product.category_id,
+                "source": product.source,
+                "rating": float(sku.rating) if sku.rating else 0,
+                "search_count": sku.search_count or 0,
+                "match_score": match_score,
+                "matched_attributes": matched_attrs,
+                # Include all attributes for reference
+                "attributes": [
+                    {"name": attr_name, "value": attr_value}
+                    for attr_name, attr_value in sku_attrs.items()
+                ]
+            }
+            
+            products_with_scores.append(product_data)
+        
+        # Sort by: match_score DESC → rating DESC → search_count DESC
+        products_with_scores.sort(
+            key=lambda p: (-p["match_score"], -p["rating"], -p["search_count"])
+        )
+        
+        # Apply limit
+        products_list = products_with_scores[:limit]
+        
+        logger.info(f"✅ Filtered {len(products_list)} products (total: {len(products_with_scores)})")
+        logger.info(f"   Top product match score: {products_list[0]['match_score'] if products_list else 'N/A'}")
+        
+        return {
+            "success": True,
+            "category_id": category.id,
+            "category_name": category.name,
+            "products": products_list,
+            "total": len(products_list)
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Filter with ranking failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
 
 # ============================================================================
 # Startup and Shutdown

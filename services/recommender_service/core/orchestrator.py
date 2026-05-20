@@ -5,7 +5,6 @@ import re
 from typing import Dict, Any, List
 from .extractor import AttributeExtractor
 from .dialogue import DialogueManager
-from .matcher import ProductMatcher
 from .ranker import ProductRanker
 # 🚀 REMOVED: from app.crawler.multi_crawler import MultiCrawler
 from services.crawl_service_client import CrawlServiceClient  # ✅ Use absolute import
@@ -33,7 +32,6 @@ class RecommendationOrchestrator:
         self.attribute_extractor = AttributeExtractor()
         self.schema_manager = DynamicSchemaManager()  # Add dynamic schema manager
         self.dialogue_manager = DialogueManager()
-        self.product_matcher = ProductMatcher()
         self.product_ranker = ProductRanker()
         # 🚀 CHANGED: Use CrawlServiceClient instead of MultiCrawler
         self.crawl_service_client = CrawlServiceClient()  # ✅ HTTP client to Crawl Service (8003)
@@ -301,24 +299,41 @@ class RecommendationOrchestrator:
         """
         Convert extracted attributes from LLM comprehensive analysis to dict format
         
-        Input format (from LLM):
+        Input format (from LLM - NEW):
         {
             "attributes": [
-                {"name": "ram", "keywords": [...], "value_pattern": "...", "user_value": ">=16GB"},
-                {"name": "storage", "keywords": [...], "value_pattern": "...", "user_value": "SSD"},
-                ...
+                {
+                    "name": "màu sắc",
+                    "keywords": [...],
+                    "expected_values": ["đỏ"],
+                    "priority": "high"
+                },
+                {
+                    "name": "size",
+                    "keywords": [...],
+                    "expected_values": ["42"],
+                    "priority": "critical"
+                }
+            ]
+        }
+        
+        Input format (from LLM - OLD, backward compat):
+        {
+            "attributes": [
+                {"name": "ram", "user_value": ">=16GB"},
+                {"name": "storage", "user_value": "SSD"}
             ]
         }
         
         Output format (for crawl service):
         {
-            "ram": ">=16GB",
-            "storage": "SSD",
+            "màu sắc": "đỏ",
+            "size": "42",
             ...
         }
         
         Returns:
-            Dict with {attribute_name: user_value} for non-None values
+            Dict with {attribute_name: value} for non-None values
         """
         attributes_dict = {}
         
@@ -329,11 +344,25 @@ class RecommendationOrchestrator:
         if isinstance(attributes_list, list):
             for attr in attributes_list:
                 attr_name = attr.get("name", "").strip()
-                user_value = attr.get("user_value")
                 
-                if attr_name and user_value is not None:
+                if not attr_name:
+                    continue
+                
+                # Priority 1: user_value (old format for backward compatibility)
+                user_value = attr.get("user_value")
+                if user_value is not None:
                     attributes_dict[attr_name] = user_value
-                    logger.info(f"[_convert_comprehensive_attributes_to_dict] {attr_name}: {user_value}")
+                    logger.info(f"[_convert_comprehensive_attributes_to_dict] {attr_name}: {user_value} (from user_value)")
+                    continue
+                
+                # Priority 2: expected_values (NEW LLM format - array)
+                expected_values = attr.get("expected_values")
+                if expected_values and isinstance(expected_values, list) and len(expected_values) > 0:
+                    # Take first element from expected_values array
+                    value = expected_values[0]
+                    attributes_dict[attr_name] = value
+                    logger.info(f"[_convert_comprehensive_attributes_to_dict] {attr_name}: {value} (from expected_values)")
+                    continue
         
         # Handle old format (direct dict) for compatibility
         elif isinstance(attributes_list, dict):
@@ -348,6 +377,197 @@ class RecommendationOrchestrator:
         
         logger.info(f"[_convert_comprehensive_attributes_to_dict] Converted to: {attributes_dict}")
         return attributes_dict
+    
+    def _calculate_attribute_match_score(self, expected_value: Any, product_value: Any) -> float:
+        """
+        Calculate match score between expected and actual product attribute values.
+        
+        Scoring logic:
+        - Exact match (case-insensitive): 1.0
+        - Partial match (contains): 0.85
+        - Fuzzy match (similar): 0.7
+        - Numeric range match (e.g., >=16GB, <=1000): 0.9
+        - No match: 0.0
+        
+        Args:
+            expected_value: User's expected value (e.g., "16GB", ">=1000W", "SSD")
+            product_value: Product's actual attribute value
+            
+        Returns:
+            float: Match score between 0.0 and 1.0
+        """
+        if not expected_value or product_value is None:
+            return 0.0
+        
+        expected_str = str(expected_value).strip().lower()
+        product_str = str(product_value).strip().lower()
+        
+        # 1. Exact match
+        if expected_str == product_str:
+            logger.debug(f"[Rank] Exact match: '{expected_str}' = '{product_str}'")
+            return 1.0
+        
+        # 2. Partial match (one contains the other)
+        if expected_str in product_str or product_str in expected_str:
+            logger.debug(f"[Rank] Partial match: '{expected_str}' <-> '{product_str}'")
+            return 0.85
+        
+        # 3. Numeric comparison (e.g., ">=16GB" vs "16GB")
+        # Handle patterns like ">=16GB", "<=1000W", ">8", etc.
+        try:
+            import re
+            comparison_pattern = r'^(>=|<=|>|<|=)?(.+?)(\s*(?:gb|mb|kb|w|watt|mah|inch|cm|mm|lít|ml))?$'
+            
+            expected_match = re.match(comparison_pattern, expected_str)
+            product_match = re.match(comparison_pattern, product_str)
+            
+            if expected_match and product_match:
+                exp_op = expected_match.group(1) or "="
+                exp_num_str = expected_match.group(2).strip()
+                prod_num_str = product_match.group(2).strip()
+                
+                # Try to extract numeric values
+                exp_num_match = re.search(r'(\d+(?:\.\d+)?)', exp_num_str)
+                prod_num_match = re.search(r'(\d+(?:\.\d+)?)', prod_num_str)
+                
+                if exp_num_match and prod_num_match:
+                    exp_num = float(exp_num_match.group(1))
+                    prod_num = float(prod_num_match.group(1))
+                    
+                    # Check numeric condition
+                    if exp_op == ">=":
+                        is_match = prod_num >= exp_num
+                    elif exp_op == "<=":
+                        is_match = prod_num <= exp_num
+                    elif exp_op == ">":
+                        is_match = prod_num > exp_num
+                    elif exp_op == "<":
+                        is_match = prod_num < exp_num
+                    else:  # "="
+                        is_match = abs(prod_num - exp_num) < 0.01  # Small tolerance for floats
+                    
+                    if is_match:
+                        logger.debug(f"[Rank] Numeric range match: '{expected_str}' matches '{product_str}'")
+                        return 0.9
+                    else:
+                        logger.debug(f"[Rank] Numeric range mismatch: '{expected_str}' vs '{product_str}'")
+                        return 0.3  # Partial credit for trying
+        except Exception as e:
+            logger.debug(f"[Rank] Error parsing numeric comparison: {e}")
+        
+        # 4. Fuzzy match using substring similarity
+        try:
+            from difflib import SequenceMatcher
+            similarity = SequenceMatcher(None, expected_str, product_str).ratio()
+            if similarity >= 0.7:
+                logger.debug(f"[Rank] Fuzzy match (similarity={similarity:.2f}): '{expected_str}' ~= '{product_str}'")
+                return 0.7 + (similarity - 0.7) * 0.3  # Scale between 0.7 and 1.0
+        except Exception as e:
+            logger.debug(f"[Rank] Error in fuzzy matching: {e}")
+        
+        # 5. No match
+        logger.debug(f"[Rank] No match: '{expected_str}' vs '{product_str}'")
+        return 0.0
+    
+    def _rank_products_by_attributes(
+        self,
+        expected_attributes: Dict[str, Any],
+        products: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Rank products based on how well their attributes match expected values.
+        
+        Algorithm:
+        1. For each product, calculate match score for each attribute
+        2. Aggregate scores (weighted by importance if applicable)
+        3. Sort products by total score (highest first)
+        4. Return sorted list with scores attached
+        
+        Args:
+            expected_attributes: Dict like {"ram": "16GB", "storage": "SSD", ...}
+            products: List of product dicts from crawl service
+            
+        Returns:
+            List of products sorted by match score (highest first)
+        """
+        if not products:
+            logger.warning("[Rank] No products to rank")
+            return []
+        
+        if not expected_attributes:
+            logger.warning("[Rank] No expected attributes provided, returning products unsorted")
+            return products
+        
+        logger.info(f"[Rank] Starting ranking for {len(products)} products")
+        logger.info(f"[Rank] Expected attributes: {expected_attributes}")
+        
+        # Calculate score for each product
+        ranked_products = []
+        
+        for idx, product in enumerate(products):
+            attribute_scores = []
+            
+            for attr_name, expected_value in expected_attributes.items():
+                # Try to find product attribute in multiple places
+                product_attr_value = None
+                
+                # 1. Check if product has direct field with attribute name
+                if attr_name in product:
+                    product_attr_value = product.get(attr_name)
+                
+                # 2. Check if product has "attributes" dict/list
+                elif "attributes" in product:
+                    attrs = product["attributes"]
+                    if isinstance(attrs, dict):
+                        product_attr_value = attrs.get(attr_name)
+                    elif isinstance(attrs, list):
+                        for attr in attrs:
+                            if isinstance(attr, dict) and attr.get("name") == attr_name:
+                                product_attr_value = attr.get("value")
+                                break
+                
+                # 3. Check detailed_attributes (from product detail crawl)
+                elif "detailed_attributes" in product:
+                    detailed_attrs = product["detailed_attributes"]
+                    if isinstance(detailed_attrs, dict):
+                        product_attr_value = detailed_attrs.get(attr_name)
+                    elif isinstance(detailed_attrs, list):
+                        for attr in detailed_attrs:
+                            if isinstance(attr, dict) and attr.get("name") == attr_name:
+                                product_attr_value = attr.get("value")
+                                break
+                
+                # Calculate match score
+                score = self._calculate_attribute_match_score(expected_value, product_attr_value)
+                attribute_scores.append({
+                    "attribute": attr_name,
+                    "expected": expected_value,
+                    "actual": product_attr_value,
+                    "score": score
+                })
+                
+                logger.debug(f"[Rank] Product {idx}: {attr_name} score={score:.2f} (expected='{expected_value}', actual='{product_attr_value}')")
+            
+            # Aggregate scores (simple average)
+            total_score = sum(s["score"] for s in attribute_scores) / len(attribute_scores) if attribute_scores else 0.0
+            
+            # Attach score to product
+            product_with_score = product.copy()
+            product_with_score["_match_score"] = total_score
+            product_with_score["_attribute_scores"] = attribute_scores
+            
+            ranked_products.append((total_score, product_with_score))
+            logger.info(f"[Rank] Product {idx} (ID: {product.get('product_id', 'N/A')}): total_score={total_score:.2f}")
+        
+        # Sort by score descending (highest score first)
+        ranked_products.sort(key=lambda x: x[0], reverse=True)
+        
+        # Extract just the products
+        sorted_products = [p for _, p in ranked_products]
+        
+        logger.info(f"[Rank] ✅ Ranking complete. Top 3 scores: {[p['_match_score'] for p in sorted_products[:3]]}")
+        
+        return sorted_products
     
     # ====================================================================================
     # CENTRAL 7-CASE DISPATCHER SYSTEM
@@ -548,16 +768,19 @@ class RecommendationOrchestrator:
         """
         CASE 1: Clear request (NO LLM)
         
-        Flow:
-        1. Detect category
-        2. VALIDATE category with DB (new!)
-        3. Extract attributes
-        4. Crawl with validated category
+        Simplified flow:
+        1. Validate category
+        2. Extract attributes
+        3. Get products (DB or crawl+detail if needed)
+        4. Rank by attributes
+        5. Return
+        
+        Note: ALL crawling logic is delegated to ProductServiceClient.get_or_crawl_products()
         """
         # Ensure state structure
         conversation_state = self._ensure_state_structure(conversation_state)
         
-        logger.info(f"[CASE 1] Processing clear request with rule-based extraction")
+        logger.info(f"[CASE 1] Processing clear request")
         
         category = case_data["category"]
         
@@ -568,7 +791,7 @@ class RecommendationOrchestrator:
         detected_attributes_names = [attr.get("name") if isinstance(attr, dict) else str(attr) for attr in detected_attributes] if detected_attributes else []
         logger.info(f"[CASE 1] 📊 Detected attributes from analysis: {detected_attributes_names}")
         
-        # NEW: Validate category before crawling (pass detected attributes)
+        # STEP 1: Validate category before proceeding
         logger.info(f"[CASE 1] Validating category: '{category}' with {len(detected_attributes_names)} detected attributes")
         validation_result = await self.category_validator.validate_category(
             user_category=category,
@@ -599,24 +822,25 @@ class RecommendationOrchestrator:
             "status": validation_status
         }
         
-        # Get attributes from comprehensive analysis (LLM extraction)
+        # STEP 2: Extract attributes for search
         comprehensive_analysis = conversation_state.get("comprehensive_analysis", {})
         attributes_for_search = self._convert_comprehensive_attributes_to_dict(comprehensive_analysis)
         
-        logger.info(f"[CASE 1] ✨ Extracted attributes from LLM: {attributes_for_search}")
+        logger.info(f"[CASE 1] ✨ Extracted attributes for search: {attributes_for_search}")
         
-        # Also store extracted for backward compatibility
-        extract_result = self.attribute_extractor.extract(
-            user_input,
-            validated_category,
-            use_llm=False  # CRITICAL: No LLM for Case 1
-        )
-        conversation_state["extracted"] = extract_result["extracted"]
+        # Store LLM attributes to state
+        conversation_state["extracted"] = attributes_for_search.copy()
         
         # ⭐ FALLBACK: If LLM attributes empty, use rule-based extraction
         if not attributes_for_search or len(attributes_for_search) == 0:
             logger.info(f"[CASE 1] 💡 LLM attributes empty → Using rule-based extraction")
+            extract_result = self.attribute_extractor.extract(
+                user_input,
+                validated_category,
+                use_llm=False  # CRITICAL: No LLM for Case 1
+            )
             attributes_for_search = extract_result["extracted"].copy()
+            conversation_state["extracted"] = extract_result["extracted"]
             
             if not attributes_for_search or len(attributes_for_search) == 0:
                 product_name = conversation_state.get("detected_intent", {}).get("product_name", "").strip()
@@ -624,116 +848,35 @@ class RecommendationOrchestrator:
                     attributes_for_search["loai"] = product_name
                     logger.info(f"[CASE 1] 💡 No attributes → Using product_name as search hint: '{product_name}'")
         
-        # Query Product Service first before crawling
-        logger.info(f"[CASE 1] 🔍 Querying Product Service for products...")
-        db_products = await self.product_service_client.get_products_by_category_and_attributes(
+        # STEP 3: Get products - DB or crawl+detail if needed
+        # ✅ ProductServiceClient handles ALL crawling logic internally
+        logger.info(f"[CASE 1] 📤 Requesting products from ProductServiceClient (DB or crawl if needed)...")
+        products = await self.product_service_client.get_or_crawl_products(
             category_id=category_id,
-            attributes=attributes_for_search,
+            category_name=validated_category,
+            attributes=attributes_for_search if attributes_for_search else None,
             limit=50
         )
         
-        if db_products:
-            # DB HIT: Found products in database
-            logger.info(f"[CASE 1] ✅ DB HIT! Found {len(db_products)} products in database")
-            return await self._process_crawl_results(db_products, conversation_state, case=1, source="db")
-        
-        # DB MISS: Products not in DB, crawl from external sources via Crawl Service (8003)
-        logger.info(f"[CASE 1] ❌ DB MISS! Crawling from external sources (Lazada/Tiki/Shopee) via CrawlService...")
-        logger.info(f"[CASE 1] 📤 Sending to CrawlService with attributes: {attributes_for_search}")
-        crawled_products = await self.crawl_service_client.crawl(
-            category=validated_category,
-            category_id=category_id,
-            attributes=attributes_for_search
-        )
-        
-        if not crawled_products:
+        if not products:
             return {
                 "status": "no_results",
                 "message": "Không tìm thấy sản phẩm phù hợp.",
                 "case": 1,
                 "state": conversation_state
             }
-        # ✅ Save crawled products to Product Service (not directly to DB)
-        logger.info(f"[CASE 1] 💾 Saving {len(crawled_products)} crawled products via Product Service...")
-        try:
-            await self.product_service_client.save_products(
-                crawled_products, 
-                source="tiki",
-                category_id=category_id  # ✅ IMPORTANT: Include category_id
-            )
-        except Exception as e:
-            logger.warning(f"[CASE 1] ⚠️ Failed to save products via Product Service: {e}")
-            
-            
-        # 🆕 STEP: Enqueue product detail crawl task to RabbitMQ (via CrawlService)
-        logger.info(f"[CASE 1] 🔍 Enqueuing product detail crawl for {len(crawled_products)} products via RabbitMQ...")
         
-        # Extract product IDs (Tiki product_id)
-        product_ids_to_crawl = []
-        product_spids_to_crawl = []
-        for product in crawled_products:
-            product_id = product.get("product_id")
-            spid = product.get("spid")
-            if product_id:
-                product_ids_to_crawl.append(product_id)
-                product_spids_to_crawl.append(str(spid) if spid is not None else "")
+        logger.info(f"[CASE 1] ✅ Got {len(products)} products")
         
-        if product_ids_to_crawl:
-            try:
-                # Get dynamic schema for detailed extraction (optional)
-                # Build dynamic schema từ comprehensive_analysis (LLM đã extract sẵn)
-                crawl_schema = None
-                try:
-                    comprehensive_analysis = conversation_state.get("comprehensive_analysis", {})
-                    detected_attributes = (
-                        comprehensive_analysis.get("extracted_attributes")
-                        or comprehensive_analysis.get("attributes")
-                        or []
-                    )
-                    
-                    if detected_attributes:
-                        crawl_schema = self._build_crawl_schema_from_attributes(
-                            category=validated_category,
-                            attributes=detected_attributes
-                        )
-                        logger.info(f"[CASE 1] 📐 Built crawl schema from LLM attributes: {[a.get('name') for a in detected_attributes]}")
-                    else:
-                        logger.info(f"[CASE 1] ℹ️ No LLM attributes → crawl without schema (no attribute extraction)")
-
-                except Exception as e:
-                    logger.warning(f"[CASE 1] ⚠️ Could not build crawl schema: {e}")
-                
-                # Only crawl details for top 10 products (to avoid timeout)
-                products_to_detail_crawl = product_ids_to_crawl[:10]
-                logger.info(f"[CASE 1] 📤 Enqueuing product details crawl for top {len(products_to_detail_crawl)} products...")
-                
-                # Enqueue product detail crawl task to RabbitMQ
-                task_id = await self.crawl_service_client.enqueue_product_detail_crawl(
-                    product_ids=products_to_detail_crawl,
-                    spids=product_spids_to_crawl[: len(products_to_detail_crawl)],
-                    schema=crawl_schema,
-                    max_concurrent=3,
-                    priority="high"
-                )
-                
-                logger.info(f"[CASE 1] ✅ Product detail crawl enqueued: {task_id}")
-                
-                # Store task_id in conversation state for later polling (optional)
-                conversation_state["product_detail_crawl_task_id"] = task_id
-                
-                # 🆕 ASYNC: Don't wait for product detail crawl - return products now
-                # The CrawlService worker will process attributes in background
-                # Attributes will be saved directly to Product Service by the worker
-                logger.info(f"[CASE 1] ⏳ Product detail crawl will complete in background (task_id: {task_id})")
-            
-            except Exception as e:
-                logger.warning(f"[CASE 1] ⚠️ Failed to enqueue product details crawl: {e}")
-                # Continue - don't fail the entire flow if enqueue fails
+        # STEP 4: RANK products by attribute match (now products have full attributes)
+        logger.info(f"[CASE 1] 🎯 Ranking {len(products)} products by attribute match...")
+        ranked_products = self._rank_products_by_attributes(attributes_for_search, products)
         
+        if ranked_products:
+            logger.info(f"[CASE 1] ✅ Ranking complete. Top product match score: {ranked_products[0].get('_match_score', 0):.2f}")
         
-        
-        # Return crawled products directly (already complete from CrawlService)
-        return await self._process_crawl_results(crawled_products, conversation_state, case=1, source="crawl")
+        # STEP 5: Return ranked products
+        return await self._process_crawl_results(ranked_products, conversation_state, case=1)
     
     def _ensure_state_structure(self, conversation_state: Dict[str, Any]):
         """Ensure conversation_state has all required keys for safety"""
@@ -763,16 +906,25 @@ class RecommendationOrchestrator:
         conversation_state: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        CASE 2: request chưa rõ ràng nhưng đã detect được category với confidence khá cao, và category đó có schema
+        CASE 2: Unclear request but category detected with schema available
+        
+        Similar to CASE 1 but checks for missing required attributes first.
+        
+        Simplified flow:
+        1. Validate category
+        2. Extract attributes  
+        3. Check for missing required attributes (ask if needed)
+        4. Get products (DB or crawl+detail if needed) via ProductServiceClient
+        5. Rank and return
         """
         # Ensure state structure
         conversation_state = self._ensure_state_structure(conversation_state)
         
-        logger.info(f"[CASE 2] Request unclear but category '{case_data['category']}' detected")
+        logger.info(f"[CASE 2] Request unclear but category detected: '{case_data['category']}'")
         
         category = case_data["category"]
         
-        # Validate category before proceeding
+        # STEP 1: Validate category
         logger.info(f"[CASE 2] Validating category: '{category}'")
         validation_result = await self.category_validator.validate_category(category)
         
@@ -800,147 +952,94 @@ class RecommendationOrchestrator:
             "status": validation_result["status"]
         }
         
-        # Get attributes from comprehensive analysis (LLM extraction)
+        # STEP 2: Extract attributes
         comprehensive_analysis = conversation_state.get("comprehensive_analysis", {})
         attributes_for_search = self._convert_comprehensive_attributes_to_dict(comprehensive_analysis)
         
         logger.info(f"[CASE 2] ✨ Extracted attributes from LLM: {attributes_for_search}")
         
-        # Also store extracted for backward compatibility
+        # Fallback to rule-based extraction if LLM extraction empty
         extract_result = self.attribute_extractor.extract(
             user_input,
             validated_category,
-            use_llm=False  # NO LLM
+            use_llm=False  # NO LLM for CASE 2
         )
         
         conversation_state["extracted"].update(extract_result["extracted"])
         
-        # If LLM attributes empty, use rule-based extraction
         if not attributes_for_search or len(attributes_for_search) == 0:
             logger.info(f"[CASE 2] 💡 LLM attributes empty → Using rule-based extraction")
             attributes_for_search = extract_result["extracted"].copy()
         
-        # lấy schema và required attributes cho category đã được validate
+        # STEP 3: Check for missing required attributes
         schema = get_schema(validated_category)
-        schema_attrs = self.schema_manager.get_attributes_for_category(validated_category)
+        schema_attrs = self.schema_manager.get_attributes_for_category(validated_category) if schema else None
         
-        # If no schema, we don't have required attributes list, so proceed to Product Service query
-        if schema is None:
-            logger.info(f"[CASE 2] No schema found for '{validated_category}', querying Product Service...")
-            db_products = await self.product_service_client.get_products_by_category_and_attributes(
-                category_id=category_id,
-                attributes=attributes_for_search,
-                limit=50
-            )
+        if schema_attrs:
+            required_attrs = [
+                attr for attr, constraint in schema_attrs.items()
+                if constraint.required
+            ]
             
-            if db_products:
-                logger.info(f"[CASE 2] ✅ Found {len(db_products)} products in DB")
-                return await self._process_crawl_results(db_products, conversation_state, case=2, source="db")
+            missing = [
+                attr for attr in required_attrs
+                if attr not in attributes_for_search
+                and attr not in conversation_state.get("attributes_asked", [])
+            ]
             
-            # No schema, no products in DB → Crawl via Crawl Service (8003)
-            logger.info(f"[CASE 2] ❌ DB MISS! Crawling from external sources via CrawlService...")
-            logger.info(f"[CASE 2] 📤 Sending to CrawlService with attributes: {attributes_for_search}")
-            crawled_products = await self.crawl_service_client.crawl(
-                category=validated_category,
-                category_id=category_id,
-                attributes=attributes_for_search
-            )
-            if not crawled_products:
+            if missing:
+                # Ask for next missing attribute
+                next_attr = missing[0]
+                if "attributes_asked" not in conversation_state:
+                    conversation_state["attributes_asked"] = []
+                conversation_state["attributes_asked"].append(next_attr)
+                
+                question = self.dialogue_manager.generate_question({
+                    "has_category": True,
+                    "category": validated_category,
+                    "extracted": attributes_for_search,
+                    "missing_required": [next_attr],
+                    "user_input": user_input
+                })
+                
                 return {
-                    "status": "no_results",
-                    "message": "Không tìm thấy sản phẩm phù hợp.",
+                    "status": "need_info",
+                    "question": question["question"],
+                    "options": question["options"],
+                    "attribute_name": question.get("attribute_name"),
                     "case": 2,
                     "state": conversation_state
                 }
-            # ✅ Save crawled products to Product Service (not directly to DB)
-            try:
-                await self.product_service_client.save_products(
-                    crawled_products, 
-                    source="tiki",
-                    category_id=category_id  # ✅ IMPORTANT: Include category_id
-                )
-            except Exception as e:
-                logger.warning(f"[CASE 2] ⚠️ Failed to save products via Product Service: {e}")
-            return await self._process_crawl_results(crawled_products, conversation_state, case=2, source="crawl")
         
-        required_attrs = [
-            attr for attr, constraint in schema_attrs.items()
-            if constraint.required
-        ]
+        # STEP 4: Get products - DB or crawl+detail if needed
+        # ✅ ProductServiceClient handles ALL crawling logic internally
+        logger.info(f"[CASE 2] 📤 Requesting products from ProductServiceClient (DB or crawl if needed)...")
+        products = await self.product_service_client.get_or_crawl_products(
+            category_id=category_id,
+            category_name=validated_category,
+            attributes=attributes_for_search if attributes_for_search else None,
+            limit=50
+        )
         
-        missing = [
-            attr for attr in required_attrs
-            if attr not in attributes_for_search
-            and attr not in conversation_state.get("attributes_asked", [])
-        ]
+        if not products:
+            return {
+                "status": "no_results",
+                "message": "Không tìm thấy sản phẩm phù hợp.",
+                "case": 2,
+                "state": conversation_state
+            }
         
-        if not missing:
-            # All required attributes provided → Query Product Service first
-            logger.info(f"[CASE 2] All required attributes provided, querying Product Service...")
-            db_products = await self.product_service_client.get_products_by_category_and_attributes(
-                category_id=category_id,
-                attributes=attributes_for_search,
-                limit=50
-            )
-            
-            if db_products:
-                # DB HIT
-                logger.info(f"[CASE 2] ✅ DB HIT! Found {len(db_products)} products")
-                return await self._process_crawl_results(db_products, conversation_state, case=2, source="db")
-            
-            # DB MISS → Crawl via Crawl Service (8003)
-            logger.info(f"[CASE 2] ❌ DB MISS! Crawling from external sources via CrawlService...")
-            logger.info(f"[CASE 2] 📤 Sending to CrawlService with attributes: {attributes_for_search}")
-            crawled_products = await self.crawl_service_client.crawl(
-                category=validated_category,
-                category_id=category_id,
-                attributes=attributes_for_search
-            )
-            
-            if not crawled_products:
-                return {
-                    "status": "no_results",
-                    "message": "Không tìm thấy sản phẩm phù hợp.",
-                    "case": 2,
-                    "state": conversation_state
-                }
-            
-            # ✅ Save crawled products to Product Service (not directly to DB)
-            logger.info(f"[CASE 2] 💾 Saving crawled products via Product Service...")
-            try:
-                await self.product_service_client.save_products(
-                    crawled_products, 
-                    source="tiki",
-                    category_id=category_id  # ✅ IMPORTANT: Include category_id
-                )
-            except Exception as e:
-                logger.warning(f"[CASE 2] ⚠️ Failed to save products via Product Service: {e}")
-            
-            # Return crawled products directly (already complete from CrawlService)
-            return await self._process_crawl_results(crawled_products, conversation_state, case=2, source="crawl")
+        logger.info(f"[CASE 2] ✅ Got {len(products)} products")
         
-        # Ask for next missing attribute
-        next_attr = missing[0]
-        if "attributes_asked" not in conversation_state:
-            conversation_state["attributes_asked"] = []
-        conversation_state["attributes_asked"].append(next_attr)
+        # STEP 5: RANK products by attribute match (now products have full attributes)
+        logger.info(f"[CASE 2] 🎯 Ranking {len(products)} products by attribute match...")
+        ranked_products = self._rank_products_by_attributes(attributes_for_search, products)
         
-        question = self.dialogue_manager.generate_question({
-            "has_category": True,
-            "category": validated_category,  # Use validated category
-            "extracted": attributes_for_search,
-            "missing_required": [next_attr],
-            "user_input": user_input
-        })
+        if ranked_products:
+            logger.info(f"[CASE 2] ✅ Ranking complete. Top product match score: {ranked_products[0].get('_match_score', 0):.2f}")
         
-        return {
-            "status": "need_info",
-            "question": question["question"],
-            "options": question["options"],
-            "attribute_name": question.get("attribute_name"),
-            "case": 2,
-            "state": conversation_state
-        }
+        # STEP 6: Return ranked products
+        return await self._process_crawl_results(ranked_products, conversation_state, case=2)
 
     
     async def handle_case_3_unclear_no_schema(
@@ -1177,7 +1276,7 @@ Be practical and culturally relevant for Vietnamese shopping."""
             if db_products:
                 # DB HIT
                 logger.info(f"[CASE 5] ✅ Found {len(db_products)} products in DB")
-                return await self._process_crawl_results(db_products, conversation_state, case=5, source="db")
+                return await self._process_crawl_results(db_products, conversation_state, case=5)
             
             # DB MISS → Crawl via Crawl Service (8003)
             logger.info(f"[CASE 5] ❌ DB MISS, crawling via CrawlService...")
@@ -1208,7 +1307,7 @@ Be practical and culturally relevant for Vietnamese shopping."""
                 logger.warning(f"[CASE 5] ⚠️ Failed to save products via Product Service: {e}")
             
             # Return crawled products directly (already complete from CrawlService)
-            return await self._process_crawl_results(crawled_products, conversation_state, case=5, source="crawl")
+            return await self._process_crawl_results(crawled_products, conversation_state, case=5)
         
         else:
             # Need more info
@@ -1291,13 +1390,7 @@ Be practical and culturally relevant for Vietnamese shopping."""
             category_id=conversation_state.get("category_id")
         )
         
-        # Determine if products came from DB cache or crawl
-        db_hit = conversation_state.get("cache_hits", 0) > initial_cache_hits
-        source = "db" if db_hit else "crawl"
-        
-        logger.info(f"[CASE 6] Source: {source} (db_hit={db_hit}, cache_hits={conversation_state.get('cache_hits')})")
-        
-        return await self._process_crawl_results(products, conversation_state, case=6, source=source)
+        return await self._process_crawl_results(products, conversation_state, case=6)
 
     
     async def handle_case_7_comparison_advisory(
@@ -1533,57 +1626,34 @@ Format:
         conversation_state["extracted"] = attributes_for_search  # Store extracted attributes
         
         # Return crawled products directly (already complete from CrawlService)
-        return await self._process_crawl_results(crawled_products, conversation_state, case=8, source="crawl")
+        return await self._process_crawl_results(crawled_products, conversation_state, case=8)
     
     async def _process_crawl_results(
         self,
         products: List[Dict[str, Any]],
         conversation_state: Dict[str, Any],
-        case: int,
-        source: str = "crawl"  # NEW: Track source (db, crawl)
+        case: int
     ) -> Dict[str, Any]:
         """
-        Helper to process crawled/DB products and return formatted results
+        Helper to process products from DB and return formatted results
+        
+        All products come from DB (either directly or saved after crawling)
         
         Args:
-            products: List of products
+            products: List of products from DB (already ranked)
             conversation_state: Current conversation state
             case: Case number (1-7)
-            source: Where products came from ("db" or "crawl")
         """
         if not products:
             return {
                 "status": "no_results",
                 "message": "Không tìm thấy sản phẩm phù hợp.",
                 "case": case,
-                "state": conversation_state,
-                "source": source
+                "state": conversation_state
             }
         
+        # Normalize products
         products = [self._normalize_product(p) for p in products]
-        
-        # 🎯 CRITICAL FIX: Skip matcher for DB products - they're already validated by category_id
-        # Only match crawled products (they need validation)
-        if source == "db":
-            # DB products are pre-filtered by category_id → no need to re-validate
-            matched_products = products
-            logger.info(f"[_process_crawl_results] ✅ Using {len(products)} DB products (no re-validation needed)")
-        else:
-            # Crawled products need to be matched/validated
-            matched_products = self.product_matcher.match_products(
-                products,
-                conversation_state["category"],
-                conversation_state["extracted"]
-            )
-        
-        if not matched_products:
-            return {
-                "status": "no_results",
-                "message": "Không có sản phẩm nào phù hợp với yêu cầu.",
-                "case": case,
-                "state": conversation_state,
-                "source": source
-            }
         
         # Update cache
         conversation_state["cached_products"] = products
@@ -1593,22 +1663,12 @@ Format:
             "brand": conversation_state["extracted"].get("brand")
         }
         
-        ranked_products = self.product_ranker.rank(
-            matched_products,
-            conversation_state["extracted"],
-            use_llm_explain=False  # Tắt LLM explanation để giảm API calls
-        )
-        
-        comparison = self.product_ranker.generate_comparison(ranked_products, top_n=3)
-        
         return {
             "status": "results",
-            "products": ranked_products[:20],
-            "comparison": comparison,
-            "total_found": len(matched_products),
+            "products": products,
+            "total_found": len(products),
             "case": case,
-            "state": conversation_state,
-            "source": source  # Track whether from DB or crawl
+            "state": conversation_state
         }
     
     def _extract_category_from_input(self, user_input: str) -> Dict[str, Any]:
@@ -1737,371 +1797,476 @@ Return ONLY valid JSON, no markdown."""
         categories_text = ", ".join(AVAILABLE_CATEGORIES)
         
         prompt = f"""
-You are an AI system for E-COMMERCE PRODUCT UNDERSTANDING
-AND ATTRIBUTE EXTRACTION SCHEMA GENERATION.
+You are an AI system for:
 
-Your task is to:
-1. Identify the literal/concrete product category
-2. Generate ONLY realistic, extractable product attributes
-3. Preserve explicit user constraints/preferences when present
+* E-commerce query understanding
+* Product category detection
+* Retrieval-oriented attribute schema generation
+* Semantic search intent analysis
+* Product ranking signal generation
 
-The generated schema will be used by a RULE-BASED
-ATTRIBUTE EXTRACTION ENGINE operating on raw Vietnamese
-e-commerce product descriptions.
+Your output schema will be used for:
+
+* semantic product retrieval
+* attribute extraction
+* product filtering
+* ranking
+* recommendation
+* search matching
 
 ==================================================
 USER QUERY
-==================================================
+==========
 
-"{merged_intent}"
+"{user_input}"
 
 ==================================================
 KNOWN CATEGORIES (REFERENCE ONLY)
-==================================================
+=================================
 
 {categories_text}
 
 IMPORTANT:
-- KNOWN CATEGORIES are references/examples only
-- You MAY create a NEW category if needed
-- DO NOT force unrelated categories
-- Prefer literal/concrete product types
+
+* KNOWN CATEGORIES are only references/examples
+* You MAY create a NEW category if needed
+* DO NOT force unrelated categories
+* Prefer literal and concrete product types
 
 ==================================================
 CATEGORY RULES
-==================================================
+==============
 
-If the user mentions a CONCRETE PRODUCT TYPE,
+If the query explicitly mentions a concrete product type,
 the category MUST be that exact product type.
 
-GOOD EXAMPLES:
-- "tivi samsung" -> "tivi"
-- "iphone 15" -> "điện thoại"
-- "macbook air" -> "laptop"
-- "chảo chống dính" -> "chảo"
-- "nồi cơm điện" -> "nồi cơm điện"
-- "tai nghe bluetooth" -> "tai nghe"
+GOOD:
 
-BAD EXAMPLES:
-- "tivi" -> "điện thoại"
-- "iphone" -> "tai nghe"
-- "tai nghe" -> "điện thoại"
+* "tai nghe bluetooth" -> "tai nghe"
+* "iphone 15" -> "điện thoại"
+* "macbook air" -> "laptop"
+* "màn hình 144hz" -> "màn hình"
+
+BAD:
+
+* "tai nghe" -> "điện thoại"
+* "tivi" -> "điện tử"
 
 Use broad/general categories ONLY for abstract queries.
 
-ABSTRACT QUERY EXAMPLES:
-- "đồ công nghệ"
-- "quà cho mẹ"
-- "đồ học tập"
+==================================================
+IMPORTANT SYSTEM MINDSET
+========================
+
+This system is PRIMARILY for:
+
+* semantic retrieval
+* ranking
+* product matching
+
+NOT only regex extraction.
+
+IMPORTANT:
+
+* expected_values are MORE IMPORTANT than regex patterns
+* Prefer semantic searchable values
+* Prefer canonical retrieval values
+* Regex patterns are OPTIONAL helpers only
+
+GOOD:
+
+* "wireless"
+* "bluetooth"
+* "oled"
+* "144hz"
+* "đen"
+
+BAD:
+
+* "(có|không có) bluetooth"
+* boolean-style regex features
+* vague yes/no patterns
 
 ==================================================
 ATTRIBUTE GENERATION RULES
-==================================================
+==========================
 
 Generate ONLY attributes that satisfy ALL conditions:
 
-1. Commonly written EXPLICITLY in Vietnamese
-   e-commerce product descriptions
+1. Commonly written EXPLICITLY in Vietnamese e-commerce data
 
-2. Extractable using:
-   - regex matching
-   - keyword matching
-   - simple text parsing
+2. Useful for:
 
-3. Useful for:
-   - product filtering
-   - comparison
-   - ranking
-   - matching
+   * filtering
+   * ranking
+   * retrieval
+   * comparison
+   * semantic search
 
-4. Usually appear in:
-   - specifications
-   - product details
-   - technical information
+3. Usually appear in:
+
+   * product specifications
+   * titles
+   * technical details
+   * descriptions
+
+4. Realistically searchable by users
 
 Prefer attributes with:
-- numeric values
-- measurable values
-- standardized units
-- finite enumerated values
-- technical specifications
-- physical properties
 
-GOOD ATTRIBUTES:
-- ram
-- storage
-- cpu
-- gpu
-- battery
-- battery_capacity
-- screen_size
-- refresh_rate
-- resolution
-- material
-- color
-- weight
-- dimensions
-- capacity
-- wattage
-- voltage
-- bluetooth
-- wireless
-- jack_type
-- driver_size
-- impedance
-- frequency_range
-
-BAD ATTRIBUTES:
-- good_quality
-- premium
-- comfort
-- gaming_experience
-- suitable_for_students
-- usage
-- purpose
-- target_user
-- performance
-- đẹp
-- sang_trọng
-- hot
-- bán_chạy
-
-DO NOT generate:
-- subjective qualities
-- marketing language
-- inferred properties
-- emotional concepts
-- vague attributes
-- abstract shopping preferences
+* finite enumerated values
+* measurable values
+* technical specifications
+* physical properties
+* compatibility information
+* meaningful purchase intent
 
 ==================================================
-USER VALUE RULES
-==================================================
+RETRIEVAL INTENT RULES
+======================
 
-- Preserve explicitly mentioned values
-- Infer ONLY broad realistic constraints
-- DO NOT hallucinate exact specifications
+For EVERY attribute, infer:
+
+* expected_values
+* priority
+* constraint_type
+
+These fields are REQUIRED.
+
+==================================================
+EXPECTED VALUES RULES
+=====================
+
+expected_values represent what the user is likely searching for.
+
+expected_values MUST:
+
+* reflect user intent
+* use searchable values
+* use canonical semantic values whenever possible
+* avoid unnecessary variations
 
 GOOD:
-- "16GB"
-- ">=16GB"
-- "55 inch"
-- "OLED"
-- "5000mAh"
-- "144Hz"
-- "3.5mm"
-- "15-25 triệu"
+
+* ["wireless"]
+* ["bluetooth"]
+* ["đen"]
+* ["oled"]
+* ["144hz"]
+* ["16gb"]
 
 BAD:
-- "Intel i7-13700H"
-- "RTX 4070"
-- "Sony WH-1000XM6"
 
-unless explicitly mentioned by the user.
+* ["có bluetooth"]
+* ["hỗ trợ bluetooth"]
+* hallucinated exact specs
+* unsupported inferred models
+
+If the query does not mention or imply a value:
+
+* use null
 
 ==================================================
-KEYWORD RULES
-==================================================
+PRIORITY RULES
+==============
 
-- Include Vietnamese + English variants
-- Keywords should be:
-  - short
-  - searchable
-  - realistic
-  - commonly used in product descriptions
+Every attribute MUST declare priority.
+
+Allowed values:
+
+* "critical"
+* "high"
+* "medium"
+* "low"
+
+Meaning:
+
+critical:
+
+* core purchase intent
+* strongly affects ranking
+* often should filter results
+
+high:
+
+* very important preference
+* major ranking signal
+
+medium:
+
+* relevant but not dominant
+
+low:
+
+* minor preference
+
+GOOD examples:
+
+Query:
+"chuột gaming không dây logitech"
+
+* connection_type -> critical
+* brand -> high
+* gaming_features -> high
+* color -> low
+
+Query:
+"iphone 15 256gb"
+
+* model -> critical
+* storage -> high
+* color -> low
+
+==================================================
+CONSTRAINT TYPE RULES
+=====================
+
+Every attribute MUST declare constraint_type.
+
+Allowed values:
+
+* "hard"
+* "soft"
+
+hard:
+
+* products SHOULD strongly match
+* mismatches should be heavily penalized
+
+soft:
+
+* preference only
+* mismatch acceptable
+
+GOOD examples:
+
+Query:
+"tai nghe bluetooth"
+
+* connection_type -> hard
+
+Query:
+"màu đen"
+
+* color -> soft
+
+==================================================
+ATTRIBUTE TYPE RULES
+====================
+
+Every attribute MUST declare attr_type.
+
+Allowed values:
+
+* "numeric"
+* "enum"
+* "multi_enum"
+* "regex"
+
+IMPORTANT:
+
+* Prefer enum/multi_enum whenever possible
+* regex should be RARE
+* regex is ONLY for structured measurable patterns
+
+==================================================
+ATTR_TYPE DEFINITIONS
+=====================
+
+numeric:
+
+* measurable numeric values
+* MUST have value_pattern
 
 GOOD:
-["tivi", "tv", "smart tv"]
-["pin", "battery", "mah"]
-["bluetooth", "không dây"]
 
-BAD:
-["âm thanh cực đỉnh"]
-["siêu bền"]
-["trải nghiệm gaming"]
+* RAM
+* battery capacity
+* refresh rate
+* storage
+* DPI
+
+enum:
+
+* exactly ONE value from vocabulary
+* MUST have vocabulary
+* value_pattern must be null
+
+GOOD:
+
+* color
+* skin type
+* operating system
+
+multi_enum:
+
+* MULTIPLE possible values
+* MUST have vocabulary
+* value_pattern must be null
+
+GOOD:
+
+* connectivity
+* features
+* compatibility
+
+regex:
+
+* ONLY for structured text patterns
+* MUST have specific pattern
+* NEVER use broad unsafe patterns
+
+GOOD:
+
+* bluetooth version
+* dimensions
+* voltage
 
 ==================================================
-ATTRIBUTE TYPES
-==================================================
+REGEX SAFETY RULES
+==================
 
-Every attribute MUST declare an "attr_type".
-Choose from:
+NEVER use:
 
-  "numeric"    — has a measurable numeric value
-                 MUST have a specific value_pattern
-                 value_pattern must match the unit
-                 Examples: ram, storage, battery, screen_size, khối lượng
+* ".*"
+* ".+"
+* "\w+"
+* "\S+"
 
-  "enum"       — exactly ONE value from a fixed list
-                 MUST have a "vocabulary" list
-                 Set value_pattern to null
-                 Examples: color, loại da, loại tóc, chất liệu
-
-  "multi_enum" — MULTIPLE values from a fixed list
-                 MUST have a "vocabulary" list
-                 Set value_pattern to null
-                 Examples: thành phần, kết nối, tính năng, công dụng
-
-  "regex"      — free text with a SPECIFIC pattern
-                 MUST have a non-generic value_pattern
-                 Use ONLY when numeric/enum/multi_enum do not fit
-                 Examples: model_number, bluetooth_version
-
-CRITICAL:
-- NEVER set value_pattern to ".*" or ".+" for ANY attr_type
-- If you want to match free text → use multi_enum + vocabulary instead
-- If attr_type is "enum" or "multi_enum" → vocabulary is REQUIRED
-- If attr_type is "numeric" → value_pattern is REQUIRED and must be specific
-- If attr_type is "regex" → value_pattern is REQUIRED and must be specific
+GOOD:
+"[0-9]+\\s?gb"
+"[0-9]+\\s?(mah|mAh)"
+"[0-9]+\\s?(hz|Hz)"
+"bluetooth\\s?[0-9]+\\.?[0-9]*"
 
 ==================================================
 VOCABULARY RULES
-==================================================
+================
 
-For enum and multi_enum attributes, provide realistic
-vocabulary lists based on the product category.
+Vocabulary MUST:
 
-Keep vocabulary:
-- Realistic for the product category
-- 5-20 terms per attribute
-- Vietnamese preferred, English variants allowed
-- Lowercase only
+* be lowercase
+* be realistic
+* be searchable
+* be category-specific
+* contain canonical values
 
-GOOD vocabulary for "thành phần" (dầu xả / skincare):
-["vitamin e", "keratin", "collagen", "argan oil", "biotin",
- "protein", "caffeine", "niacinamide", "chiết xuất dừa",
- "chiết xuất bơ", "panthenol", "axit amin", "tinh dầu"]
-
-GOOD vocabulary for "loại tóc":
-["tóc thường", "tóc khô", "tóc dầu", "tóc hư tổn",
- "tóc nhuộm", "tóc uốn", "mọi loại tóc"]
-
-GOOD vocabulary for "mùi hương":
-["hoa hồng", "cam", "chanh", "bạc hà", "dừa",
- "vanilla", "hoa nhài", "không mùi", "thảo mộc", "trái cây"]
-
-GOOD vocabulary for "loại da":
-["da dầu", "da khô", "da hỗn hợp", "da nhạy cảm",
- "da thường", "mọi loại da"]
-
-GOOD vocabulary for "màu sắc" (điện tử):
-["đen", "trắng", "xanh", "đỏ", "bạc", "vàng",
- "black", "white", "silver", "gold", "xanh navy", "xanh mint"]
-
-GOOD vocabulary for "kết nối" (tai nghe / điện tử):
-["bluetooth", "wifi", "usb-c", "jack 3.5mm", "nfc",
- "không dây", "có dây", "usb", "lightning"]
-
-==================================================
-REGEX RULES
-==================================================
-
-Use "regex" attr_type ONLY for attributes that are:
-- numeric with units (prefer "numeric" instead)
-- structured codes or identifiers
-
-value_pattern must be SIMPLE and SPECIFIC.
-Avoid complex syntax. Minimize false positives.
-
-GOOD patterns:
-"[0-9]+\\\\s?gb"
-"[0-9]+\\\\s?(mah|mAh)"
-"[0-9]+\\\\s?(hz|Hz)"
-"[0-9]+\\\\s?inch"
-"[0-9]+\\\\s?ml"
-"[0-9]+\\\\s?(mg|g|kg)"
-"bluetooth\\\\s?[0-9]+\\\\.?[0-9]*"
-
-BAD patterns (NEVER use):
-".*"
-".+"
-"[a-zA-Z]+"
-"\\\\w+"
-"\\\\S+"
-
-==================================================
-ATTRIBUTE QUALITY RULES
-==================================================
-
-If an attribute cannot be reliably extracted
-from raw product text, DO NOT include it.
-
-Prefer FEWER high-quality attributes
-over MANY noisy attributes.
-
-Target:
-- high precision
-- realistic extraction
-- low hallucination
-- practical matching
+GOOD:
+["đen", "trắng", "xanh", "silver"]
+["bluetooth", "wifi", "wireless", "usb-c"]
+["anc", "noise cancelling", "transparent mode"]
 
 ==================================================
 OUTPUT FORMAT
-==================================================
+=============
 
-Return ONLY valid JSON. No markdown. No explanation.
+Return ONLY valid JSON.
 
 {{
-  "category": "literal product category",
-  "attributes": [
-    {{
-      "name": "khối lượng",
-      "attr_type": "numeric",
-      "keywords": ["ml", "gram", "g", "khối lượng", "dung tích"],
-      "value_pattern": "[0-9]+\\\\s?ml",
-      "user_value": null
-    }},
-    {{
-      "name": "loại tóc",
-      "attr_type": "enum",
-      "keywords": ["loại tóc", "tóc", "phù hợp"],
-      "vocabulary": [
-        "tóc thường", "tóc khô", "tóc dầu",
-        "tóc hư tổn", "tóc nhuộm", "tóc uốn", "mọi loại tóc"
-      ],
-      "value_pattern": null,
-      "user_value": null
-    }},
-    {{
-      "name": "thành phần",
-      "attr_type": "multi_enum",
-      "keywords": ["thành phần", "ingredients", "chứa", "chiết xuất"],
-      "vocabulary": [
-        "keratin", "collagen", "vitamin e", "argan oil",
-        "protein", "panthenol", "chiết xuất dừa", "biotin",
-        "axit amin", "tinh dầu", "niacinamide"
-      ],
-      "value_pattern": null,
-      "user_value": null
-    }},
-    {{
-      "name": "mùi hương",
-      "attr_type": "enum",
-      "keywords": ["mùi", "hương", "mùi hương"],
-      "vocabulary": [
-        "hoa hồng", "cam", "chanh", "bạc hà", "dừa",
-        "vanilla", "hoa nhài", "không mùi", "thảo mộc", "trái cây"
-      ],
-      "value_pattern": null,
-      "user_value": null
-    }}
+"category": "literal product category",
+
+"attributes": [
+{{
+"name": "kết nối",
+
+  "attr_type": "multi_enum",
+
+  "keywords": [
+    "bluetooth",
+    "wifi",
+    "wireless",
+    "không dây"
   ],
-  "confidence": 0.95,
-  "category_changed": false,
-  "is_new_category": false
+
+  "vocabulary": [
+    "bluetooth",
+    "wifi",
+    "wireless",
+    "có dây",
+    "usb-c"
+  ],
+
+  "value_pattern": null,
+
+  "expected_values": [
+    "bluetooth",
+    "wireless"
+  ],
+
+  "priority": "critical",
+
+  "constraint_type": "hard"
+}},
+
+{{
+  "name": "màu sắc",
+
+  "attr_type": "enum",
+
+  "keywords": [
+    "màu",
+    "màu sắc",
+    "color"
+  ],
+
+  "vocabulary": [
+    "đen",
+    "trắng",
+    "xanh",
+    "silver"
+  ],
+
+  "value_pattern": null,
+
+  "expected_values": [
+    "đen"
+  ],
+
+  "priority": "low",
+
+  "constraint_type": "soft"
+}}
+
+
+],
+
+"confidence": 0.95,
+
+"category_changed": false,
+
+"is_new_category": false
 }}
 
 ==================================================
-REMEMBER
-==================================================
+FINAL RULES
+===========
 
-- Return ONLY JSON
-- No markdown, no backticks, no explanations
-- Every attribute MUST have "attr_type"
-- "enum" and "multi_enum" MUST have "vocabulary"
-- "numeric" and "regex" MUST have a specific "value_pattern"
-- NEVER use ".*" or ".+" as value_pattern
-- vocabulary terms must be lowercase
+* Return ONLY JSON
+
+* No markdown
+
+* No explanations
+
+* Every attribute MUST include:
+
+  * attr_type
+  * expected_values
+  * priority
+  * constraint_type
+
+* enum and multi_enum MUST have vocabulary
+
+* numeric and regex MUST have specific value_pattern
+
+* vocabulary MUST be lowercase
+
+* expected_values should reflect retrieval intent
+
+* Prefer semantic searchable values over regex-style boolean extraction
+
+* NEVER hallucinate unsupported product specifications
+
+
 """        
         try:
             response = call_openai(
@@ -2202,268 +2367,477 @@ REMEMBER
         categories_text = ", ".join(AVAILABLE_CATEGORIES)
 
         prompt = f"""
-You are an AI system for E-COMMERCE PRODUCT UNDERSTANDING
-AND ATTRIBUTE EXTRACTION SCHEMA GENERATION.
+You are an AI system for:
 
-Your task is to:
-1. Identify the literal/concrete product category
-2. Generate ONLY realistic, extractable product attributes
-3. Preserve explicit user constraints/preferences when present
+* E-commerce query understanding
+* Product category detection
+* Retrieval-oriented attribute schema generation
+* Semantic search intent analysis
+* Product ranking signal generation
 
-The generated schema will be used by a RULE-BASED
-ATTRIBUTE EXTRACTION ENGINE operating on raw Vietnamese
-e-commerce product descriptions.
+Your output schema will be used for:
+
+* semantic product retrieval
+* attribute extraction
+* product filtering
+* ranking
+* recommendation
+* search matching
 
 ==================================================
 USER QUERY
-==================================================
+==========
 
 "{merged_intent}"
 
 ==================================================
 KNOWN CATEGORIES (REFERENCE ONLY)
-==================================================
+=================================
 
 {categories_text}
 
 IMPORTANT:
-- KNOWN CATEGORIES are references/examples only
-- You MAY create a NEW category if needed
-- DO NOT force unrelated categories
-- Prefer literal/concrete product types
+
+* KNOWN CATEGORIES are only references/examples
+* You MAY create a NEW category if needed
+* DO NOT force unrelated categories
+* Prefer literal and concrete product types
 
 ==================================================
 CATEGORY RULES
-==================================================
+==============
 
-If the user mentions a CONCRETE PRODUCT TYPE,
+If the query explicitly mentions a concrete product type,
 the category MUST be that exact product type.
 
-GOOD EXAMPLES:
-- "tivi samsung" -> "tivi"
-- "iphone 15" -> "điện thoại"
-- "macbook air" -> "laptop"
-- "chảo chống dính" -> "chảo"
-- "nồi cơm điện" -> "nồi cơm điện"
-- "tai nghe bluetooth" -> "tai nghe"
+GOOD:
 
-BAD EXAMPLES:
-- "tivi" -> "điện thoại"
-- "iphone" -> "tai nghe"
-- "tai nghe" -> "điện thoại"
+* "tai nghe bluetooth" -> "tai nghe"
+* "iphone 15" -> "điện thoại"
+* "macbook air" -> "laptop"
+* "màn hình 144hz" -> "màn hình"
+
+BAD:
+
+* "tai nghe" -> "điện thoại"
+* "tivi" -> "điện tử"
 
 Use broad/general categories ONLY for abstract queries.
 
-ABSTRACT QUERY EXAMPLES:
-- "đồ công nghệ"
-- "quà cho mẹ"
-- "đồ học tập"
+==================================================
+IMPORTANT SYSTEM MINDSET
+========================
+
+This system is PRIMARILY for:
+
+* semantic retrieval
+* ranking
+* product matching
+
+NOT only regex extraction.
+
+IMPORTANT:
+
+* expected_values are MORE IMPORTANT than regex patterns
+* Prefer semantic searchable values
+* Prefer canonical retrieval values
+* Regex patterns are OPTIONAL helpers only
+
+GOOD:
+
+* "wireless"
+* "bluetooth"
+* "oled"
+* "144hz"
+* "đen"
+
+BAD:
+
+* "(có|không có) bluetooth"
+* boolean-style regex features
+* vague yes/no patterns
 
 ==================================================
 ATTRIBUTE GENERATION RULES
-==================================================
+==========================
 
 Generate ONLY attributes that satisfy ALL conditions:
 
-1. Commonly written EXPLICITLY in Vietnamese
-   e-commerce product descriptions
+1. Commonly written EXPLICITLY in Vietnamese e-commerce data
 
-2. Extractable using:
-   - regex matching
-   - keyword matching
-   - simple text parsing
+2. Useful for:
 
-3. Useful for:
-   - product filtering
-   - comparison
-   - ranking
-   - matching
+   * filtering
+   * ranking
+   * retrieval
+   * comparison
+   * semantic search
 
-4. Usually appear in:
-   - specifications
-   - product details
-   - technical information
+3. Usually appear in:
+
+   * product specifications
+   * titles
+   * technical details
+   * descriptions
+
+4. Realistically searchable by users
 
 Prefer attributes with:
-- numeric values
-- measurable values
-- standardized units
-- finite enumerated values
-- technical specifications
-- physical properties
 
-GOOD ATTRIBUTES:
-- ram
-- storage
-- cpu
-- gpu
-- battery
-- battery_capacity
-- screen_size
-- refresh_rate
-- resolution
-- material
-- color
-- weight
-- dimensions
-- capacity
-- wattage
-- voltage
-- bluetooth
-- wireless
-- jack_type
-- driver_size
-- impedance
-- frequency_range
-
-BAD ATTRIBUTES:
-- good_quality
-- premium
-- comfort
-- gaming_experience
-- suitable_for_students
-- usage
-- purpose
-- target_user
-- performance
-- đẹp
-- sang_trọng
-- hot
-- bán_chạy
-
-DO NOT generate:
-- subjective qualities
-- marketing language
-- inferred properties
-- emotional concepts
-- vague attributes
-- abstract shopping preferences
+* finite enumerated values
+* measurable values
+* technical specifications
+* physical properties
+* compatibility information
+* meaningful purchase intent
 
 ==================================================
-USER VALUE RULES
-==================================================
+RETRIEVAL INTENT RULES
+======================
 
-- Preserve explicitly mentioned values
-- Infer ONLY broad realistic constraints
-- DO NOT hallucinate exact specifications
+For EVERY attribute, infer:
+
+* expected_values
+* priority
+* constraint_type
+
+These fields are REQUIRED.
+
+==================================================
+EXPECTED VALUES RULES
+=====================
+
+expected_values represent what the user is likely searching for.
+
+expected_values MUST:
+
+* reflect user intent
+* use searchable values
+* use canonical semantic values whenever possible
+* avoid unnecessary variations
 
 GOOD:
-- "16GB"
-- ">=16GB"
-- "55 inch"
-- "OLED"
-- "5000mAh"
-- "144Hz"
-- "3.5mm"
-- "15-25 triệu"
+
+* ["wireless"]
+* ["bluetooth"]
+* ["đen"]
+* ["oled"]
+* ["144hz"]
+* ["16gb"]
 
 BAD:
-- "Intel i7-13700H"
-- "RTX 4070"
-- "Sony WH-1000XM6"
 
-unless explicitly mentioned by the user.
+* ["có bluetooth"]
+* ["hỗ trợ bluetooth"]
+* hallucinated exact specs
+* unsupported inferred models
+
+If the query does not mention or imply a value:
+
+* use null
 
 ==================================================
-KEYWORD RULES
-==================================================
+PRIORITY RULES
+==============
 
-- Include Vietnamese + English variants
-- Keywords should be:
-  - short
-  - searchable
-  - realistic
-  - commonly used in product descriptions
+Every attribute MUST declare priority.
+
+Allowed values:
+
+* "critical"
+* "high"
+* "medium"
+* "low"
+
+Meaning:
+
+critical:
+
+* core purchase intent
+* strongly affects ranking
+* often should filter results
+
+high:
+
+* very important preference
+* major ranking signal
+
+medium:
+
+* relevant but not dominant
+
+low:
+
+* minor preference
+
+GOOD examples:
+
+Query:
+"chuột gaming không dây logitech"
+
+* connection_type -> critical
+* brand -> high
+* gaming_features -> high
+* color -> low
+
+Query:
+"iphone 15 256gb"
+
+* model -> critical
+* storage -> high
+* color -> low
+
+==================================================
+CONSTRAINT TYPE RULES
+=====================
+
+Every attribute MUST declare constraint_type.
+
+Allowed values:
+
+* "hard"
+* "soft"
+
+hard:
+
+* products SHOULD strongly match
+* mismatches should be heavily penalized
+
+soft:
+
+* preference only
+* mismatch acceptable
+
+GOOD examples:
+
+Query:
+"tai nghe bluetooth"
+
+* connection_type -> hard
+
+Query:
+"màu đen"
+
+* color -> soft
+
+==================================================
+ATTRIBUTE TYPE RULES
+====================
+
+Every attribute MUST declare attr_type.
+
+Allowed values:
+
+* "numeric"
+* "enum"
+* "multi_enum"
+* "regex"
+
+IMPORTANT:
+
+* Prefer enum/multi_enum whenever possible
+* regex should be RARE
+* regex is ONLY for structured measurable patterns
+
+==================================================
+ATTR_TYPE DEFINITIONS
+=====================
+
+numeric:
+
+* measurable numeric values
+* MUST have value_pattern
 
 GOOD:
-["tivi", "tv", "smart tv"]
 
-["pin", "battery", "mah"]
+* RAM
+* battery capacity
+* refresh rate
+* storage
+* DPI
 
-["bluetooth", "không dây"]
+enum:
 
-BAD:
-["âm thanh cực đỉnh"]
-["siêu bền"]
-["trải nghiệm gaming"]
-
-==================================================
-REGEX RULES
-==================================================
-
-- value_pattern must be SIMPLE regex only
-- Keep regex practical for text matching
-- Avoid complex regex syntax
-- Avoid overly generic matching
-- Minimize false positives
-- Match realistic Vietnamese e-commerce wording
+* exactly ONE value from vocabulary
+* MUST have vocabulary
+* value_pattern must be null
 
 GOOD:
-"[0-9]+\\\\s?gb"
 
-"[0-9]+\\\\s?(mah|mAh)"
+* color
+* skin type
+* operating system
 
-"[0-9]+\\\\s?(hz|Hz)"
+multi_enum:
 
-"(đen|trắng|xanh|đỏ|black|white)"
+* MULTIPLE possible values
+* MUST have vocabulary
+* value_pattern must be null
 
-BAD:
-".*"
-"[a-zA-Z]+"
+GOOD:
+
+* connectivity
+* features
+* compatibility
+
+regex:
+
+* ONLY for structured text patterns
+* MUST have specific pattern
+* NEVER use broad unsafe patterns
+
+GOOD:
+
+* bluetooth version
+* dimensions
+* voltage
 
 ==================================================
-ATTRIBUTE QUALITY RULES
+REGEX SAFETY RULES
+==================
+
+NEVER use:
+
+* ".*"
+* ".+"
+* "\w+"
+* "\S+"
+
+GOOD:
+"[0-9]+\\s?gb"
+"[0-9]+\\s?(mah|mAh)"
+"[0-9]+\\s?(hz|Hz)"
+"bluetooth\\s?[0-9]+\\.?[0-9]*"
+
 ==================================================
+VOCABULARY RULES
+================
 
-If an attribute cannot be reliably extracted
-from raw product text, DO NOT include it.
+Vocabulary MUST:
 
-Prefer FEWER high-quality attributes
-over MANY noisy attributes.
+* be lowercase
+* be realistic
+* be searchable
+* be category-specific
+* contain canonical values
 
-Target:
-- high precision
-- realistic extraction
-- low hallucination
-- practical matching
+GOOD:
+["đen", "trắng", "xanh", "silver"]
+["bluetooth", "wifi", "wireless", "usb-c"]
+["anc", "noise cancelling", "transparent mode"]
 
 ==================================================
 OUTPUT FORMAT
-==================================================
+=============
 
 Return ONLY valid JSON.
 
 {{
-  "category": "literal product category",
-  "attributes": [
-    {{
-      "name": "screen_size",
-      "keywords": ["inch", "screen", "màn hình"],
-      "value_pattern": "[0-9]+\\\\s?inch",
-      "user_value": "55 inch"
-    }}
+"category": "literal product category",
+
+"attributes": [
+{{
+"name": "kết nối",
+
+  "attr_type": "multi_enum",
+
+  "keywords": [
+    "bluetooth",
+    "wifi",
+    "wireless",
+    "không dây"
   ],
-  "confidence": 0.95,
-  "category_changed": false,
-  "is_new_category": false
+
+  "vocabulary": [
+    "bluetooth",
+    "wifi",
+    "wireless",
+    "có dây",
+    "usb-c"
+  ],
+
+  "value_pattern": null,
+
+  "expected_values": [
+    "bluetooth",
+    "wireless"
+  ],
+
+  "priority": "critical",
+
+  "constraint_type": "hard"
+}},
+
+{{
+  "name": "màu sắc",
+
+  "attr_type": "enum",
+
+  "keywords": [
+    "màu",
+    "màu sắc",
+    "color"
+  ],
+
+  "vocabulary": [
+    "đen",
+    "trắng",
+    "xanh",
+    "silver"
+  ],
+
+  "value_pattern": null,
+
+  "expected_values": [
+    "đen"
+  ],
+
+  "priority": "low",
+
+  "constraint_type": "soft"
+}}
+
+
+],
+
+"confidence": 0.95,
+
+"category_changed": false,
+
+"is_new_category": false
 }}
 
 ==================================================
-IMPORTANT
-==================================================
+FINAL RULES
+===========
 
-- Return ONLY JSON
-- No markdown
-- No explanations
-- No comments
-- No extra text
-- category must represent the literal product type
-- If category is not in KNOWN_CATEGORIES,
-  you may still return it as a NEW category
-- Generate ONLY extractable attributes
-- Think like an INFORMATION EXTRACTION ENGINE,
-  NOT a shopping assistant
-"""
+* Return ONLY JSON
+
+* No markdown
+
+* No explanations
+
+* Every attribute MUST include:
+
+  * attr_type
+  * expected_values
+  * priority
+  * constraint_type
+
+* enum and multi_enum MUST have vocabulary
+
+* numeric and regex MUST have specific value_pattern
+
+* vocabulary MUST be lowercase
+
+* expected_values should reflect retrieval intent
+
+* Prefer semantic searchable values over regex-style boolean extraction
+
+* NEVER hallucinate unsupported product specifications
+
+
+"""        
         try:
             response = call_openai(
                 prompt,
@@ -2534,7 +2908,11 @@ IMPORTANT
                         "name": str(name).strip().lower(),
                         "keywords": attr.get("keywords", []),
                         "value_pattern": attr.get("value_pattern", ""),
-                        "user_value": attr.get("user_value")
+                        "user_value": attr.get("user_value"),
+                        "expected_values": attr.get("expected_values"),   # ← quan trọng nhất
+                        "priority": attr.get("priority", "medium"),       # ← ranking signal
+                        "constraint_type": attr.get("constraint_type", "soft"),
+                        
                     })
 
             logger.info("[Orchestrator] 📊 Parsed Analysis:")
@@ -2618,7 +2996,7 @@ IMPORTANT
         # STEP 0: ✅ ANALYZE INTENT - Enrich conversation_state with intent info BEFORE classification
         logger.info(f"\n[Orchestrator] 📊 Analyzing user intent from: '{user_input}'")
         intent_result = self.intent_mapper.map_intent(user_input)
-        logger.info(f"[Orchestrator] ✅ Intent detected:")
+        logger.info(f"[Orchestrator] ✅ Intent detected:")  
         logger.info(f"  - Intent: {intent_result['intent']}")
         logger.info(f"  - Intent Type: {intent_result['intent_type']}")
         logger.info(f"  - Categories: {intent_result['categories']}")
@@ -2646,7 +3024,6 @@ IMPORTANT
         # For first query: use user_input
         # For follow-up: use merged_intent from analyze_processor (already in conversation_state)
         merged_intent = conversation_state.get("merged_intent", user_input)
-        
         logger.info(f"\n[Orchestrator] 🧠 Extracting category + attributes (LLM call)...")
         comprehensive = self._comprehensive_intent_analysis(merged_intent, conversation_state)
         conversation_state["comprehensive_analysis"] = comprehensive

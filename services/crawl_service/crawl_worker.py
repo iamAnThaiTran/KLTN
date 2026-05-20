@@ -366,6 +366,170 @@ def execute_product_details_crawl(task_data: Dict[str, Any]) -> Dict[str, Any]:
         }
 
 
+def execute_enrichment_task(task_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Execute enrichment task for category schema evolution
+    
+    Flow:
+    1. Get products of category from ProductService
+    2. Crawl product details with new attributes
+    3. Extract new attributes
+    4. Save to ProductService
+    
+    Args:
+        task_data: {
+            "category_id": int,
+            "category_name": str,
+            "attributes": ["5G", "khả năng chống nước"],
+            "action": "recrawl_and_extract_attributes",
+            "description": str
+        }
+    
+    Returns:
+        Dictionary with enrichment results
+    """
+    try:
+        category_id = task_data.get("category_id")
+        category_name = task_data.get("category_name")
+        new_attributes = task_data.get("attributes", [])
+        
+        logger.info(f"🔄 Enrichment task: category_id={category_id}, category_name='{category_name}'")
+        logger.info(f"   New attributes to extract: {new_attributes}")
+        
+        # STEP 1: Get products of category from ProductService
+        logger.info(f"📤 Getting products of category from ProductService...")
+        try:
+            product_service_url = f"http://{PRODUCT_SERVICE_HOST}:{PRODUCT_SERVICE_PORT}/api/categories/{category_id}/products"
+            response = httpx.get(product_service_url, timeout=30.0)
+            
+            if response.status_code != 200:
+                logger.warning(f"⚠️ Failed to get products: HTTP {response.status_code}")
+                return {
+                    "status": "error",
+                    "error": f"Failed to get products from ProductService: HTTP {response.status_code}",
+                    "category_id": category_id
+                }
+            
+            products_data = response.json()
+            product_ids = products_data.get("product_ids", [])
+            spids = products_data.get("spids", [])
+            
+            logger.info(f"✅ Retrieved {len(product_ids)} products for enrichment")
+            
+            if not product_ids:
+                logger.info(f"ℹ️  No products found for category {category_id}")
+                return {
+                    "status": "success",
+                    "category_id": category_id,
+                    "products_enriched": 0,
+                    "reason": "No products found"
+                }
+        
+        except Exception as e:
+            logger.error(f"❌ Error getting products from ProductService: {e}")
+            return {
+                "status": "error",
+                "error": str(e),
+                "category_id": category_id
+            }
+        
+        # STEP 2: Build dynamic schema from new attributes
+        logger.info(f"📐 Building extraction schema for {len(new_attributes)} attributes...")
+        schema = {
+            "category": category_name,
+            "attributes": [
+                {
+                    "name": attr,
+                    "keywords": [attr.lower()],
+                    "value_pattern": None  # Will use LLM extraction
+                }
+                for attr in new_attributes
+            ]
+        }
+        
+        logger.info(f"✅ Schema built: {[a['name'] for a in schema['attributes']]}")
+        
+        # STEP 3: Crawl product details with new attributes
+        logger.info(f"🕷️ Crawling product details for {len(product_ids)} products...")
+        
+        # Limit to top 20 products to avoid timeout
+        products_to_crawl = product_ids[:20]
+        spids_to_crawl = spids[:20] if spids else [""] * len(products_to_crawl)
+        
+        logger.info(f"📊 Crawling top {len(products_to_crawl)} products (limited from {len(product_ids)})")
+        
+        crawl_result = execute_product_details_crawl({
+            "product_ids": products_to_crawl,
+            "spids": spids_to_crawl,
+            "schema": schema,
+            "max_concurrent": 3
+        })
+        
+        if crawl_result.get("status") != "success":
+            logger.error(f"❌ Product details crawl failed: {crawl_result.get('error')}")
+            return {
+                "status": "error",
+                "error": f"Product details crawl failed: {crawl_result.get('error')}",
+                "category_id": category_id
+            }
+        
+        # STEP 4: Save extracted attributes to ProductService
+        logger.info(f"💾 Saving extracted attributes to ProductService...")
+        
+        attributes_saved = 0
+        attributes_failed = 0
+        
+        for index, crawl_result_item in enumerate(crawl_result.get("results", [])):
+            if crawl_result_item.get("status") == "success":
+                # Get spid from product or from spids list
+                spid = crawl_result_item.get("product", {}).get("spid")
+                if not spid and index < len(spids_to_crawl):
+                    spid = spids_to_crawl[index]
+                
+                extracted_attrs = crawl_result_item.get("extracted_attributes", {})
+                extraction_method = crawl_result_item.get("extraction_method", "unknown")
+                confidence = crawl_result_item.get("confidence", 0.0)
+                
+                logger.info(
+                    f"🔍 Saving attributes for spid={spid}: "
+                    f"attrs_count={len(extracted_attrs)}, "
+                    f"method={extraction_method}, confidence={confidence:.1%}"
+                )
+                
+                if spid and extracted_attrs:
+                    success = save_sku_attributes_to_product_service(
+                        sku_code=str(spid),
+                        attributes=extracted_attrs
+                    )
+                    if success:
+                        attributes_saved += 1
+                    else:
+                        attributes_failed += 1
+        
+        logger.info(f"📊 Enrichment complete: {attributes_saved} saved, {attributes_failed} failed")
+        
+        return {
+            "status": "success",
+            "category_id": category_id,
+            "category_name": category_name,
+            "new_attributes": new_attributes,
+            "products_crawled": len(products_to_crawl),
+            "attributes_saved": attributes_saved,
+            "attributes_failed": attributes_failed,
+            "extraction_method": crawl_result.get("extraction_method"),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    
+    except Exception as e:
+        logger.error(f"❌ Enrichment task error: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e),
+            "category_id": task_data.get("category_id")
+        }
+
+
+
 # ============================================================================
 # Product Service Integration - Save Attributes
 # ============================================================================
@@ -448,8 +612,13 @@ def process_task(task_message: Dict[str, Any]) -> bool:
         
         logger.info(f"Starting task: {task_id}")
         logger.info(f"🔍 Task category: {task.category!r} | attributes: {list(task.attributes.keys()) if task.attributes else 'None'}")
+        
         # Route based on task type
-        if task.category == "product_details":
+        if task.category == "enrichment":
+            # 🆕 Enrichment task - recrawl and extract new attributes
+            result = execute_enrichment_task(task.attributes)
+            
+        elif task.category == "product_details":
             # 🆕 Product details crawl with attribute extraction
             product_ids = task.attributes.get("product_ids", [])
             spids = task.attributes.get("spids", []) or []

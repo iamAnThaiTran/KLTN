@@ -210,6 +210,48 @@ class CrawlServiceClient:
         
         return result.get("task_id")
     
+    async def enqueue_enrichment_task(
+        self,
+        task_data: Dict[str, Any],
+        priority: str = "normal",
+        max_retries: int = 3
+    ) -> str:
+        """
+        Enqueue enrichment task for category schema evolution
+        
+        When category schema updates with new attributes, enqueue background
+        enrichment task to recrawl products and extract new attributes.
+        
+        Args:
+            task_data: Enrichment task metadata
+                {
+                    "type": "enrichment",
+                    "category_id": int,
+                    "category_name": str,
+                    "attributes": List[str],  # New attributes to extract
+                    "action": "recrawl_and_extract_attributes",
+                    "description": str
+                }
+            priority: Task priority (high, normal, low)
+            max_retries: Maximum retry attempts
+        
+        Returns:
+            task_id (str) - Use get_task_result() to poll for completion
+        """
+        payload = {
+            **task_data,
+            "priority": priority,
+            "max_retries": max_retries
+        }
+        
+        result = await self._request_with_retry(
+            "POST",
+            "/api/crawl/enqueue-enrichment",
+            json=payload
+        )
+        
+        return result.get("task_id")
+    
     async def get_task_status(self, task_id: str) -> Dict[str, Any]:
         """
         Get status of a crawl task
@@ -493,6 +535,129 @@ class CrawlServiceClient:
         except Exception as e:
             logger.error(f"[CrawlServiceClient] ❌ Failed to get task result: {e}")
             raise Exception(f"Failed to retrieve crawl results: {e}")
+    
+    async def crawl_product_details_sync(
+        self,
+        product_ids: List[str],
+        spids: Optional[List[str]] = None,
+        category_id: Optional[int] = None,
+        schema: Optional[Dict[str, Any]] = None,
+        max_concurrent: int = 5,
+        wait_for_completion: bool = True,
+        timeout_seconds: int = 600,
+        poll_interval: float = 2.0
+    ) -> List[Dict[str, Any]]:
+        """
+        BLOCKING product details crawl - enqueue task and wait for completion
+        
+        Synchronous wrapper for product detail crawling with attribute extraction.
+        
+        Args:
+            product_ids: List of Tiki product IDs to crawl details for
+            spids: Optional list of seller IDs (for Tiki)
+            category_id: Category ID from database (optional)
+            schema: Optional dynamic schema for attribute extraction
+            max_concurrent: Max concurrent crawls (default: 5)
+            wait_for_completion: Whether to wait for task completion (default: True)
+            timeout_seconds: Maximum wait time (default: 10 minutes)
+            poll_interval: How often to check status (seconds, default: 2)
+        
+        Returns:
+            List of products with crawled details and attributes
+        
+        Raises:
+            TimeoutError: If task takes too long
+            Exception: If crawl task fails
+        
+        Example:
+            products = await crawl_client.crawl_product_details_sync(
+                product_ids=["276183351", "276183352"],
+                spids=["276183355", "276183356"],
+                category_id=5,
+                schema=category_schema,
+                max_concurrent=5
+            )
+        """
+        logger.info(f"[CrawlServiceClient] 🚀 Starting blocking product details crawl for {len(product_ids)} products")
+        
+        # STEP 1: Enqueue product detail crawl task
+        try:
+            enqueue_result = await self.enqueue_product_detail_crawl(
+                product_ids=product_ids,
+                spids=spids,
+                schema=schema,
+                max_concurrent=max_concurrent,
+                priority="high"  # Use high priority for direct crawls
+            )
+            task_id = enqueue_result
+            logger.info(f"[CrawlServiceClient] ✅ Product detail task enqueued: {task_id}")
+        except Exception as e:
+            logger.error(f"[CrawlServiceClient] ❌ Failed to enqueue product detail crawl: {e}")
+            raise
+        
+        # Return immediately if not waiting for completion
+        if not wait_for_completion:
+            logger.info(f"[CrawlServiceClient] ℹ️  Returning task_id without waiting: {task_id}")
+            return []
+        
+        # STEP 2: Poll for task completion
+        elapsed = 0.0
+        while elapsed < timeout_seconds:
+            try:
+                status_result = await self.get_task_status(task_id)
+                task_status = status_result.get("status")
+                
+                logger.info(f"[CrawlServiceClient] ⏳ Product detail task {task_id} status: {task_status}")
+                
+                if task_status == "completed":
+                    logger.info(f"[CrawlServiceClient] ✅ Product detail task completed: {task_id}")
+                    break
+                
+                elif task_status == "failed":
+                    error_msg = status_result.get("error", "Unknown error")
+                    logger.error(f"[CrawlServiceClient] ❌ Product detail task failed: {error_msg}")
+                    raise Exception(f"Product detail crawl task failed: {error_msg}")
+                
+                elif task_status == "cancelled":
+                    logger.warning(f"[CrawlServiceClient] ⚠️  Product detail task cancelled: {task_id}")
+                    raise Exception("Product detail crawl task was cancelled")
+                
+                # Task still running - wait and retry
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+                
+            except Exception as e:
+                if "failed" in str(e).lower() or "cancel" in str(e).lower():
+                    raise
+                logger.warning(f"[CrawlServiceClient] ⚠️  Error checking status: {e}, retrying...")
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+        
+        if elapsed >= timeout_seconds:
+            logger.error(f"[CrawlServiceClient] ❌ Product detail crawl timeout after {timeout_seconds}s")
+            await self.cancel_task(task_id)
+            raise TimeoutError(f"Product detail crawl did not complete within {timeout_seconds} seconds")
+        
+        # STEP 3: Fetch results with detailed products
+        try:
+            result = await self.get_task_result(task_id)
+            
+            # ✅ Extract products from result
+            products = result.get("products", [])
+            products_crawled = result.get("products_crawled", 0)
+            attributes_extracted = result.get("attributes_extracted", 0)
+            
+            logger.info(
+                f"[CrawlServiceClient] ✅ Product detail crawl complete: "
+                f"{products_crawled} crawled, {attributes_extracted} attributes extracted, {len(products)} returned"
+            )
+            
+            # Return products list with details and attributes
+            return products
+            
+        except Exception as e:
+            logger.error(f"[CrawlServiceClient] ❌ Failed to get product detail results: {e}")
+            raise Exception(f"Failed to retrieve product detail results: {e}")
 
 
 # Singleton instance for global access

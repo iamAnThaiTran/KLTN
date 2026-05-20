@@ -13,15 +13,6 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 class BaseService(ABC):
-    """
-    Abstract base class for all microservices
-    
-    Provides:
-    - Standardized logging with context
-    - Performance monitoring
-    - Error handling patterns
-    - Service metadata
-    """
     
     # Service metadata - override in subclass
     SERVICE_NAME = "BaseService"

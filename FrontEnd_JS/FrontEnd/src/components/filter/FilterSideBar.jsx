@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { SlidersHorizontal, ChevronDown, CheckCircle2, RotateCcw, X } from 'lucide-react';
+import { SlidersHorizontal, ChevronDown, CheckCircle2, RotateCcw, X, Loader2 } from 'lucide-react';
+import { API_BASE_URL } from '../../config';
 
 const SIDEBAR_STYLES = `
   @keyframes sidebarIn { from{opacity:0;transform:translateX(-10px)} to{opacity:1;transform:translateX(0)} }
@@ -27,8 +28,10 @@ const SIDEBAR_STYLES = `
     color: #fff; font-weight: 700; font-size: 14px; cursor: pointer;
     font-family: inherit; transition: box-shadow 0.2s;
     box-shadow: 0 4px 14px rgba(99,102,241,0.3);
+    display: flex; align-items: center; justify-content: center; gap: 6px;
   }
   .apply-btn:hover { box-shadow: 0 6px 20px rgba(99,102,241,0.45); }
+  .apply-btn:disabled { opacity: 0.6; cursor: not-allowed; }
   .reset-btn {
     display: flex; align-items: center; gap: 4px;
     color: #94a3b8; font-size: 12px; background: none; border: none;
@@ -37,8 +40,9 @@ const SIDEBAR_STYLES = `
   .reset-btn:hover { color: #6366f1; }
 `;
 
-const FilterSidebar = ({ filters, selectedFilters, onToggle, onApply, onReset, resultCount, isLoading }) => {
+const FilterSidebar = ({ filters, selectedFilters, onToggle, onApply, onReset, resultCount, isLoading, categoryId, categoryName }) => {
   const [openGroups, setOpenGroups] = useState({});
+  const [isApplying, setIsApplying] = useState(false);
 
   useEffect(() => {
     if (filters?.length) {
@@ -48,8 +52,85 @@ const FilterSidebar = ({ filters, selectedFilters, onToggle, onApply, onReset, r
     }
   }, [filters]);
 
+  // Debug: Log when categoryName changes
+  useEffect(() => {
+    console.log('🎯 FilterSidebar received:', { categoryId, categoryName, filtersCount: filters?.length });
+  }, [categoryId, categoryName, filters?.length]);
+
   const activeCount  = Object.keys(selectedFilters).length;
   const toggleGroup  = (i) => setOpenGroups(p => ({ ...p, [i]: !p[i] }));
+
+  /**
+   * Convert selectedFilters from format {`attribute:value`...} to {attribute_name: [values...]}
+   * Then call API to filter + rank products
+   */
+  const handleApplyFilters = async () => {
+    if (!categoryId && !categoryName) {
+      alert('❌ Không có category ID hoặc category name');
+      return;
+    }
+
+    setIsApplying(true);
+    try {
+      // Convert format: {`brand:Nike`, `size:42`} → {brand: [`Nike`], size: [`42`]}
+      const attributesMap = {};
+      for (const key of Object.keys(selectedFilters)) {
+        const [attrName, attrValue] = key.split(':');
+        if (!attributesMap[attrName]) {
+          attributesMap[attrName] = [];
+        }
+        attributesMap[attrName].push(attrValue);
+      }
+
+      console.log('📤 Sending filter request:', { categoryId, categoryName, attributes: attributesMap });
+
+      // Call backend API
+      const response = await fetch(`${API_BASE_URL}/api/products/filter-with-ranking`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          category_id: categoryId,
+          category_name: categoryName,
+          attributes: attributesMap,
+          limit: 100
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log('📥 Filter response:', data);
+
+      if (data.success && onApply) {
+        // Convert selectedFilters for logging
+        const attributesMap = {};
+        for (const key of Object.keys(selectedFilters)) {
+          const [attrName, attrValue] = key.split(':');
+          if (!attributesMap[attrName]) {
+            attributesMap[attrName] = [];
+          }
+          attributesMap[attrName].push(attrValue);
+        }
+        
+        // Pass filtered + ranked products to parent component
+        onApply({
+          products: data.products,
+          total: data.total,
+          categoryId: data.category_id,
+          categoryName: categoryName,
+          selectedFilters: selectedFilters,
+          attributesMap: attributesMap
+        });
+      }
+    } catch (err) {
+      console.error('❌ Filter error:', err);
+      alert('❌ Lỗi: ' + err.message);
+    } finally {
+      setIsApplying(false);
+    }
+  };
 
   return (
     <div style={{
@@ -81,7 +162,7 @@ const FilterSidebar = ({ filters, selectedFilters, onToggle, onApply, onReset, r
             )}
           </div>
           {activeCount > 0 && (
-            <button className="reset-btn" onClick={onReset}>
+            <button className="reset-btn" onClick={onReset} disabled={isApplying}>
               <RotateCcw size={11} /> Xóa tất cả
             </button>
           )}
@@ -97,7 +178,7 @@ const FilterSidebar = ({ filters, selectedFilters, onToggle, onApply, onReset, r
             }}>
               <CheckCircle2 size={13} color="#6366f1" />
               <span style={{ fontSize: 13, color: '#4f46e5', fontWeight: 600 }}>
-                {isLoading ? 'Đang tìm...' : `${resultCount} sản phẩm`}
+                {isLoading || isApplying ? '⏳ Đang tìm...' : `${resultCount} sản phẩm`}
               </span>
             </div>
           </div>
@@ -129,6 +210,7 @@ const FilterSidebar = ({ filters, selectedFilters, onToggle, onApply, onReset, r
                           key={oi}
                           className={`fchip${active ? ' on' : ''}`}
                           onClick={() => onToggle(key)}
+                          disabled={isApplying}
                         >
                           {opt.attribute_value}
                         </button>
@@ -166,9 +248,10 @@ const FilterSidebar = ({ filters, selectedFilters, onToggle, onApply, onReset, r
                       {value}
                       <button
                         onClick={() => onToggle(key)}
+                        disabled={isApplying}
                         style={{
                           background: 'none', border: 'none', color: '#fff',
-                          cursor: 'pointer', padding: 0, lineHeight: 1,
+                          cursor: isApplying ? 'not-allowed' : 'pointer', padding: 0, lineHeight: 1,
                           display: 'flex', alignItems: 'center',
                           opacity: 0.8,
                         }}
@@ -186,8 +269,19 @@ const FilterSidebar = ({ filters, selectedFilters, onToggle, onApply, onReset, r
 
           <div style={{ padding: '10px 16px 14px' }}>
             {activeCount > 0 ? (
-              <button className="apply-btn" onClick={onApply}>
-                Áp dụng ({activeCount} tiêu chí)
+              <button 
+                className="apply-btn" 
+                onClick={handleApplyFilters}
+                disabled={isApplying || isLoading}
+              >
+                {isApplying ? (
+                  <>
+                    <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                    Đang xử lý...
+                  </>
+                ) : (
+                  `Áp dụng (${activeCount} tiêu chí)`
+                )}
               </button>
             ) : (
               <p style={{ margin: 0, fontSize: 12, color: '#b0b7c3', textAlign: 'center', fontStyle: 'italic' }}>

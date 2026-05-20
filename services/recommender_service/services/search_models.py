@@ -10,11 +10,11 @@ from enum import Enum
 
 class SearchState(str, Enum):
     """Search session state"""
-    INITIAL = "initial"  # Category detected, filters suggested
-    CRAWLING = "crawling"  # Background crawl in progress
-    READY = "ready"  # Products ready
-    REFINED = "refined"  # Filters applied to results
-    ERROR = "error"  # Error occurred
+    INITIAL = "initial"  
+    CRAWLING = "crawling"  
+    READY = "ready"  
+    REFINED = "refined"  
+    ERROR = "error"  
 
 
 class SearchSession:

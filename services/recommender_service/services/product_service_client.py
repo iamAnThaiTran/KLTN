@@ -323,7 +323,26 @@ class ProductServiceClient:
             limit: Max results (default 50)
         
         Returns:
-            List of matching products with SKU details
+            List of matching products with SKU details and attributes:
+            [
+                {
+                    "id": 123,
+                    "product_id": "276183351",
+                    "spid": "276183355",
+                    "title": "Giày thể thao nam...",
+                    "brand": "Nike",
+                    "price": 620000,
+                    "original_price": 1000000,
+                    "stock": 10,
+                    "rating": 4.5,
+                    "search_count": 150,
+                    "attributes": [  # ✅ NOW INCLUDED
+                        {"name": "color", "value": "đen"},
+                        {"name": "size", "value": "42"},
+                        {"name": "material", "value": "da"}
+                    ]
+                }
+            ]
         
         Example:
             products = await client.get_products_by_category_and_attributes(
@@ -331,6 +350,10 @@ class ProductServiceClient:
                 attributes={"brand": "Nike", "color": "đen", "price_max": 5000000},
                 limit=50
             )
+            # Now you can access product attributes for ranking/filtering:
+            for product in products:
+                attrs_dict = {attr["name"]: attr["value"] for attr in product.get("attributes", [])}
+                print(f"Color: {attrs_dict.get('color')}, Size: {attrs_dict.get('size')}")
         """
         if attributes is None:
             attributes = {}
@@ -348,6 +371,7 @@ class ProductServiceClient:
         )
         
         # Extract products list from response
+        # Products now include "attributes" field with list of {"name": str, "value": str}
         return response.get("products", [])
     
     async def get_filters(self, category_name: str) -> List[Dict[str, Any]]:
@@ -417,6 +441,254 @@ class ProductServiceClient:
     # Health Check
     # ========================================================================
     
+    async def get_category_details(self, category_id: int) -> Dict[str, Any]:
+        """
+        Get category details with attributes
+        
+        Returns:
+            {
+                "id": 5,
+                "name": "Laptop",
+                "attributes": [
+                    {"id": 1, "attribute_name": "brand", ...},
+                    {"id": 2, "attribute_name": "cpu", ...}
+                ]
+            }
+        """
+        try:
+            response = await self._request_with_retry(
+                "GET",
+                f"/api/categories/{category_id}/details"
+            )
+            return response if response else {}
+        except Exception as e:
+            logger.error(f"Failed to get category details: {e}")
+            return {}
+    
+    async def add_category_attributes(
+        self,
+        category_id: int,
+        attributes: List[str]
+    ) -> Dict[str, Any]:
+        """
+        Add (append) attributes to existing category
+        
+        Request:
+        {
+            "attributes": ["khả năng chống nước", "tính năng mới"]
+        }
+        
+        Response:
+        {
+            "success": true,
+            "category_id": 5,
+            "attributes_added": ["khả năng chống nước", "tính năng mới"],
+            "attributes_count": 5,
+            "schema_version": 3
+        }
+        """
+        try:
+            payload = {
+                "attributes": attributes
+            }
+            
+            response = await self._request_with_retry(
+                "PUT",
+                f"/api/categories/{category_id}/attributes",
+                json=payload
+            )
+            
+            if response and response.get("success"):
+                logger.info(f"✅ Added {len(attributes)} attributes to category {category_id}")
+                return response
+            else:
+                logger.warning(f"⚠️ Failed to add attributes: {response}")
+                return {"success": False}
+        
+        except Exception as e:
+            logger.error(f"Error adding category attributes: {e}")
+            return {"success": False}
+    
+    async def sync_product_sku_attributes(
+        self,
+        category_id: int,
+        attributes: List[str]
+    ) -> Dict[str, Any]:
+        """
+        Sync SKU attributes for products in category
+        
+        Request:
+        {
+            "attributes": ["khả năng chống nước"],
+            "only_missing": true
+        }
+        
+        Response:
+        {
+            "success": true,
+            "category_id": 5,
+            "products_synced": 1250,
+            "sku_attributes_added": 1250
+        }
+        """
+        try:
+            payload = {
+                "attributes": attributes,
+                "only_missing": True
+            }
+            
+            response = await self._request_with_retry(
+                "POST",
+                f"/api/categories/{category_id}/sync-sku-attributes",
+                json=payload
+            )
+            
+            if response and response.get("success"):
+                logger.info(f"✅ Synced SKU attributes for {response.get('products_synced', 0)} products")
+                return response
+            else:
+                logger.warning(f"⚠️ Failed to sync SKU attributes: {response}")
+                return {"success": False}
+        
+        except Exception as e:
+            logger.error(f"Error syncing SKU attributes: {e}")
+            return {"success": False}
+
+    async def get_or_crawl_products(
+        self,
+        category_id: int,
+        category_name: str,
+        attributes: Optional[Dict[str, Any]] = None,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get products from DB, or crawl + detail crawl if not available
+        
+        IMPORTANT: This method is responsible for ALL crawling logic.
+        Orchestrator only needs to call this and rank the results.
+        
+        Flow:
+        1. Query DB first
+        2. If miss → Crawl shallow + detail crawl (SYNCHRONIZED, not async)
+        3. Save crawled products with full details
+        4. Return products with complete attributes for ranking
+        
+        Args:
+            category_id: Category ID from database
+            category_name: Category name for crawling
+            attributes: Filter attributes (brand, color, size, etc.)
+            limit: Max results
+        
+        Returns:
+            List of products with FULL attributes (detailed_attributes populated)
+        """
+        # 1. Query DB first
+        logger.info(f"[ProductServiceClient.get_or_crawl_products] Querying DB for category_id={category_id}")
+        db_products = await self.get_products_by_category_and_attributes(
+            category_id=category_id,
+            attributes=attributes,
+            limit=limit
+        )
+        
+        if db_products and len(db_products) >= 10:
+            # DB HIT - sufficient products found
+            logger.info(f"[ProductServiceClient] ✅ DB HIT: Found {len(db_products)} products in database")
+            return db_products
+        
+        # 2. DB MISS - Crawl from external sources
+        logger.info(f"[ProductServiceClient] ❌ DB MISS - Crawling products from external sources...")
+        
+        try:
+            from .crawl_service_client import CrawlServiceClient
+            crawl_client = CrawlServiceClient()
+            
+            # Crawl shallow products
+            logger.info(f"[ProductServiceClient] 🔄 Step 1: Crawling shallow products...")
+            crawled_products = await crawl_client.crawl(
+                category=category_name,
+                category_id=category_id,
+                attributes=attributes
+            )
+            
+            if not crawled_products:
+                logger.warning(f"[ProductServiceClient] No products crawled for category '{category_name}'")
+                return []
+            
+            logger.info(f"[ProductServiceClient] ✅ Crawled {len(crawled_products)} shallow products")
+            
+            # 3. Save shallow products to DB FIRST (before detail crawl)
+            logger.info(f"[ProductServiceClient] 💾 Step 2: Saving {len(crawled_products)} shallow products to database...")
+            try:
+                await self.save_products(
+                    crawled_products,
+                    source="tiki",
+                    category_id=category_id
+                )
+                logger.info(f"[ProductServiceClient] ✅ Saved {len(crawled_products)} shallow products to DB")
+            except Exception as e:
+                logger.warning(f"[ProductServiceClient] ⚠️ Failed to save shallow products: {e}")
+                # Don't fail - continue with detail crawl anyway
+            
+            # 4. Crawl product DETAILS (SYNCHRONIZED - wait for completion, not async RabbitMQ)
+            logger.info(f"[ProductServiceClient] 🔄 Step 3: Crawling product details for {len(crawled_products)} products...")
+            product_ids = [p.get("product_id") for p in crawled_products if p.get("product_id")]
+            product_spids = [p.get("spid") for p in crawled_products if p.get("spid")]
+            
+            if product_ids:
+                # Build schema from detected attributes (if available)
+                crawl_schema = None
+                if attributes:
+                    # Convert attributes to schema-like structure
+                    crawl_schema = {
+                        "category": category_name,
+                        "attributes": [
+                            {
+                                "name": attr_name,
+                                "keywords": [attr_name],
+                                "value_pattern": None
+                            }
+                            for attr_name in attributes.keys()
+                        ]
+                    }
+                
+                try:
+                    # ⭐ IMPORTANT: Wait for detail crawl to COMPLETE (synchronized)
+                    await crawl_client.crawl_product_details_sync(
+                        product_ids=product_ids,
+                        spids=product_spids,
+                        category_id=category_id,
+                        schema=crawl_schema,
+                        max_concurrent=5,
+                        wait_for_completion=True  # ✅ WAIT for completion
+                    )
+                    logger.info(f"[ProductServiceClient] ✅ Detail crawl completed")
+                    
+                    # ⭐ Query DB again to get products with updated attributes
+                    logger.info(f"[ProductServiceClient] 🔄 Step 4: Re-querying DB to fetch products with new attributes...")
+                    crawled_products = await self.get_products_by_category_and_attributes(
+                        category_id=category_id,
+                        attributes=attributes,
+                        limit=limit
+                    )
+                    logger.info(f"[ProductServiceClient] ✅ Got {len(crawled_products)} products with detailed attributes from DB")
+                except Exception as e:
+                    logger.warning(f"[ProductServiceClient] ⚠️ Detail crawl failed, returning shallow products from DB: {e}")
+                    # Continue with shallow products if detail crawl fails
+                    crawled_products = await self.get_products_by_category_and_attributes(
+                        category_id=category_id,
+                        attributes=attributes,
+                        limit=limit
+                    )
+            
+            # 5. Return products with full attributes ready for ranking
+            logger.info(f"[ProductServiceClient] ✅ Returning {len(crawled_products)} products with full attributes")
+            return crawled_products
+        
+        except Exception as e:
+            logger.error(f"[ProductServiceClient] ❌ Error in get_or_crawl_products: {e}", exc_info=True)
+            # Fallback: return DB results if crawling fails
+            return db_products if db_products else []
+
     async def health_check(self) -> bool:
         """Check if service is healthy"""
         try:

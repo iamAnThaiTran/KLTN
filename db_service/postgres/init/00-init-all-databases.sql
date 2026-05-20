@@ -39,6 +39,8 @@ CREATE TABLE categories (
     parent_category_id INTEGER,
     category_type VARCHAR(50),
     is_active BOOLEAN DEFAULT TRUE,
+    schema_version INTEGER DEFAULT 1,
+    last_updated_attributes TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -67,6 +69,7 @@ CREATE TABLE products (
     tiki_spid VARCHAR(100),
     seller_id VARCHAR(100) DEFAULT '1',
     is_active BOOLEAN DEFAULT TRUE,
+    last_schema_version INTEGER DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -92,6 +95,16 @@ CREATE TABLE sku_attributes (
     PRIMARY KEY (sku_id, attribute_name)
 );
 
+-- Many-to-Many: Product-Category relationship for multi-category support
+CREATE TABLE product_categories (
+    id SERIAL PRIMARY KEY,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    is_primary BOOLEAN DEFAULT FALSE,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(product_id, category_id)
+);
+
 -- Indexes for products_db
 CREATE INDEX idx_products_category ON products(category_id);
 CREATE INDEX idx_products_brand ON products(brand);
@@ -105,6 +118,11 @@ CREATE INDEX idx_skus_search_count ON skus(search_count DESC);
 CREATE INDEX idx_skus_rating ON skus(rating DESC);
 CREATE INDEX idx_skus_rating_search ON skus(rating DESC, search_count DESC);
 
+-- Indexes for product_categories (many-to-many)
+CREATE INDEX idx_product_categories_product ON product_categories(product_id);
+CREATE INDEX idx_product_categories_category ON product_categories(category_id);
+CREATE INDEX idx_product_categories_primary ON product_categories(product_id, is_primary);
+
 -- Timestamp trigger for products_db
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -114,14 +132,42 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Sync product_categories when product.category_id is updated (backward compatibility)
+CREATE OR REPLACE FUNCTION sync_product_categories_on_legacy_update()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- If category_id changed, update product_categories
+    IF NEW.category_id IS NOT NULL AND (OLD.category_id IS NULL OR OLD.category_id != NEW.category_id) THEN
+        -- Remove old primary
+        UPDATE product_categories SET is_primary = FALSE WHERE product_id = NEW.id;
+        
+        -- Add or update new primary
+        INSERT INTO product_categories (product_id, category_id, is_primary)
+        VALUES (NEW.id, NEW.category_id, TRUE)
+        ON CONFLICT (product_id, category_id) DO UPDATE
+        SET is_primary = TRUE;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE TRIGGER update_products_updated_at BEFORE UPDATE ON products
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER sync_product_categories_trigger AFTER UPDATE ON products
+    FOR EACH ROW EXECUTE FUNCTION sync_product_categories_on_legacy_update();
 
 CREATE TRIGGER update_skus_updated_at BEFORE UPDATE ON skus
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_categories_updated_at BEFORE UPDATE ON categories
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Migrate existing products to product_categories (populate M2M relationship)
+INSERT INTO product_categories (product_id, category_id, is_primary)
+SELECT id, category_id, TRUE FROM products
+WHERE category_id IS NOT NULL
+ON CONFLICT DO NOTHING;
 
 -- ============================================================================
 -- DATABASE 2: RECOMMENDER_DB (RecommendatorService)

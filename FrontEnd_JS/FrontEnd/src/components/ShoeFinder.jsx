@@ -64,9 +64,64 @@ const ShoeFinder = () => {
       setMessages(prev => [...prev, msg]);
     }
   }, []);
- 
+
   // ── Product search hook ──
   const search = useProductSearch({ token, onAddMessage: addMessage });
+
+  // ── Handle filter result from FilterSidebar ──
+  const handleFilterApply = useCallback((filterResult) => {
+    console.log('📥 Filter result from sidebar:', filterResult);
+    
+    if (!filterResult || !filterResult.products) {
+      console.warn('⚠️ No products in filter result');
+      return;
+    }
+    
+    const { products, total, categoryName, attributesMap } = filterResult;
+    console.log(`📊 Processing ${products.length} filtered products`);
+    console.log('🔍 Using lastProductsMsgId from search hook:', search.lastProductsMsgId);
+    
+    // Build filter display string: "Category • Brand: Nike, Adidas • Size: 42, 43"
+    let filterText = categoryName || 'Sản phẩm';
+    if (attributesMap && Object.keys(attributesMap).length > 0) {
+      const filterParts = Object.entries(attributesMap).map(([attr, values]) => 
+        `${attr}: ${values.join(', ')}`
+      );
+      filterText += ' • ' + filterParts.join(' • ');
+    }
+    
+    // Add user message showing filter choices
+    setMessages(prev => [...prev, {
+      type: 'user',
+      text: `🔍 ${filterText}`,
+      timestamp: new Date()
+    }]);
+    
+    if (search.lastProductsMsgId) {
+      // Update existing products message using msgId from search hook
+      console.log('🔄 Updating existing message with new products...');
+      addMessage({
+        type: 'update_products',
+        msgId: search.lastProductsMsgId,
+        products: products,
+        productCount: total,
+        filters: search.activeFilters  // Use filters from search hook
+      });
+      console.log(`✅ Updated ${total} filtered products in existing message`);
+    } else {
+      // Create new products message (fallback)
+      console.log('🆕 Creating new products message...');
+      addMessage({
+        type: 'products',
+        products: products,
+        productCount: total,
+        filters: search.activeFilters || [],
+        msgId: `products_filter_${Date.now()}`,
+        timestamp: new Date()
+      });
+      console.log(`✅ Created new message with ${total} filtered products`);
+    }
+  }, [search.lastProductsMsgId, search.activeFilters, addMessage]);
  
   // ── Speech hook ──
   const speech = useSpeech({
@@ -160,10 +215,11 @@ const ShoeFinder = () => {
               filters={search.activeFilters}
               selectedFilters={search.selectedFilters}
               onToggle={search.toggleFilter}
-              onApply={search.applyFilters}
+              onApply={handleFilterApply}
               onReset={search.resetFilters}
               resultCount={search.productCount}
               isLoading={search.productsLoading}
+              categoryName={search.lastCategoryName}
             />
           )}
  

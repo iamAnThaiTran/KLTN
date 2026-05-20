@@ -102,7 +102,10 @@ const ProductCard = ({ product, index, isFavorited, onToggleFavorite, onOpen }) 
 };
 
 // ─── Products bubble — inline trong chat stream ──────────────
-const ProductsBubble = ({ msg, favoriteProductIds, onToggleFavorite, onOpen }) => (
+const ProductsBubble = ({ msg, favoriteProductIds, onToggleFavorite, onOpen }) => {
+  console.log('🎨 ProductsBubble rendering:', { productCount: msg.productCount, productsLength: msg.products?.length, productIds: msg.products?.map(p => p.id).slice(0, 3) });
+  
+  return (
   <div style={{ animation: 'fadeIn 0.3s ease' }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
       <CheckCircle2 size={15} color="#10b981" />
@@ -123,7 +126,8 @@ const ProductsBubble = ({ msg, favoriteProductIds, onToggleFavorite, onOpen }) =
       ))}
     </div>
   </div>
-);
+)};
+
 
 // ─── Skeleton (loading mới) ──────────────────────────────────
 const SkeletonBubble = () => (
@@ -158,6 +162,8 @@ const SkeletonBubble = () => (
  */
 const ChatArea = ({ messages, isThinking, onQuickReply, favoriteProductIds, onToggleFavorite, onOpen }) => {
   if (!messages.length && !isThinking) return null;
+
+  console.log('💬 ChatArea rendering:', messages.length, 'messages -', messages.map(m => `${m.type}(${m.productCount || m.products?.length || 0})`).join(', '));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20, marginBottom: 20 }}>

@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 class CategoryValidator:
     """Validate và normalize categories trước khi crawl"""
     
-    def __init__(self, product_service_client=None):
+    def __init__(self, product_service_client=None, schema_evolution_service=None, rabbitmq_producer=None):
         # Construct DATABASE_URL from environment variables if not already set
         self.db_url = os.getenv(
             "DATABASE_URL",
@@ -38,7 +38,20 @@ class CategoryValidator:
         # Import khi cần để tránh circular import
         self._universal_keywords = None
         self._llm_utils = None
+        self._schema_evolution_service = None
         self.product_service_client = product_service_client  # HTTP client to ProductService
+        self._product_service_client_for_evolution = product_service_client
+        self._rabbitmq_producer = rabbitmq_producer
+    
+    @property
+    def schema_evolution_service(self):
+        """Lazy load CategorySchemaEvolution"""
+        if self._schema_evolution_service is None:
+            from services.category_schema_evolution import CategorySchemaEvolution
+            self._schema_evolution_service = CategorySchemaEvolution(
+                product_service_client=self._product_service_client_for_evolution
+            )
+        return self._schema_evolution_service
     
     @property
     def universal_keywords(self):
@@ -56,9 +69,9 @@ class CategoryValidator:
             self._llm_utils = call_openai
         return self._llm_utils
     
-    def get_db_categories(self) -> Dict[int, Dict[str, str]]:
+    async def get_db_categories(self) -> Dict[int, Dict[str, str]]:
         """
-        Get tất cả categories từ database
+        Get tất cả categories từ ProductService API
         
         Returns:
             {
@@ -67,19 +80,32 @@ class CategoryValidator:
                 ...
             }
         """
-        conn = psycopg2.connect(self.db_url)
+        if self.product_service_client is None:
+            logger.error("❌ ProductServiceClient not available")
+            return {}
+        
         try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, name FROM categories ORDER BY id")
-            rows = cursor.fetchall()
+            logger.info("📤 Calling ProductService API to get all categories...")
+            response = await self.product_service_client.list_categories()
+            logger.info(f"📥 Received response from ProductService: {response}")
             
             categories = {}
-            for cat_id, name in rows:
-                categories[cat_id] = {"name": name, "slug": self._slugify(name)}
+            if response and isinstance(response, list):
+                for cat in response:
+                    cat_id = cat.get("id")
+                    cat_name = cat.get("name")
+                    if cat_id and cat_name:
+                        categories[cat_id] = {
+                            "name": cat_name,
+                            "slug": self._slugify(cat_name)
+                        }
             
+            logger.info(f"✅ Retrieved {len(categories)} categories from ProductService API")
             return categories
-        finally:
-            conn.close()
+        
+        except Exception as e:
+            logger.error(f"❌ Failed to get categories from ProductService API: {str(e)}")
+            return {}
     
     def _slugify(self, text: str) -> str:
         """Convert text to slug"""
@@ -121,7 +147,8 @@ class CategoryValidator:
                 "reason": str
             }
         """
-        db_categories = self.get_db_categories()
+        db_categories = await self.get_db_categories()
+        logger.info(f"db_categories: {db_categories}")
         db_names = {cat["name"].lower(): (cat_id, cat["name"]) for cat_id, cat in db_categories.items()}
         db_slugs = {cat["slug"]: (cat_id, cat["name"]) for cat_id, cat in db_categories.items()}
         
@@ -132,6 +159,14 @@ class CategoryValidator:
         if user_cat_lower in db_names:
             cat_id, cat_name = db_names[user_cat_lower]
             logger.info(f"✅ Category '{user_category}' → exact match '{cat_name}' (id={cat_id})")
+            
+            # 🔄 Check nếu có new attributes để update schema
+            await self._enqueue_schema_evolution_if_needed(
+                category_id=cat_id,
+                category_name=cat_name,
+                detected_attributes=detected_attributes
+            )
+            
             return {
                 "success": True,
                 "category": cat_name,
@@ -143,6 +178,14 @@ class CategoryValidator:
         if user_slug in db_slugs:
             cat_id, cat_name = db_slugs[user_slug]
             logger.info(f"✅ Category '{user_category}' → slug match '{cat_name}' (id={cat_id})")
+            
+            # 🔄 Check nếu có new attributes để update schema
+            await self._enqueue_schema_evolution_if_needed(
+                category_id=cat_id,
+                category_name=cat_name,
+                detected_attributes=detected_attributes
+            )
+            
             return {
                 "success": True,
                 "category": cat_name,
@@ -159,6 +202,14 @@ class CategoryValidator:
                 for cat_id, cat in db_categories.items():
                     if cat["name"].lower() == base_cat.lower():
                         logger.info(f"✅ Category '{user_category}' → keyword match '{base_cat}' (id={cat_id})")
+                        
+                        # 🔄 Check nếu có new attributes để update schema
+                        await self._enqueue_schema_evolution_if_needed(
+                            category_id=cat_id,
+                            category_name=cat["name"],
+                            detected_attributes=detected_attributes
+                        )
+                        
                         return {
                             "success": True,
                             "category": cat["name"],
@@ -175,6 +226,14 @@ class CategoryValidator:
                         for cat_id, cat in db_categories.items():
                             if cat["name"].lower() == base_cat.lower():
                                 logger.info(f"✅ Category '{user_category}' → substring match '{base_cat}' (id={cat_id})")
+                                
+                                # 🔄 Check nếu có new attributes để update schema
+                                await self._enqueue_schema_evolution_if_needed(
+                                    category_id=cat_id,
+                                    category_name=cat["name"],
+                                    detected_attributes=detected_attributes
+                                )
+                                
                                 return {
                                     "success": True,
                                     "category": cat["name"],
@@ -547,99 +606,60 @@ NHẮC NHỜ:
             logger.error(f"LLM validation error: {e}")
             return {"success": False}
     
-    def _create_category(self, category_name: str, description: str = "", attributes: list = None) -> Optional[int]:
+    async def _enqueue_schema_evolution_if_needed(
+        self,
+        category_id: int,
+        category_name: str,
+        detected_attributes: list = None
+    ) -> None:
         """
-        Create new category trong database + save attributes
+        Check nếu có new attributes so với category schema
+        Nếu có → enqueue schema evolution job (non-blocking)
         
-        Returns:
-            Category ID nếu thành công, None nếu fail
+        Args:
+            category_id: ID của category
+            category_name: Tên category
+            detected_attributes: Danh sách attributes detect được
         """
-        conn = psycopg2.connect(self.db_url)
+        if not detected_attributes:
+            logger.info(f"ℹ️  No detected attributes to check for schema evolution")
+            return
+        
+        # Extract attribute names
+        attribute_names = []
+        if detected_attributes and len(detected_attributes) > 0:
+            first_item = detected_attributes[0]
+            if isinstance(first_item, dict):
+                # Format: [{"name": "ram", ...}, {"name": "cpu", ...}]
+                attribute_names = [attr.get("name", attr) for attr in detected_attributes if isinstance(attr, dict)]
+            else:
+                # Format: ["ram", "cpu", "storage", ...]
+                attribute_names = [str(attr).strip() for attr in detected_attributes]
+        
+        if not attribute_names:
+            logger.info(f"ℹ️  No attributes to check for schema evolution")
+            return
+        
+        logger.info(f"🔍 Checking schema evolution for category '{category_name}' (id={category_id})")
+        logger.info(f"   Detected attributes: {attribute_names}")
+        
         try:
-            cursor = conn.cursor()
-            slug = self._slugify(category_name)
+            # Call schema evolution service (async, non-blocking)
+            # This will enqueue enrichment jobs if needed
+            result = await self.schema_evolution_service.evolve_category_schema(
+                category_id=category_id,
+                category_name=category_name,
+                new_attributes=attribute_names
+            )
             
-            # Log what we're doing
-            if attributes:
-                logger.info(f"[_CREATE_CATEGORY] Creating category '{category_name}' with {len(attributes)} attributes")
-            
-            # STEP 1: Insert category
-            cursor.execute("""
-                INSERT INTO categories (name, description, created_at)
-                VALUES (%s, %s, NOW())
-                RETURNING id
-            """, (category_name, description or ""))
-            
-            result = cursor.fetchone()
-            
-            if not result:
-                logger.error(f"Failed to create category '{category_name}'")
-                conn.rollback()
-                return None
-            
-            category_id = result[0]
-            logger.info(f"✅ Created category '{category_name}' (id={category_id})")
-            
-            # STEP 2: Save attributes to category_attributes table
-            if attributes and len(attributes) > 0:
-                logger.info(f"[_CREATE_CATEGORY] 💾 Saving {len(attributes)} attributes to category_attributes table...")
-                
-                for idx, attr_name in enumerate(attributes, 1):
-                    try:
-                        # Clean up attribute name (remove extra spaces)
-                        attr_name_clean = str(attr_name).strip()
-                        
-                        # Use attribute name as both name and display_name
-                        display_name = attr_name_clean.replace("_", " ").title()
-                        
-                        cursor.execute("""
-                            INSERT INTO category_attributes 
-                            (category_id, attribute_name, attribute_type, is_filterable, display_order)
-                            VALUES (%s, %s, %s, true, %s)
-                            RETURNING id
-                        """, (
-                            category_id,
-                            attr_name_clean,
-                            "text",  # Default to text type, can be refined later
-                            idx  # display_order based on position
-                        ))
-                        
-                        attr_id = cursor.fetchone()
-                        if attr_id:
-                            logger.info(f"[_CREATE_CATEGORY]   ✅ Saved attribute #{idx}: '{attr_name_clean}' (attr_id={attr_id[0]})")
-                        else:
-                            logger.warning(f"[_CREATE_CATEGORY]   ⚠️  Could not retrieve attr_id for '{attr_name_clean}'")
-                    
-                    except Exception as e:
-                        logger.error(f"[_CREATE_CATEGORY]   ❌ Error saving attribute '{attr_name}': {e}")
-                        # Continue with next attribute instead of failing
-                        continue
-                
-                logger.info(f"[_CREATE_CATEGORY] ✅ Finished saving attributes")
-            
-            conn.commit()
-            logger.info(f"[_CREATE_CATEGORY] ✅ Category '{category_name}' FULLY CREATED with {len(attributes or [])} attributes")
-            return category_id
-            
+            if result.get("success"):
+                if result.get("new_attributes_added"):
+                    logger.info(f"✨ Schema evolved: {result}")
+                else:
+                    logger.info(f"ℹ️  No new attributes needed")
+            else:
+                logger.warning(f"⚠️ Schema evolution warning: {result.get('reason')}")
+        
         except Exception as e:
-            logger.error(f"Error creating category: {e}")
-            conn.rollback()
-            return None
-        finally:
-            conn.close()
-
-
-def validate_category_before_crawl(user_category: str) -> Tuple[bool, str, Optional[int]]:
-    """
-    Convenience function: Validate category before crawling
-    
-    Returns:
-        (success, normalized_category_name, category_id)
-    """
-    validator = CategoryValidator()
-    result = validator.validate_category(user_category)
-    
-    if result["success"]:
-        return True, result["category"], result["category_id"]
-    else:
-        return False, None, None
+            logger.warning(f"⚠️ Error checking schema evolution: {str(e)}")
+            # Don't fail the validation flow, just log warning

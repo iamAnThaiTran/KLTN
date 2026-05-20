@@ -120,7 +120,7 @@ export const useProductSearch = ({ token, onAddMessage }) => {
       // Check if response contains jobId (async) or products (sync fallback)
       if (d.jobId) {
         console.log('[UseProductSearch] 📤 Job created:', d.jobId);
-        // Start polling for results
+        // Start polling for results - lastCategoryName will be set when job completes
         setJobId(d.jobId);
         // Keep productsLoading true until polling completes
       } else if (d.category) {
@@ -270,6 +270,11 @@ export const useProductSearch = ({ token, onAddMessage }) => {
     if (jobResult && !pollingLoading) {
       console.log('[UseProductSearch] Job result received:', jobResult);
       setProductsLoading(false);
+      
+      // Update category name from result if available
+      if (jobResult.category) {
+        setLastCategoryName(jobResult.category);
+      }
       
       if (jobResult.status === 'need_info' && jobResult.question) {
         onAddMsgRef.current({

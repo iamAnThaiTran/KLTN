@@ -401,6 +401,106 @@ async def enqueue_product_details_crawl(
     finally:
         db.close()
 
+@app.post("/api/crawl/enqueue-enrichment")
+async def enqueue_enrichment_task(
+    type: str = Body(..., embed=True),
+    category_id: int = Body(..., embed=True),
+    category_name: str = Body(..., embed=True),
+    attributes: List[str] = Body(..., embed=True),
+    action: str = Body("recrawl_and_extract_attributes", embed=True),
+    description: str = Body("", embed=True),
+    priority: str = Body("normal", embed=True),
+    max_retries: int = Body(3, embed=True)
+):
+    """
+    Enqueue enrichment task for category schema evolution
+    
+    When category schema updates with new attributes, enqueue background
+    enrichment task to recrawl products and extract new attributes.
+    
+    Worker will:
+    1. Get products of category_id from ProductService
+    2. Crawl product details
+    3. Extract new attributes from product pages
+    4. Save attributes to ProductService
+    
+    Example:
+    {
+        "type": "enrichment",
+        "category_id": 5,
+        "category_name": "smartphone",
+        "attributes": ["5G", "khả năng chống nước"],
+        "action": "recrawl_and_extract_attributes",
+        "description": "Enrichment for new attributes: 5G, khả năng chống nước",
+        "priority": "normal",
+        "max_retries": 3
+    }
+    
+    Returns:
+        {
+            "task_id": "enrichment_...",
+            "status": "pending",
+            "category_id": 5,
+            "new_attributes": ["5G", "khả năng chống nước"]
+        }
+    """
+    db = SessionLocal()
+    try:
+        # Generate unique task ID
+        task_id = f"enrichment_{uuid.uuid4().hex[:12]}"
+        
+        # Create task record in database
+        task = CrawlTask(
+            task_id=task_id,
+            category="enrichment",
+            category_id=category_id,
+            attributes={
+                "type": type,
+                "category_name": category_name,
+                "attributes": attributes,
+                "action": action,
+                "description": description
+            },
+            status="pending",
+            priority=priority,
+            max_retries=max_retries,
+            retry_count=0
+        )
+        db.add(task)
+        db.commit()
+        
+        # Enqueue to RabbitMQ
+        producer = get_rabbitmq_producer()
+        if producer:
+            task_data = {
+                "type": type,
+                "category_id": category_id,
+                "category_name": category_name,
+                "attributes": attributes,
+                "action": action,
+                "description": description,
+                "task_type": "enrichment"
+            }
+            producer.enqueue_task(task_id, task_data, priority)
+            logger.info(f"🚀 Enrichment task enqueued: {task_id} for category_id={category_id} with {len(attributes)} new attributes")
+        else:
+            logger.warning(f"RabbitMQ producer not available, task saved locally: {task_id}")
+        
+        return {
+            "task_id": task_id,
+            "status": "pending",
+            "category_id": category_id,
+            "category_name": category_name,
+            "new_attributes": attributes,
+            "estimated_completion": (datetime.utcnow() + timedelta(minutes=5)).isoformat()
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ Enqueue enrichment task failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
 @app.get("/api/crawl/status/{task_id}")
 async def get_task_status(task_id: str):
     """Get status of a crawl task"""
