@@ -576,14 +576,18 @@ class RecommendationOrchestrator:
         
         # 🆕 STEP 1: Extract category + attributes (LLM call - ONLY for CASE 1)
         merged_intent = conversation_state.get("merged_intent", user_input)
-        #logger.info(f"\n[CASE 1] 🧠 Extracting category + attributes (LLM call)...")
+        logger.info(f"\n[CASE 1] 🧠 Extracting category + attributes (LLM call)...")
+        logger.info(f"[CASE 1] User input: '{merged_intent}'")
         comprehensive = self._comprehensive_intent_analysis(merged_intent, conversation_state)
         conversation_state["comprehensive_analysis"] = comprehensive
-        #logger.info(f"[CASE 1] ✅ Extraction done:")
-        #logger.info(f"  - Category: {comprehensive['category']}")
+        logger.info(f"[CASE 1] ✅ Extraction done:")
+        logger.info(f"[CASE 1] Full response: {comprehensive}")
         
         category = comprehensive.get("category", "")
         if not category:
+            logger.error(
+                f"[❌ CASE 1] Category is empty! Response was: {comprehensive}"
+            )
             return {
                 "status": "error",
                 "message": "Không thể xác định danh mục sản phẩm. Vui lòng mô tả cụ thể hơn.",
@@ -658,6 +662,7 @@ class RecommendationOrchestrator:
         # STEP 4: Get products - DB or crawl+detail if needed
         # ✅ ProductServiceClient handles ALL crawling logic internally
         #logger.info(f"[CASE 1] 📤 Requesting products from ProductServiceClient (DB or crawl if needed)...")
+        logger.info(f"[CASE 1] 📤 Requesting products for category_id={category_id}, category_name='{validated_category}', attributes={attributes_for_search}, limit=50")
         products = await self.product_service_client.get_or_crawl_products(
             category_id=category_id,
             category_name=validated_category,
@@ -703,19 +708,353 @@ class RecommendationOrchestrator:
         
         # Call LLM with purpose-oriented prompt
         import json
-        prompt = f"""User expresses this need: "{user_input}"
+        prompt = f"""
+You are an advanced Vietnamese ecommerce shopping intent assistant.
 
-This is an abstract or purpose-oriented request. Suggest 3-5 product categories that could fulfill this need.
+The user has expressed an ABSTRACT shopping intent.
 
-Format response as JSON:
+Your job is to transform vague emotional/lifestyle/gift/purpose intent
+into CONCRETE, SEARCHABLE ecommerce shopping entities.
+
+==================================================
+USER INPUT
+==================================================
+
+"{user_input}"
+
+==================================================
+CORE OBJECTIVE
+==================================================
+
+Convert ABSTRACT intent into SPECIFIC shopping suggestions.
+
+The suggestions must:
+- be purchasable
+- be searchable in ecommerce systems
+- contain concrete product nouns
+- help transition the user into product search flow
+
+==================================================
+CRITICAL HARD RULES
+==================================================
+
+1. EVERY suggestion MUST contain a purchasable noun.
+
+GOOD:
+- "tai nghe chống ồn"
+- "nến thơm"
+- "máy massage cổ"
+- "đèn ngủ"
+- "sách self-help"
+
+BAD:
+- "thư giãn"
+- "giải trí"
+- "chăm sóc sức khỏe"
+- "phong cách sống"
+- "minimalism"
+
+--------------------------------------------------
+
+2. NEVER suggest vague lifestyle concepts.
+
+Do NOT return:
+- emotions
+- moods
+- aesthetics
+- abstract themes
+without concrete purchasable products.
+
+--------------------------------------------------
+
+3. Suggestions MUST be searchable.
+
+The user should be able to click the suggestion
+and immediately search products.
+
+--------------------------------------------------
+
+4. Prefer practical Vietnamese ecommerce behavior.
+
+Think like:
+- Shopee
+- Lazada
+- Tiki
+
+--------------------------------------------------
+
+5. Prioritize:
+
+- concrete products
+- concrete categories
+- common ecommerce keywords
+- highly purchasable entities
+
+--------------------------------------------------
+
+6. Suggestions should feel NATURAL for Vietnamese users.
+
+==================================================
+SUGGESTION STRATEGY
+==================================================
+
+When users express:
+
+- stress
+→ suggest relaxation products
+
+- gift intent
+→ suggest giftable products
+
+- productivity intent
+→ suggest productivity tools
+
+- aesthetics/vibes
+→ suggest matching fashion/decor/accessories
+
+- hobbies/interests
+→ suggest related products
+
+==================================================
+GOOD VS BAD EXAMPLES
+==================================================
+
+--------------------------------------------------
+USER:
+"tôi đang stress"
+--------------------------------------------------
+
+GOOD:
+- "tai nghe chống ồn"
+- "nến thơm"
+- "máy massage cổ"
+- "trà ngủ ngon"
+- "đèn ngủ"
+
+BAD:
+- "thư giãn"
+- "giải trí"
+- "self-care"
+
+==================================================
+
+--------------------------------------------------
+USER:
+"tôi cần quà cho bạn gái"
+--------------------------------------------------
+
+GOOD:
+- "gấu bông"
+- "nước hoa nữ"
+- "son môi"
+- "vòng cổ"
+- "nến thơm"
+
+BAD:
+- "quà tặng"
+- "lãng mạn"
+- "tình yêu"
+
+==================================================
+
+--------------------------------------------------
+USER:
+"vibe hàn quốc"
+--------------------------------------------------
+
+GOOD:
+- "áo cardigan hàn quốc"
+- "đèn ngủ decor"
+- "son tint"
+- "túi tote"
+- "nến thơm"
+
+BAD:
+- "phong cách hàn quốc"
+- "korean aesthetic"
+
+==================================================
+
+--------------------------------------------------
+USER:
+"muốn setup góc học tập"
+--------------------------------------------------
+
+GOOD:
+- "đèn bàn học"
+- "bàn phím cơ"
+- "giá đỡ laptop"
+- "ghế công thái học"
+- "kệ để bàn"
+
+BAD:
+- "productivity"
+- "workspace"
+
+==================================================
+
+--------------------------------------------------
+USER:
+"đồ gì đó chill chill"
+--------------------------------------------------
+
+GOOD:
+- "loa bluetooth"
+- "đèn led decor"
+- "máy khuếch tán tinh dầu"
+- "nến thơm"
+- "ghế lười"
+
+BAD:
+- "chill"
+- "relaxation"
+
+==================================================
+
+--------------------------------------------------
+USER:
+"cho người thích gym"
+--------------------------------------------------
+
+GOOD:
+- "bình nước thể thao"
+- "găng tay tập gym"
+- "tai nghe thể thao"
+- "áo gym"
+- "túi tập gym"
+
+BAD:
+- "fitness"
+- "healthy lifestyle"
+
+==================================================
+
+--------------------------------------------------
+USER:
+"tôi muốn ngủ ngon hơn"
+--------------------------------------------------
+
+GOOD:
+- "gối memory foam"
+- "đèn ngủ"
+- "máy tạo tiếng ồn trắng"
+- "tinh dầu ngủ ngon"
+- "trà thảo mộc"
+
+BAD:
+- "giấc ngủ"
+- "wellness"
+
+==================================================
+
+--------------------------------------------------
+USER:
+"minimalist"
+--------------------------------------------------
+
+GOOD:
+- "đồng hồ tối giản"
+- "ví da tối giản"
+- "áo thun basic"
+- "bàn làm việc tối giản"
+- "đèn bàn minimal"
+
+BAD:
+- "minimalism"
+- "simple lifestyle"
+
+==================================================
+
+--------------------------------------------------
+USER:
+"tôi cần gì đó để học online"
+--------------------------------------------------
+
+GOOD:
+- "webcam"
+- "tai nghe có mic"
+- "giá đỡ laptop"
+- "bàn học"
+- "đèn bàn"
+
+BAD:
+- "học tập"
+- "study setup"
+
+==================================================
+
+--------------------------------------------------
+USER:
+"cho dân IT"
+--------------------------------------------------
+
+GOOD:
+- "bàn phím cơ"
+- "chuột không dây"
+- "giá đỡ laptop"
+- "màn hình phụ"
+- "ghế công thái học"
+
+BAD:
+- "công nghệ"
+- "productivity"
+
+==================================================
+EDGE CASE RULES
+==================================================
+
+If the user input is:
+- emotion
+- vibe
+- lifestyle
+- personality
+- aesthetic
+- purpose
+- gift intent
+
+You MUST map it into:
+- concrete purchasable products
+- searchable ecommerce entities
+
+--------------------------------------------------
+
+If uncertain:
+prefer MORE CONCRETE suggestions.
+
+--------------------------------------------------
+
+Every suggestion MUST contain:
+- a product noun
+OR
+- a searchable ecommerce category
+
+==================================================
+OUTPUT RULES
+==================================================
+
+Return ONLY valid JSON.
+
+Do NOT use markdown.
+
+Do NOT explain outside JSON.
+
+==================================================
+OUTPUT FORMAT
+==================================================
+
 {{
   "suggestions": [
-    {{"category": "category_name", "reason": "why this helps", "example_products": ["product1", "product2"]}},
-    ...
+    {{
+      "search_term": "concrete searchable product/category",
+      "reason": "why this matches the user's intent",
+      "example_products": [
+        "example 1",
+        "example 2"
+      ]
+    }}
   ]
 }}
-
-Be practical and culturally relevant for Vietnamese shopping."""
+"""
         
         try:
             response = call_openai(prompt, model="gpt-4o-mini", temperature=0.3, max_tokens=400)
@@ -743,8 +1082,8 @@ Be practical and culturally relevant for Vietnamese shopping."""
                 "question": "Dựa trên nhu cầu của bạn, tôi gợi ý một số loại sản phẩm sau:",
                 "options": [
                     {
-                        "label": s["category"],
-                        "value": s["category"],
+                        "label": s["search_term"],
+                        "value": s["search_term"],
                         "reason": s.get("reason", ""),
                         "examples": s.get("example_products", [])
                     }
@@ -1369,13 +1708,13 @@ FINAL RULES
                 prompt,
                 model="gpt-4o-mini",
                 temperature=0.0,
-                max_tokens=500
+                max_tokens=1000  # 🔧 INCREASED from 500 to prevent JSON truncation
             )
 
             if not response:
-                # #logger.warning(
-                #     "[Orchestrator] OpenAI returned empty response"
-                # )
+                logger.warning(
+                    "[❌ DEBUG] OpenAI returned EMPTY response!"
+                )
 
                 return {
                     "merged_intent": merged_intent,
@@ -1388,9 +1727,9 @@ FINAL RULES
 
             response_text = response.strip()
 
-            # #logger.info(
-            #     f"[Orchestrator] 🔍 Raw LLM Response:\n{response_text}"
-            # )
+            logger.info(
+                f"[✅ DEBUG] Raw LLM Response:\n{response_text}"
+            )
 
             # Remove markdown code block if exists
             json_text = response_text
@@ -1408,6 +1747,20 @@ FINAL RULES
                     json_text
                 )
 
+            # 🔧 FIX: Handle truncated JSON by auto-completing if needed
+            # If JSON looks truncated, try to complete it
+            if not json_text.rstrip().endswith("}"):
+                # Count open/close braces to estimate missing content
+                open_braces = json_text.count("{")
+                close_braces = json_text.count("}")
+                
+                if open_braces > close_braces:
+                    missing_braces = open_braces - close_braces
+                    json_text += "}" * missing_braces
+                    logger.warning(
+                        f"[⚠️ DEBUG] JSON was truncated. Added {missing_braces} closing braces"
+                    )
+
             data = json.loads(json_text)
 
             # ===== VALIDATION =====
@@ -1415,6 +1768,10 @@ FINAL RULES
             category = data.get("category", "").strip()
             confidence = float(data.get("confidence", 0.0))
             attributes = data.get("attributes", [])
+
+            logger.info(f"[✅ DEBUG] Parsed category: '{category}'")
+            logger.info(f"[✅ DEBUG] Parsed confidence: {confidence}")
+            logger.info(f"[✅ DEBUG] Number of attributes: {len(attributes) if isinstance(attributes, list) else 'NOT_A_LIST'}")
 
             # Validate attributes structure
             valid_attributes = []
@@ -1463,7 +1820,12 @@ FINAL RULES
             }
 
         except json.JSONDecodeError as e:
-
+            logger.error(
+                f"[❌ DEBUG] JSON Parse Error: {str(e)}"
+            )
+            logger.error(
+                f"[❌ DEBUG] Response text was: {response_text}"
+            )
 
             return {
                 "merged_intent": merged_intent,
@@ -1475,11 +1837,10 @@ FINAL RULES
             }
 
         except Exception as e:
-
-            # #logger.error(
-            #     f"[Orchestrator] Comprehensive analysis error: {e}",
-            #     exc_info=True
-            # )
+            logger.error(
+                f"[❌ DEBUG] Unexpected error: {str(e)}",
+                exc_info=True
+            )
 
             return {
                 "merged_intent": merged_intent,
