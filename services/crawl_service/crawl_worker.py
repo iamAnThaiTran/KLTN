@@ -19,6 +19,7 @@ sys.path.insert(0, service_dir)
 
 from crawlers.multi_crawler import MultiCrawler
 from crawlers.tiki.product_detail_crawler import ProductDetailCrawler
+from crawlers.lazada.product_detail_crawler import LazadaProductDetailCrawler
 
 try:
     from extraction import LLMAttributeExtractor
@@ -60,6 +61,9 @@ USE_LLM = os.getenv("USE_LLM", "true").lower() == "true"
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 LLM_BATCH_SIZE = int(os.getenv("LLM_BATCH_SIZE", "5"))
 FALLBACK_TO_REGEX = os.getenv("FALLBACK_TO_REGEX", "true").lower() == "true"
+
+# === Lazada API Configuration ===
+LAZADA_COOKIES = os.getenv("LAZADA_COOKIES", "")  # Browser cookies for Lazada API auth
 
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
@@ -218,38 +222,67 @@ def execute_single_product_crawl(task_data: Dict[str, Any]) -> Dict[str, Any]:
     Execute single product crawl with details + reviews (for comparison feature)
     
     Args:
-        task_data: {"product_id": int, "seller_id": str, "crawl_reviews": bool}
+        task_data: {
+            "product_id": int,
+            "seller_id": str (optional, default "1" for Tiki),
+            "product_url": str (optional, required for Lazada),
+            "crawl_reviews": bool,
+            "source": str ("tiki" or "lazada", default "tiki")
+        }
     
     Returns:
         Dictionary with snapshot
     """
     try:
         product_id = task_data.get("product_id")
+        source = task_data.get("source", "tiki").lower()
+        product_url = task_data.get("product_url")
         seller_id = task_data.get("seller_id", "1")
         crawl_reviews = task_data.get("crawl_reviews", True)
         
-        logger.info(f"📦 Single product crawl: product_id={product_id}, seller_id={seller_id}")
+        logger.info(f"📦 Single product crawl: source={source}, product_id={product_id}")
         
-        # Import local crawler
-        from crawlers.tiki_review_crawler_simple import TikiReviewCrawlerSimple
-        
-        crawler = TikiReviewCrawlerSimple()
-        
-        # Run async crawl
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        snapshot = loop.run_until_complete(
-            crawler.get_product_snapshot(
-                product_id=str(product_id),
-                spid="",
-                seller_id=seller_id,
-                label=f"Product {product_id}"
+        # Route based on source
+        if source == "lazada":
+            # Use Lazada crawler
+            from crawlers.lazada_product_crawler import LazadaProductCrawler
+            
+            crawler = LazadaProductCrawler()
+            
+            # Run async crawl
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            snapshot = loop.run_until_complete(
+                crawler.get_product_snapshot(
+                    product_id=str(product_id),
+                    product_url=product_url,
+                    label=f"Product {product_id}"
+                )
             )
-        )
-        
-        loop.run_until_complete(crawler.close())
-        loop.close()
+            
+            loop.close()
+        else:
+            # Default: Use Tiki crawler (source="tiki" or unknown)
+            from crawlers.tiki_review_crawler_simple import TikiReviewCrawlerSimple
+            
+            crawler = TikiReviewCrawlerSimple()
+            
+            # Run async crawl
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            snapshot = loop.run_until_complete(
+                crawler.get_product_snapshot(
+                    product_id=str(product_id),
+                    spid="",
+                    seller_id=seller_id,
+                    label=f"Product {product_id}"
+                )
+            )
+            
+            loop.run_until_complete(crawler.close())
+            loop.close()
         
         logger.info(f"✅ Snapshot created: {snapshot.get('name', 'Unknown')[:50]}")
         
@@ -257,6 +290,7 @@ def execute_single_product_crawl(task_data: Dict[str, Any]) -> Dict[str, Any]:
             "status": "success",
             "snapshot": snapshot,
             "product_id": product_id,
+            "source": source,
             "timestamp": datetime.utcnow().isoformat()
         }
     
@@ -266,6 +300,7 @@ def execute_single_product_crawl(task_data: Dict[str, Any]) -> Dict[str, Any]:
             "status": "error",
             "error": str(e),
             "product_id": task_data.get("product_id"),
+            "source": task_data.get("source", "tiki"),
             "snapshot": None
         }
 
@@ -277,26 +312,39 @@ def execute_product_details_crawl(task_data: Dict[str, Any]) -> Dict[str, Any]:
     
     Args:
         task_data: {
-            "product_ids": ["276183351", "276183352", ...],
+            "product_ids": ["276183351", "276183352", ...] (optional),
+            "spids": ["123", "124", ...] (optional),
+            "product_urls": ["https://...", "https://..."] (optional, for Lazada/Shopee),
+            "sources": ["tiki"] or ["lazada"] or ["shopee"] (optional, auto-detected),
             "schema": {...},
             "max_concurrent": 3,
-            "use_llm": true (optional, defaults to USE_LLM env)
+            "use_llm": true (optional, defaults to USE_LLM env),
         }
     
     Returns:
         Dictionary with crawl results and extracted attributes + extraction method
+    
+    ✅ SUPPORTS MULTIPLE SOURCES:
+    - Tiki: Uses product_ids + ProductDetailCrawler
+    - Lazada/Shopee: Uses product_urls (requires Playwright crawler - TODO)
     """
     try:
         product_ids = task_data.get("product_ids", [])
+        product_urls = task_data.get("product_urls", [])
+        spids = task_data.get("spids", [])
         schema = task_data.get("schema")
         max_concurrent = task_data.get("max_concurrent", 3)
+        sources = task_data.get("sources", ["tiki"])
         use_llm = task_data.get("use_llm", USE_LLM and HAS_LLM_SUPPORT)
         
         logger.info(
     f"""
 📦 execute_product_details_crawl called
-- product_ids_count: {len(product_ids)}
-- product_ids_sample: {product_ids[:5]}
+- sources: {sources}
+- product_ids_count: {len(product_ids) if product_ids else 0}
+- product_urls_count: {len(product_urls) if product_urls else 0}
+- product_ids_sample: {product_ids[:5] if product_ids else 'None'}
+- product_urls_sample: {product_urls[:2] if product_urls else 'None'}
 - schema_exists: {bool(schema)}
 - max_concurrent: {max_concurrent}
 - use_llm: {use_llm}
@@ -305,34 +353,102 @@ def execute_product_details_crawl(task_data: Dict[str, Any]) -> Dict[str, Any]:
 )
         
         extraction_method = "llm" if use_llm else "regex"
-        logger.info(f"📦 Product details crawl: {len(product_ids)} products, schema={bool(schema)}, method={extraction_method}")
+        total_products = (len(product_ids) if product_ids else 0) + (len(product_urls) if product_urls else 0)
+        logger.info(f"📦 Product details crawl: sources={sources}, {total_products} products, schema={bool(schema)}, method={extraction_method}")
         
-        # Run async crawler
-        crawler = ProductDetailCrawler(use_llm=use_llm)
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # ⭐ Route based on sources
+        results = []
         
-        # Use LLM extraction if enabled, otherwise fallback to regex
-        if use_llm and HAS_LLM_SUPPORT:
-            results = loop.run_until_complete(
-                crawler.crawl_multiple_products_with_llm(
-                    product_ids=product_ids,
-                    schema=schema,
-                    max_concurrent=max_concurrent,
-                    fallback_to_regex=FALLBACK_TO_REGEX
+        # Handle Tiki products (via product_ids)
+        if "tiki" in sources and product_ids:
+            logger.info(f"🔄 Processing Tiki: {len(product_ids)} products via product_ids")
+            
+            # Run async crawler
+            crawler = ProductDetailCrawler(use_llm=use_llm)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Use LLM extraction if enabled, otherwise fallback to regex
+            if use_llm and HAS_LLM_SUPPORT:
+                tiki_results = loop.run_until_complete(
+                    crawler.crawl_multiple_products_with_llm(
+                        product_ids=product_ids,
+                        schema=schema,
+                        max_concurrent=max_concurrent,
+                        fallback_to_regex=FALLBACK_TO_REGEX
+                    )
                 )
-            )
-        else:
-            results = loop.run_until_complete(
-                crawler.crawl_multiple_products(
-                    product_ids=product_ids,
-                    schema=schema,
-                    max_concurrent=max_concurrent
+            else:
+                tiki_results = loop.run_until_complete(
+                    crawler.crawl_multiple_products(
+                        product_ids=product_ids,
+                        schema=schema,
+                        max_concurrent=max_concurrent
+                    )
                 )
-            )
+            
+            loop.run_until_complete(crawler.close())
+            loop.close()
+            
+            results.extend(tiki_results)
+            logger.info(f"✅ Tiki crawl complete: {len(tiki_results)} products processed")
         
-        loop.run_until_complete(crawler.close())
-        loop.close()
+        # Handle Lazada products (via product_urls with API + LLM)
+        if "lazada" in sources and product_urls:
+            logger.info(f"🔄 Processing Lazada: {len(product_urls)} products via product_urls (API + LLM mode)")
+            
+            # Get cookies from task_data or environment
+            cookies_str = task_data.get("lazada_cookies") or LAZADA_COOKIES
+            if not cookies_str:
+                logger.error("❌ Lazada cookies not found! Set LAZADA_COOKIES environment variable or pass lazada_cookies in task_data")
+                results.extend([
+                    {
+                        "status": "error",
+                        "product_url": url,
+                        "product_id": f"lazada_{i}",
+                        "error": "Lazada cookies not configured",
+                        "extraction_method": "none"
+                    }
+                    for i, url in enumerate(product_urls)
+                ])
+            else:
+                # Run async crawler (API-based, no browser needed)
+                lazada_crawler = LazadaProductDetailCrawler(
+                    cookies_str=cookies_str,
+                    use_llm=use_llm,
+                    timeout=60.0
+                )
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # Crawl with LLM extraction (use max_concurrent=2 to respect rate limiting)
+                lazada_results = loop.run_until_complete(
+                    lazada_crawler.crawl_multiple_products(
+                        product_urls=product_urls,
+                        product_ids=[f"lazada_{i}" for i in range(len(product_urls))],
+                        schema=schema,
+                        max_concurrent=min(2, max_concurrent)  # Limit to 2 for rate limiting
+                    )
+                )
+                
+                loop.close()
+                
+                results.extend(lazada_results)
+                logger.info(f"✅ Lazada crawl complete: {len(lazada_results)} products processed")
+        
+        # Handle Shopee products (placeholder - not yet implemented)
+        if "shopee" in sources and product_urls:
+            logger.warning("⚠️  Shopee product details crawl not yet implemented")
+            logger.info(f"   🔗 Would crawl: {len(product_urls)} URLs")
+            
+            # TODO: Implement Shopee ProductDetailCrawler with Playwright
+            for url in product_urls:
+                results.append({
+                    "status": "pending",
+                    "product_url": url,
+                    "error": "Shopee product details crawl not yet implemented",
+                    "extraction_method": "none"
+                })
         
         # Process results
         success_count = sum(1 for r in results if r.get("status") == "success")
@@ -347,6 +463,7 @@ def execute_product_details_crawl(task_data: Dict[str, Any]) -> Dict[str, Any]:
         
         return {
             "status": "success",
+            "sources": sources,
             "results": results,
             "total": len(results),
             "success_count": success_count,
@@ -622,9 +739,16 @@ def process_task(task_message: Dict[str, Any]) -> bool:
             # 🆕 Product details crawl with attribute extraction
             product_ids = task.attributes.get("product_ids", [])
             spids = task.attributes.get("spids", []) or []
+            product_urls = task.attributes.get("product_urls", [])
+            sources = task.attributes.get("sources") or task_message.get("sources", ["tiki"])
+            
+            logger.info(f"📦 Product details task: sources={sources}, product_ids={len(product_ids) if product_ids else 0}, product_urls={len(product_urls) if product_urls else 0}")
+            
             result = execute_product_details_crawl({
                 "product_ids": product_ids,
                 "spids": spids,
+                "product_urls": product_urls,
+                "sources": sources,
                 "schema": task.attributes.get("schema"),
                 "max_concurrent": task.attributes.get("max_concurrent", 3)
             })
@@ -633,6 +757,7 @@ def process_task(task_message: Dict[str, Any]) -> bool:
             if result.get("status") == "success":
                 logger.info(f"💾 Saving extracted attributes to Product Service...")
                 logger.info(f"🔧 Extraction method: {result.get('extraction_method', 'unknown')} (LLM: {result.get('llm_count', 0)}, Regex: {result.get('regex_count', 0)})")
+                logger.info(f"🌐 Sources: {result.get('sources', ['unknown'])}")
                 
                 attributes_saved = 0
                 attributes_failed = 0
@@ -676,10 +801,13 @@ def process_task(task_message: Dict[str, Any]) -> bool:
         
         elif task.category == "single_product":
             # Single product crawl with details + reviews
+            source = task_message.get("source", task.attributes.get("source", "tiki")).lower()
             result = execute_single_product_crawl({
                 "product_id": task.category_id,
                 "seller_id": task.attributes.get("seller_id", "1"),
-                "crawl_reviews": task.attributes.get("crawl_reviews", True)
+                "product_url": task.attributes.get("product_url"),
+                "crawl_reviews": task.attributes.get("crawl_reviews", True),
+                "source": source
             })
         else:
             # Multi-product crawl by category

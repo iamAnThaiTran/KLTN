@@ -1,0 +1,325 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.5">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Analyze API Load Test" enabled="true">
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="BASE_URL" elementType="Argument">
+            <stringProp name="Argument.name">BASE_URL</stringProp>
+            <stringProp name="Argument.value">http://localhost:8000</stringProp>
+          </elementProp>
+          <elementProp name="NUM_THREADS" elementType="Argument">
+            <stringProp name="Argument.name">NUM_THREADS</stringProp>
+            <stringProp name="Argument.value">100</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+      <stringProp name="TestPlan.comments">Load test for /api/analyze endpoint with 20% unavailable, 80% available products</stringProp>
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
+        <collectionProp name="Arguments.arguments"/>
+      </elementProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Load Test Group" enabled="true">
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">-1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">${NUM_THREADS}</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">120</stringProp>
+        <elementProp name="ThreadGroup.scheduler" elementType="elementProp" guiclass="SchedulerPanel" testclass="elementProp" testname="Scheduler" enabled="true">
+          <boolProp name="Scheduler.controlRampupGui">false</boolProp>
+          <boolProp name="Scheduler.controlDurationGui">true</boolProp>
+          <longProp name="Scheduler.duration">600</longProp>
+          <longProp name="Scheduler.delay">0</longProp>
+        </elementProp>
+      </ThreadGroup>
+      <hashTree>
+        <!-- Data for unavailable products (20%) -->
+        <Arguments guiclass="ArgumentsPanel" testclass="Arguments" testname="Unavailable Products" enabled="true">
+          <collectionProp name="Arguments.arguments">
+            <elementProp name="unavailable_products" elementType="Argument">
+              <stringProp name="Argument.name">unavailable_products</stringProp>
+              <stringProp name="Argument.value">laptop gaming RTX 4090|iPhone 15 Pro Max 1TB|MacBook Pro M4 Max 64GB|Samsung Galaxy S25 Ultra|Sony A1 camera|DJI Phantom 8|Asus ROG laptop i9|iPad Pro 13 inch M4|Google Pixel Fold|Xiaomi Pad 8 Pro</stringProp>
+            </elementProp>
+          </collectionProp>
+        </Arguments>
+        <hashTree/>
+        
+        <!-- Data for available products (80%) -->
+        <Arguments guiclass="ArgumentsPanel" testclass="Arguments" testname="Available Products" enabled="true">
+          <collectionProp name="Arguments.arguments">
+            <elementProp name="available_products" elementType="Argument">
+              <stringProp name="Argument.name">available_products</stringProp>
+              <stringProp name="Argument.value">áo thun nam|quần jeans nữ|giày thể thao|túi xách nữ|đồng hồ|dép xỏ ngón|áo khoác nam|quần shorts nữ|mũ lưỡi trai|dây chuyền vàng|vòng tay thời trang|khăn choàng|balo du lịch|ví da nam|giày cao gót nữ|áo sơ mi nam|quần legging nữ|thắt lưng da|tất cotton|khẩu trang thời trang</stringProp>
+            </elementProp>
+          </collectionProp>
+        </Arguments>
+        <hashTree/>
+
+        <!-- Random choice: 20% unavailable, 80% available -->
+        <IfController guiclass="IfControllerPanel" testclass="IfController" testname="Random Product Selection (20/80)" enabled="true">
+          <stringProp name="IfController.condition">${__javaScript(Math.random() &lt; 0.2)}</stringProp>
+          <boolProp name="IfController.evaluateAll">false</boolProp>
+          <boolProp name="IfController.useExpression">true</boolProp>
+        </IfController>
+        <hashTree>
+          <!-- Unavailable product branch (20%) -->
+          <Arguments guiclass="ArgumentsPanel" testclass="Arguments" testname="Select Random Unavailable" enabled="true">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="product_query" elementType="Argument">
+                <stringProp name="Argument.name">product_query</stringProp>
+                <stringProp name="Argument.value">${__javaScript(var products = "${unavailable_products}".split("|"); products[Math.floor(Math.random() * products.length)])}</stringProp>
+              </elementProp>
+              <elementProp name="search_type" elementType="Argument">
+                <stringProp name="Argument.name">search_type</stringProp>
+                <stringProp name="Argument.value">unavailable</stringProp>
+              </elementProp>
+            </collectionProp>
+          </Arguments>
+          <hashTree/>
+        </hashTree>
+        <hashTree>
+          <!-- Available product branch (80%) -->
+          <Arguments guiclass="ArgumentsPanel" testclass="Arguments" testname="Select Random Available" enabled="true">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="product_query" elementType="Argument">
+                <stringProp name="Argument.name">product_query</stringProp>
+                <stringProp name="Argument.value">${__javaScript(var products = "${available_products}".split("|"); products[Math.floor(Math.random() * products.length)])}</stringProp>
+              </elementProp>
+              <elementProp name="search_type" elementType="Argument">
+                <stringProp name="Argument.name">search_type</stringProp>
+                <stringProp name="Argument.value">available</stringProp>
+              </elementProp>
+            </collectionProp>
+          </Arguments>
+          <hashTree/>
+        </hashTree>
+
+        <!-- Generate unique conversation ID -->
+        <Arguments guiclass="ArgumentsPanel" testclass="Arguments" testname="Generate Conversation ID" enabled="true">
+          <collectionProp name="Arguments.arguments">
+            <elementProp name="conversation_id" elementType="Argument">
+              <stringProp name="Argument.name">conversation_id</stringProp>
+              <stringProp name="Argument.value">conv_${__javaScript(Math.random().toString(36).substring(7))}</stringProp>
+            </elementProp>
+          </collectionProp>
+        </Arguments>
+        <hashTree/>
+
+        <!-- HTTP Request to /api/analyze -->
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="POST /api/analyze" enabled="true">
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
+          <stringProp name="HTTPSampler.domain">localhost</stringProp>
+          <stringProp name="HTTPSampler.port">8000</stringProp>
+          <stringProp name="HTTPSampler.protocol">http</stringProp>
+          <stringProp name="HTTPSampler.contentEncoding">utf-8</stringProp>
+          <stringProp name="HTTPSampler.path">/api/analyze</stringProp>
+          <stringProp name="HTTPSampler.method">POST</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp>
+          <stringProp name="HTTPSampler.embedded_url_re"></stringProp>
+          <stringProp name="HTTPSampler.connect_timeout"></stringProp>
+          <stringProp name="HTTPSampler.response_timeout"></stringProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <Arguments guiclass="ArgumentsPanel" testclass="Arguments" testname="Request Body" enabled="true">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="body" elementType="Argument">
+                <stringProp name="Argument.name">body</stringProp>
+                <stringProp name="Argument.value">{"user_input": "${product_query}", "conversation_id": "${conversation_id}"}</stringProp>
+              </elementProp>
+            </collectionProp>
+          </Arguments>
+          <hashTree/>
+          
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="HTTP Header Manager" enabled="true">
+            <collectionProp name="HeaderManager.headers">
+              <elementProp name="Content-Type" elementType="Header">
+                <stringProp name="Header.name">Content-Type</stringProp>
+                <stringProp name="Header.value">application/json</stringProp>
+              </elementProp>
+            </collectionProp>
+          </HeaderManager>
+          <hashTree/>
+
+          <!-- Response Assertion -->
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Response Assertions" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="49586">200</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.test_type">1</stringProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
+            <intProp name="Assertion.test_strings_type">1</intProp>
+          </ResponseAssertion>
+          <hashTree/>
+
+          <!-- JSON Assertion for response structure -->
+          <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="JSON Assertion - success" enabled="true">
+            <stringProp name="JSON_PATH">$.success</stringProp>
+            <stringProp name="EXPECTED_VALUE">true</stringProp>
+            <boolProp name="ISREGEX">false</boolProp>
+            <boolProp name="EXPECT_NULL">false</boolProp>
+            <boolProp name="INVERT">false</boolProp>
+            <boolProp name="IS_JSON_VALIDATION_SCRIPT">false</boolProp>
+          </JSONPathAssertion>
+          <hashTree/>
+
+          <!-- Extract job ID if present -->
+          <JSR223Extractor guiclass="TestBeanGUI" testclass="JSR223Extractor" testname="Extract jobId" enabled="true">
+            <stringProp name="cacheKey">true</stringProp>
+            <stringProp name="filename"></stringProp>
+            <stringProp name="parameters"></stringProp>
+            <stringProp name="script">def response = prev.getResponseData(java.nio.charset.StandardCharsets.UTF_8);
+def json = new org.json.JSONObject(response);
+if(json.has("jobId")) {
+    vars.put("jobId", json.getString("jobId"));
+    vars.put("hasJob", "true");
+} else {
+    vars.put("hasJob", "false");
+}</stringProp>
+            <stringProp name="scriptLanguage">groovy</stringProp>
+            <stringProp name="refNames"></stringProp>
+            <stringProp name="matchNumbers"></stringProp>
+            <stringProp name="dynamicScripting">true</stringProp>
+          </JSR223Extractor>
+          <hashTree/>
+        </hashTree>
+
+        <!-- Conditional polling if jobId exists -->
+        <IfController guiclass="IfControllerPanel" testclass="IfController" testname="If Job Created - Poll Result" enabled="true">
+          <stringProp name="IfController.condition">${hasJob}</stringProp>
+          <boolProp name="IfController.evaluateAll">false</boolProp>
+          <boolProp name="IfController.useExpression">true</boolProp>
+        </IfController>
+        <hashTree>
+          <!-- Polling loop -->
+          <WhileController guiclass="WhileControllerGui" testclass="WhileController" testname="Poll Job Until Complete" enabled="true">
+            <stringProp name="WhileController.condition">${__javaScript(true)}</stringProp>
+          </WhileController>
+          <hashTree>
+            <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="GET /api/job/${jobId}" enabled="true">
+              <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
+                <collectionProp name="Arguments.arguments"/>
+              </elementProp>
+              <stringProp name="HTTPSampler.domain">localhost</stringProp>
+              <stringProp name="HTTPSampler.port">8000</stringProp>
+              <stringProp name="HTTPSampler.protocol">http</stringProp>
+              <stringProp name="HTTPSampler.path">/api/job/${jobId}</stringProp>
+              <stringProp name="HTTPSampler.method">GET</stringProp>
+              <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+              <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+              <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+              <boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp>
+              <stringProp name="HTTPSampler.embedded_url_re"></stringProp>
+              <stringProp name="HTTPSampler.connect_timeout"></stringProp>
+              <stringProp name="HTTPSampler.response_timeout"></stringProp>
+            </HTTPSamplerProxy>
+            <hashTree>
+              <JSR223Extractor guiclass="TestBeanGUI" testclass="JSR223Extractor" testname="Check Poll Status" enabled="true">
+                <stringProp name="cacheKey">true</stringProp>
+                <stringProp name="filename"></stringProp>
+                <stringProp name="parameters"></stringProp>
+                <stringProp name="script">def response = prev.getResponseData(java.nio.charset.StandardCharsets.UTF_8);
+def json = new org.json.JSONObject(response);
+if(json.has("status") &amp;&amp; (json.getString("status").equals("completed") || json.getString("status").equals("done"))) {
+    vars.put("pollComplete", "true");
+} else {
+    vars.put("pollComplete", "false");
+}
+Thread.sleep(1000); // Wait 1 second before next poll</stringProp>
+                <stringProp name="scriptLanguage">groovy</stringProp>
+                <stringProp name="refNames"></stringProp>
+                <stringProp name="matchNumbers"></stringProp>
+                <stringProp name="dynamicScripting">true</stringProp>
+              </JSR223Extractor>
+              <hashTree/>
+            </hashTree>
+          </hashTree>
+        </hashTree>
+
+        <!-- Results Summary Listener -->
+        <ResultCollector guiclass="TableReport" testclass="ResultCollector" testname="View Results Tree" enabled="true">
+          <objProp name="saveConfig">
+            <objProp name="SampleSaveConfiguration">
+              <boolProp name="time">true</boolProp>
+              <boolProp name="latency">true</boolProp>
+              <boolProp name="timestamp">true</boolProp>
+              <boolProp name="success">true</boolProp>
+              <boolProp name="label">true</boolProp>
+              <boolProp name="code">true</boolProp>
+              <boolProp name="message">true</boolProp>
+              <boolProp name="threadName">true</boolProp>
+              <boolProp name="dataType">true</boolProp>
+              <boolProp name="encoding">false</boolProp>
+              <boolProp name="assertions">true</boolProp>
+              <boolProp name="subresults">true</boolProp>
+              <boolProp name="responseData">false</boolProp>
+              <boolProp name="samplerData">false</boolProp>
+              <boolProp name="xml">false</boolProp>
+              <boolProp name="fieldNames">true</boolProp>
+              <boolProp name="responseHeaders">false</boolProp>
+              <boolProp name="requestHeaders">false</boolProp>
+              <boolProp name="responseDataOnError">false</boolProp>
+              <boolProp name="saveAssertionResultsFailureMessage">true</boolProp>
+              <boolProp name="assertionsResultsToSave">0</boolProp>
+              <boolProp name="bytes">true</boolProp>
+              <boolProp name="url">true</boolProp>
+              <boolProp name="csv">false</boolProp>
+              <boolProp name="png">false</boolProp>
+              <boolProp name="perfBarChart">false</boolProp>
+              <boolProp name="responseTime">true</boolProp>
+              <intProp name="responseTimeWindowSize">100</intProp>
+            </objProp>
+          </objProp>
+          <stringProp name="filename"></stringProp>
+        </ResultCollector>
+        <hashTree/>
+
+        <!-- Summary Report -->
+        <ResultCollector guiclass="SummaryReport" testclass="ResultCollector" testname="Summary Report" enabled="true">
+          <objProp name="saveConfig">
+            <objProp name="SampleSaveConfiguration">
+              <boolProp name="time">true</boolProp>
+              <boolProp name="latency">true</boolProp>
+              <boolProp name="timestamp">true</boolProp>
+              <boolProp name="success">true</boolProp>
+              <boolProp name="label">true</boolProp>
+              <boolProp name="code">true</boolProp>
+              <boolProp name="message">true</boolProp>
+              <boolProp name="threadName">true</boolProp>
+              <boolProp name="dataType">true</boolProp>
+              <boolProp name="encoding">false</boolProp>
+              <boolProp name="assertions">true</boolProp>
+              <boolProp name="subresults">true</boolProp>
+              <boolProp name="responseData">false</boolProp>
+              <boolProp name="samplerData">false</boolProp>
+              <boolProp name="xml">false</boolProp>
+              <boolProp name="fieldNames">true</boolProp>
+              <boolProp name="responseHeaders">false</boolProp>
+              <boolProp name="requestHeaders">false</boolProp>
+              <boolProp name="responseDataOnError">false</boolProp>
+              <boolProp name="saveAssertionResultsFailureMessage">true</boolProp>
+              <boolProp name="assertionsResultsToSave">0</boolProp>
+              <boolProp name="bytes">true</boolProp>
+              <boolProp name="url">true</boolProp>
+              <boolProp name="csv">false</boolProp>
+              <boolProp name="png">false</boolProp>
+              <boolProp name="perfBarChart">false</boolProp>
+              <boolProp name="responseTime">true</boolProp>
+              <intProp name="responseTimeWindowSize">100</intProp>
+            </objProp>
+          </objProp>
+          <stringProp name="filename"></stringProp>
+        </ResultCollector>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

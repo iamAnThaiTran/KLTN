@@ -5,7 +5,6 @@ import { SharedHeader, LoginModal } from './SharedHeader';
 import ProductComparison from './ProductComparison';
 import RecommendedProducts from './RecommendedProducts';
 import { useAuth } from '../context/AuthContext';
-import { formatTopics, PERSONALIZED_DATA } from '../config';
 
 const CATEGORIES = [
   { icon: '👟', label: 'Giày đẹp' },

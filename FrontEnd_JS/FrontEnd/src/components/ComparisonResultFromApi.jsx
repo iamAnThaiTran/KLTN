@@ -212,7 +212,7 @@ export default function ComparisonResultFromApi({ data, onBack, onOpenHistory })
           label="Quay lại" 
           onClick={onBack} 
         />
-        <ActionButton 
+        {/* <ActionButton 
           icon={saved ? <Check size={16} /> : <Save size={16} />} 
           label={saved ? "Đã lưu" : "Lưu"} 
           onClick={handleSaveComparison}
@@ -250,7 +250,7 @@ export default function ComparisonResultFromApi({ data, onBack, onOpenHistory })
               alert('Chức năng chia sẻ không được hỗ trợ trên trình duyệt này');
             }
           }}
-        />
+        /> */}
       </div>
     </div>
   );

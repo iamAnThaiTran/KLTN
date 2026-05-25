@@ -11,7 +11,7 @@ from datetime import datetime
 import unicodedata
 import re
 
-logger = logging.getLogger(__name__)
+#logger = logging.get#logger(__name__)
 
 # ============================================================================
 # Helper Functions
@@ -37,6 +37,85 @@ def slugify(text: str) -> str:
     # Strip leading/trailing hyphens
     slug = slug.strip('-')
     return slug
+
+
+def normalize_crawled_product(product: Dict[str, Any], source: str = None) -> Dict[str, Any]:
+    """
+    Normalize product data from different sources (Tiki, Lazada, Shopee)
+    to a consistent schema for ProcessService.
+    
+    Args:
+        product: Product data from crawler (different formats per source)
+        source: Data source (tiki, lazada, shopee)
+    
+    Returns:
+        Normalized product with consistent field names:
+        {
+            "product_id": str,      # Tiki: product_id, Lazada: extracted from url
+            "product_url": str,     # Tiki: product_url, Lazada: url
+            "spid": str,            # Tiki: spid, Lazada: null
+            "title": str,
+            "name": str,
+            "price": str,
+            "image": str,
+            "source": str,
+            ...other fields
+        }
+    """
+    normalized = product.copy()
+    
+    # Auto-detect source if not provided
+    if not source:
+        source = product.get("source", "unknown")
+    
+    if source.lower() == "lazada":
+        # Lazada: url → product_url
+        if "url" in product and "product_url" not in product:
+            normalized["product_url"] = product["url"]
+        
+        # Lazada: extract product_id from URL
+        # https://www.lazada.vn/products/pdp-i3086978477.html → 3086978477
+        if "url" in product and "product_id" not in product:
+            match = re.search(r'pdp-i(\d+)', product["url"])
+            if match:
+                normalized["product_id"] = match.group(1)
+        
+        # Lazada: name or title
+        if "name" in product and "title" not in product:
+            normalized["title"] = product["name"]
+        
+        # Ensure product_id exists even if extraction failed
+        if "product_id" not in normalized or not normalized.get("product_id"):
+            # Fallback: use URL as product_id
+            normalized["product_id"] = product.get("url", "").split("/")[-1] if product.get("url") else None
+    
+    elif source.lower() == "tiki":
+        # Tiki: ensure product_url exists
+        if "url" in product and "product_url" not in product:
+            normalized["product_url"] = product["url"]
+        
+        # Tiki: ensure product_id exists
+        if "product_id" not in normalized:
+            normalized["product_id"] = product.get("id") or product.get("product_id")
+    
+    # Shopee: similar to Lazada but different URL format
+    elif source.lower() == "shopee":
+        if "url" in product and "product_url" not in product:
+            normalized["product_url"] = product["url"]
+        
+        # Shopee: extract product_id from URL
+        # https://shopee.vn/.../i... → extract id
+        if "url" in product and "product_id" not in product:
+            match = re.search(r'/i(\d+)', product["url"])
+            if match:
+                normalized["product_id"] = match.group(1)
+    
+    # Ensure essential fields exist
+    normalized.setdefault("source", source)
+    normalized.setdefault("title", product.get("name") or product.get("title") or "")
+    normalized.setdefault("name", product.get("title") or product.get("name") or "")
+    
+    return normalized
 
 
 class ProductServiceClient:
@@ -98,20 +177,20 @@ class ProductServiceClient:
         last_error = None
         for attempt in range(self.max_retries):
             try:
-                logger.debug(f"ProductServiceClient: {method} {url} (attempt {attempt + 1})")
+                #logger.debug(f"ProductServiceClient: {method} {url} (attempt {attempt + 1})")
                 response = await client.request(method, url, **kwargs)
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPError as e:
                 last_error = e
-                logger.warning(
-                    f"ProductServiceClient request failed: {method} {url} - {str(e)}"
-                )
+                # #logger.warning(
+                #     f"ProductServiceClient request failed: {method} {url} - {str(e)}"
+                # )
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(self.retry_delay)
                 continue
         
-        logger.error(f"ProductServiceClient: Failed after {self.max_retries} retries: {url}")
+        #logger.error(f"ProductServiceClient: Failed after {self.max_retries} retries: {url}")
         raise last_error or Exception("Request failed")
     
     # ========================================================================
@@ -396,7 +475,7 @@ class ProductServiceClient:
             return response.get("filters", [])
         
         except Exception as e:
-            logger.error(f"Error fetching filters for category '{category_name}': {e}")
+            #logger.error(f"Error fetching filters for category '{category_name}': {e}")
             return []
     
     async def create_category(
@@ -462,7 +541,7 @@ class ProductServiceClient:
             )
             return response if response else {}
         except Exception as e:
-            logger.error(f"Failed to get category details: {e}")
+            #logger.error(f"Failed to get category details: {e}")
             return {}
     
     async def add_category_attributes(
@@ -499,14 +578,14 @@ class ProductServiceClient:
             )
             
             if response and response.get("success"):
-                logger.info(f"✅ Added {len(attributes)} attributes to category {category_id}")
+                #logger.info(f"✅ Added {len(attributes)} attributes to category {category_id}")
                 return response
             else:
-                logger.warning(f"⚠️ Failed to add attributes: {response}")
+                #logger.warning(f"⚠️ Failed to add attributes: {response}")
                 return {"success": False}
         
         except Exception as e:
-            logger.error(f"Error adding category attributes: {e}")
+            #logger.error(f"Error adding category attributes: {e}")
             return {"success": False}
     
     async def sync_product_sku_attributes(
@@ -544,14 +623,14 @@ class ProductServiceClient:
             )
             
             if response and response.get("success"):
-                logger.info(f"✅ Synced SKU attributes for {response.get('products_synced', 0)} products")
+                #logger.info(f"✅ Synced SKU attributes for {response.get('products_synced', 0)} products")
                 return response
             else:
-                logger.warning(f"⚠️ Failed to sync SKU attributes: {response}")
+                #logger.warning(f"⚠️ Failed to sync SKU attributes: {response}")
                 return {"success": False}
         
         except Exception as e:
-            logger.error(f"Error syncing SKU attributes: {e}")
+            #logger.error(f"Error syncing SKU attributes: {e}")
             return {"success": False}
 
     async def get_or_crawl_products(
@@ -583,7 +662,7 @@ class ProductServiceClient:
             List of products with FULL attributes (detailed_attributes populated)
         """
         # 1. Query DB first
-        logger.info(f"[ProductServiceClient.get_or_crawl_products] Querying DB for category_id={category_id}")
+        #logger.info(f"[ProductServiceClient.get_or_crawl_products] Querying DB for category_id={category_id}")
         db_products = await self.get_products_by_category_and_attributes(
             category_id=category_id,
             attributes=attributes,
@@ -592,18 +671,18 @@ class ProductServiceClient:
         
         if db_products and len(db_products) >= 10:
             # DB HIT - sufficient products found
-            logger.info(f"[ProductServiceClient] ✅ DB HIT: Found {len(db_products)} products in database")
+            #logger.info(f"[ProductServiceClient] ✅ DB HIT: Found {len(db_products)} products in database")
             return db_products
         
         # 2. DB MISS - Crawl from external sources
-        logger.info(f"[ProductServiceClient] ❌ DB MISS - Crawling products from external sources...")
+        #logger.info(f"[ProductServiceClient] ❌ DB MISS - Crawling products from external sources...")
         
         try:
             from .crawl_service_client import CrawlServiceClient
             crawl_client = CrawlServiceClient()
             
             # Crawl shallow products
-            logger.info(f"[ProductServiceClient] 🔄 Step 1: Crawling shallow products...")
+            #logger.info(f"[ProductServiceClient] 🔄 Step 1: Crawling shallow products...")
             crawled_products = await crawl_client.crawl(
                 category=category_name,
                 category_id=category_id,
@@ -611,30 +690,56 @@ class ProductServiceClient:
             )
             
             if not crawled_products:
-                logger.warning(f"[ProductServiceClient] No products crawled for category '{category_name}'")
+                #logger.warning(f"[ProductServiceClient] No products crawled for category '{category_name}'")
                 return []
             
-            logger.info(f"[ProductServiceClient] ✅ Crawled {len(crawled_products)} shallow products")
+            #logger.info(f"[ProductServiceClient] ✅ Crawled {len(crawled_products)} shallow products")
+            
+            # ⭐ NORMALIZE DATA: Map fields from different sources (Lazada, Tiki, Shopee)
+            # Ensures product_id and product_url are present for detail crawl
+            #logger.info(f"[ProductServiceClient] 🔄 Normalizing product data from mixed sources...")
+            crawled_products = [
+                normalize_crawled_product(p, source=p.get("source"))
+                for p in crawled_products
+            ]
+            
+            # Log normalized data for debugging
+            if crawled_products:
+                sample = crawled_products[0]
+                #logger.info(f"[ProductServiceClient] Normalized sample: product_id={sample.get('product_id')}, product_url={sample.get('product_url')}, source={sample.get('source')}")
+                
+                # Count products with valid IDs/URLs for detail crawl
+                with_product_id = len([p for p in crawled_products if p.get("product_id")])
+                with_product_url = len([p for p in crawled_products if p.get("product_url")])
+                #logger.info(f"[ProductServiceClient] After normalization: {with_product_id} with product_id, {with_product_url} with product_url")
             
             # 3. Save shallow products to DB FIRST (before detail crawl)
-            logger.info(f"[ProductServiceClient] 💾 Step 2: Saving {len(crawled_products)} shallow products to database...")
+            #logger.info(f"[ProductServiceClient] 💾 Step 2: Saving {len(crawled_products)} shallow products to database...")
             try:
+                # Detect primary source from crawled products
+                sources = set([p.get("source") for p in crawled_products if p.get("source")])
+                primary_source = list(sources)[0] if sources else "unknown"
+                #logger.debug(f"[ProductServiceClient] Detected sources: {sources}, using primary: {primary_source}")
+                
                 await self.save_products(
                     crawled_products,
-                    source="tiki",
+                    source=primary_source,
                     category_id=category_id
                 )
-                logger.info(f"[ProductServiceClient] ✅ Saved {len(crawled_products)} shallow products to DB")
+                #logger.info(f"[ProductServiceClient] ✅ Saved {len(crawled_products)} shallow products to DB")
             except Exception as e:
-                logger.warning(f"[ProductServiceClient] ⚠️ Failed to save shallow products: {e}")
+                pass
+                #logger.warning(f"[ProductServiceClient] ⚠️ Failed to save shallow products: {e}")
                 # Don't fail - continue with detail crawl anyway
             
             # 4. Crawl product DETAILS (SYNCHRONIZED - wait for completion, not async RabbitMQ)
-            logger.info(f"[ProductServiceClient] 🔄 Step 3: Crawling product details for {len(crawled_products)} products...")
+            #logger.info(f"[ProductServiceClient] 🔄 Step 3: Crawling product details for {len(crawled_products)} products...")
             product_ids = [p.get("product_id") for p in crawled_products if p.get("product_id")]
             product_spids = [p.get("spid") for p in crawled_products if p.get("spid")]
+            product_urls = [p.get("product_url") for p in crawled_products if p.get("product_url")]
+            #logger.info(f"[ProductServiceClient] DEBUG: product_ids={len(product_ids)}, product_spids={len(product_spids)}, product_urls={len(product_urls)}")
             
-            if product_ids:
+            if product_ids or product_urls:
                 # Build schema from detected attributes (if available)
                 crawl_schema = None
                 if attributes:
@@ -651,41 +756,56 @@ class ProductServiceClient:
                         ]
                     }
                 
+                # Detect sources from crawled products
+                sources = set()
+                for p in crawled_products:
+                    if p.get("source"):
+                        sources.add(p.get("source"))
+                sources_list = list(sources) if sources else None
+                
                 try:
                     # ⭐ IMPORTANT: Wait for detail crawl to COMPLETE (synchronized)
+                    # Support both Tiki (product_ids) and Lazada/Shopee (product_urls with Playwright)
+                    #logger.debug(f"[ProductServiceClient] DEBUG: Starting sync crawl with sources={sources_list}...")
                     await crawl_client.crawl_product_details_sync(
-                        product_ids=product_ids,
-                        spids=product_spids,
+                        product_ids=product_ids if product_ids else None,
+                        spids=product_spids if product_spids else None,
+                        product_urls=product_urls if product_urls else None,
+                        sources=sources_list,
                         category_id=category_id,
                         schema=crawl_schema,
                         max_concurrent=5,
                         wait_for_completion=True  # ✅ WAIT for completion
                     )
-                    logger.info(f"[ProductServiceClient] ✅ Detail crawl completed")
+                    #logger.info(f"[ProductServiceClient] ✅ Detail crawl completed")
                     
                     # ⭐ Query DB again to get products with updated attributes
-                    logger.info(f"[ProductServiceClient] 🔄 Step 4: Re-querying DB to fetch products with new attributes...")
+                    #logger.info(f"[ProductServiceClient] 🔄 Step 4: Re-querying DB to fetch products with new attributes...")
                     crawled_products = await self.get_products_by_category_and_attributes(
                         category_id=category_id,
                         attributes=attributes,
                         limit=limit
                     )
-                    logger.info(f"[ProductServiceClient] ✅ Got {len(crawled_products)} products with detailed attributes from DB")
+                    #logger.info(f"[ProductServiceClient] ✅ Got {len(crawled_products)} products with detailed attributes from DB")
                 except Exception as e:
-                    logger.warning(f"[ProductServiceClient] ⚠️ Detail crawl failed, returning shallow products from DB: {e}")
+                    #logger.error(f"[ProductServiceClient] ❌ Detail crawl error: {type(e).__name__}: {str(e)}", exc_info=True)
+                    #logger.warning(f"[ProductServiceClient] ⚠️ Detail crawl failed, returning shallow products from DB")
                     # Continue with shallow products if detail crawl fails
                     crawled_products = await self.get_products_by_category_and_attributes(
                         category_id=category_id,
                         attributes=attributes,
                         limit=limit
                     )
+            else:
+                pass
+                #logger.warning(f"[ProductServiceClient] ⚠️ No product_ids or product_urls found to crawl details. Using shallow products only.")
             
             # 5. Return products with full attributes ready for ranking
-            logger.info(f"[ProductServiceClient] ✅ Returning {len(crawled_products)} products with full attributes")
+            #logger.info(f"[ProductServiceClient] ✅ Returning {len(crawled_products)} products with full attributes")
             return crawled_products
         
         except Exception as e:
-            logger.error(f"[ProductServiceClient] ❌ Error in get_or_crawl_products: {e}", exc_info=True)
+            #logger.error(f"[ProductServiceClient] ❌ Error in get_or_crawl_products: {e}", exc_info=True)
             # Fallback: return DB results if crawling fails
             return db_products if db_products else []
 
@@ -698,7 +818,7 @@ class ProductServiceClient:
             )
             return response.get("status") == "healthy"
         except Exception as e:
-            logger.error(f"ProductService health check failed: {e}")
+            #logger.error(f"ProductService health check failed: {e}")
             return False
 
 

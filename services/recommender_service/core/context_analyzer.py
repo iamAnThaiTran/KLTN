@@ -68,7 +68,8 @@ class ContextAnalyzer:
             return {
                 "intent": user_input,
                 "category_changed": False,
-                "new_category": None
+                "new_category": None,
+                "intent_type": "specific"
             }
         
         logger.info(f"[ContextAnalyzer] 📋 Input: '{user_input}' | History: {search_history} | Category: {current_category}")
@@ -96,7 +97,8 @@ class ContextAnalyzer:
             return {
                 "intent": user_input,
                 "category_changed": False,
-                "new_category": None
+                "new_category": None,
+                "intent_type": "specific"
             }
         
         logger.info(f"[ContextAnalyzer] 🧠 Using LLM for complex case")
@@ -147,12 +149,9 @@ class ContextAnalyzer:
             return {
                 "intent": user_input,
                 "category_changed": False,
-                "new_category": None
+                "new_category": None,
+                "intent_type": "specific"
             }
-    
-    # ═════════════════════════════════════════════════════════════════════════
-    # HELPER METHODS - Decision Layer & Validation
-    # ═════════════════════════════════════════════════════════════════════════
     
     def _try_rule_based_merge(
         self, 
@@ -352,7 +351,8 @@ class ContextAnalyzer:
         {
             "intent": "giày màu đen size 42",
             "category_changed": false,
-            "new_category": null
+            "new_category": null,
+            "intent_type": "specific"
         }
         
         If parsing fails, fallback to extracting intent only.
@@ -365,10 +365,17 @@ class ContextAnalyzer:
             if "intent" not in data:
                 raise ValueError("Missing 'intent' field")
             
+            category_changed = data.get("category_changed", False)
+            new_category = data.get("new_category", None)
+            
+            # Infer intent_type if not provided by LLM
+            intent_type = data.get("intent_type") or self._infer_intent_type(category_changed, new_category)
+            
             return {
                 "intent": data.get("intent", response_text).strip(),
-                "category_changed": data.get("category_changed", False),
-                "new_category": data.get("new_category", None)
+                "category_changed": category_changed,
+                "new_category": new_category,
+                "intent_type": intent_type
             }
         
         except json.JSONDecodeError:
@@ -380,10 +387,14 @@ class ContextAnalyzer:
                 if json_match:
                     json_str = json_match.group()
                     data = json.loads(json_str)
+                    category_changed = data.get("category_changed", False)
+                    new_category = data.get("new_category", None)
+                    intent_type = data.get("intent_type") or self._infer_intent_type(category_changed, new_category)
                     return {
                         "intent": data.get("intent", response_text).strip(),
-                        "category_changed": data.get("category_changed", False),
-                        "new_category": data.get("new_category", None)
+                        "category_changed": category_changed,
+                        "new_category": new_category,
+                        "intent_type": intent_type
                     }
             except:
                 pass
@@ -393,8 +404,21 @@ class ContextAnalyzer:
             return {
                 "intent": response_text.strip(),
                 "category_changed": False,
-                "new_category": None
+                "new_category": None,
+                "intent_type": "specific"
             }
+    
+    def _infer_intent_type(self, category_changed: bool, new_category: str = None) -> str:
+        """
+        Infer intent_type (specific | abstract) from context.
+        
+        Logic:
+        - If category_changed=True → "abstract" (user is exploring new category)
+        - If category_changed=False → "specific" (user refining current category)
+        """
+        if category_changed:
+            return "abstract"  # User exploring new category
+        return "specific"  # User refining current category
     
     def _infer_category_from_history(self, search_history: list) -> str:
         """
@@ -442,63 +466,430 @@ class ContextAnalyzer:
             else:
                 category_text = "Category: Unknown (first request)"
         
-        prompt = f"""You are a Vietnamese shopping assistant reconstructing user intent.
-IMPORTANT: This is a RULE-FIRST system. Prioritize safety over aggressive merging.
+        prompt = f"""You are a Vietnamese shopping query analyzer.
 
-CONVERSATION STATE:
-- Search history (previous queries): [{history_text}]{extracted_text}
-- {category_text}
+Your job is to reconstruct the user's shopping intent using:
+- previous conversation context
+- latest user input
 
-NEW USER INPUT: "{user_input}"
+IMPORTANT:
+This system supports ONLY TWO query types:
 
-TASK: Reconstruct the complete user intent based on conversation history + new input.
+1. SPECIFIC
+2. ABSTRACT
 
-GUIDELINES (prioritize certainty):
-1. IDENTIFY INPUT TYPE:
-   - CATEGORY: Completely different product (e.g., "áo thun", "điện thoại", "bột giặt")
-   - ATTRIBUTE: Specification (brand, color, size, price, etc.)
-   - UNKNOWN: New term you don't recognize
+--------------------------------------------------
+DEFINITION: SPECIFIC
+--------------------------------------------------
 
-2. If ATTRIBUTE (color, size, price—safe to merge):
-   Example 1: History="giày nike", Input="màu đen" → intent="giày nike màu đen"
-   Example 2: History="giày", Input="size 42" → intent="giày size 42"
+A query is SPECIFIC if it contains ANY searchable shopping entity.
 
-3. If BRAND:
-   Example 1: History="giày", Input="adidas" → intent="giày hiệu adidas"
-   Example 2: History="điện thoại", Input="samsung" → intent="điện thoại samsung"
-   
-   ⚠️ BUT: If brand seems incompatible with category (e.g., shoe brand + detergent):
-   → Mark as CATEGORY CHANGE instead
-   Example: History="bột giặt", Input="adidas" → category_changed=true, new_category="adidas"
+This includes:
+- products
+- product categories
+- brands
+- purchasable items
 
-4. If input is UNKNOWN (can't classify):
-   → When uncertain, prefer CATEGORY CHANGE over forced merge
-   Example 1: History="giày", Input="xyz123" → category_changed=true, new_category="xyz123"
-   Example 2: History="bột giặt", Input="unknown_brand" → category_changed=true
+IMPORTANT:
+Broad or vague shopping queries are STILL SPECIFIC.
 
-5. If new input is clearly DIFFERENT CATEGORY:
-   Example: History="giày nike", Input="bột giặt" → category_changed=true, new_category="bột giặt"
+Examples:
+- "laptop"
+- "áo nam"
+- "tai nghe"
+- "iphone"
+- "samsung"
+- "kẹo"
+- "bột giặt"
+- "máy lạnh"
+- "điện thoại"
 
-6. Create NATURAL queries:
-   - Merge logically respecting Vietnamese grammar
-   - When uncertain, treat as category change (safer)
-   - Don't force incompatible merges
+CRITICAL HARD RULE:
+ANY query mentioning a product/category/brand/purchasable item
+MUST ALWAYS be classified as SPECIFIC.
 
-RESPONSE FORMAT: Return ONLY valid JSON, no other text:
+Missing attributes DO NOT matter.
+
+The following are STILL SPECIFIC:
+- no color
+- no size
+- no specifications
+- incomplete attributes
+
+--------------------------------------------------
+DEFINITION: ABSTRACT
+--------------------------------------------------
+
+A query is ABSTRACT ONLY IF:
+- the user does NOT mention ANY concrete product/category/brand
+AND
+- the user expresses:
+  - lifestyle
+  - vibe
+  - aesthetic
+  - personality
+  - emotional intent
+  - gift intent
+  - exploratory shopping intent
+
+Examples:
+- "bạn gái tôi thích pastel"
+- "tôi cần quà sinh nhật"
+- "đồ gì đó chill chill"
+- "tôi thích phong cách tối giản"
+
+--------------------------------------------------
+CONVERSATION STATE
+--------------------------------------------------
+
+Search history:
+[{history_text}]
+
+{extracted_text}
+
+{category_text}
+
+--------------------------------------------------
+NEW USER INPUT
+--------------------------------------------------
+
+"{user_input}"
+
+--------------------------------------------------
+TASKS
+--------------------------------------------------
+
+1. Reconstruct the FULL shopping intent naturally.
+
+2. Determine whether the new input:
+- refines the current search
+OR
+- changes to another product/category.
+
+3. Determine query_type:
+- SPECIFIC
+- ABSTRACT
+
+--------------------------------------------------
+CATEGORY CHANGE RULES
+--------------------------------------------------
+
+category_changed refers ONLY to conversation context.
+
+category_changed DOES NOT mean ABSTRACT.
+
+Examples:
+- "áo" → "đen"
+  = refine
+  = category_changed false
+
+- "áo" → "nike"
+  = refine
+  = category_changed false
+
+- "áo" → "bột giặt"
+  = new category
+  = category_changed true
+
+- "áo" → "quà cho bạn gái"
+  = new search direction
+  = category_changed true
+
+When uncertain:
+- prefer category_changed=true
+- BUT do NOT automatically classify ABSTRACT
+
+--------------------------------------------------
+DECISION PROCESS
+--------------------------------------------------
+
+STEP 1:
+Does the latest query mention ANY purchasable entity?
+
+If YES:
+→ query_type = SPECIFIC
+
+If NO:
+→ continue checking ABSTRACT intent.
+
+--------------------------------------------------
+EXAMPLES
+--------------------------------------------------
+
+History="áo nam"
+Input="đen"
+
+Output:
 {{
-  "intent": "reconstructed user intent string",
+  "intent": "áo nam màu đen",
+  "query_type": "SPECIFIC",
+  "category_changed": false,
+  "new_category": null
+}}
+
+History="áo nam"
+Input="nike"
+
+Output:
+{{
+  "intent": "áo nam nike",
+  "query_type": "SPECIFIC",
+  "category_changed": false,
+  "new_category": null
+}}
+
+History=""
+Input="laptop"
+
+Output:
+{{
+  "intent": "laptop",
+  "query_type": "SPECIFIC",
+  "category_changed": false,
+  "new_category": null
+}}
+
+History="áo nam"
+Input="bột giặt"
+
+Output:
+{{
+  "intent": "bột giặt",
+  "query_type": "SPECIFIC",
+  "category_changed": true,
+  "new_category": "bột giặt"
+}}
+
+History="áo nam"
+Input="bạn gái tôi thích pastel"
+
+Output:
+{{
+  "intent": "quà cho bạn gái thích pastel",
+  "query_type": "ABSTRACT",
+  "category_changed": true,
+  "new_category": null
+}}
+
+--------------------------------------------------
+OUTPUT RULES
+--------------------------------------------------
+
+Return ONLY valid JSON.
+
+Required format:
+
+{{
+  "intent": "reconstructed intent",
+  "query_type": "SPECIFIC or ABSTRACT",
   "category_changed": true or false,
   "new_category": "new category if changed, else null"
 }}
-
-Examples:
-{{"intent": "giày nike màu đen size 42", "category_changed": false, "new_category": null}}
-{{"intent": "samsung", "category_changed": true, "new_category": "samsung"}}
-{{"intent": "bột giặt", "category_changed": true, "new_category": "bột giặt"}}
-
-✅ Default to safety: when uncertain → category_changed=true
-"""
+""" 
         return prompt
+
+    def detect_first_query_intent_type(self, user_input: str) -> str:
+        """
+        Detect intent_type for FIRST QUERY only (no conversation history needed).
+        
+        Returns:
+        - "specific": User knows what product/category they want
+        - "abstract": User is exploring ideas/purposes, doesn't know exact category
+        
+        Examples:
+        - "tai nghe bluetooth không dây" → "specific" (knows category)
+        - "tôi cần gì đó để nghe nhạc" → "abstract" (exploring)
+        - "điện thoại samsung 256gb" → "specific" (knows category)
+        - "tôi muốn thứ gì đó sang trọng" → "abstract" (exploring)
+        """
+        
+        import json
+        
+        prompt = f"""You are a Vietnamese shopping query analyzer.
+
+Your job is to classify the FIRST user shopping query.
+
+USER QUERY:
+"{user_input}"
+
+IMPORTANT:
+This system supports ONLY TWO intent types:
+
+1. SPECIFIC
+2. ABSTRACT
+
+--------------------------------------------------
+DEFINITION: SPECIFIC
+--------------------------------------------------
+
+A query is SPECIFIC if it contains ANY searchable shopping entity.
+
+This includes:
+- product names
+- product categories
+- brands
+- purchasable items
+
+IMPORTANT:
+Broad or vague shopping queries are STILL SPECIFIC
+as long as they mention a searchable product/category.
+
+Examples of SPECIFIC:
+- "laptop"
+- "áo nam"
+- "iphone"
+- "tai nghe"
+- "kẹo"
+- "samsung"
+- "bàn phím gaming"
+- "giày chạy bộ"
+- "máy giặt"
+- "quạt mini"
+
+CRITICAL HARD RULE:
+ANY query mentioning a product, category, brand,
+or purchasable item MUST be classified as SPECIFIC.
+
+Missing attributes DO NOT matter.
+
+The following are STILL SPECIFIC:
+- no brand
+- no color
+- no size
+- no specifications
+
+--------------------------------------------------
+DEFINITION: ABSTRACT
+--------------------------------------------------
+
+A query is ABSTRACT ONLY IF:
+- the user does NOT mention ANY concrete product/category/brand
+AND
+- the user expresses:
+  - lifestyle
+  - vibe
+  - aesthetic
+  - emotional intent
+  - gift intent
+  - purpose
+  - personality
+  - exploratory shopping intent
+
+Examples of ABSTRACT:
+- "tôi muốn thứ gì đó sang trọng"
+- "đồ gì đó chill chill"
+- "tôi cần quà sinh nhật cho bạn gái"
+- "bạn gái tôi thích pastel"
+- "tôi thích phong cách tối giản"
+- "tôi cần gì đó để thư giãn"
+
+--------------------------------------------------
+DECISION PROCESS
+--------------------------------------------------
+
+STEP 1:
+Check whether the query mentions ANY purchasable entity.
+
+If YES:
+→ SPECIFIC
+
+If NO:
+→ continue checking for ABSTRACT intent.
+
+--------------------------------------------------
+EXAMPLES
+--------------------------------------------------
+
+Input: "laptop"
+
+Output:
+{{
+  "intent_type": "SPECIFIC",
+  "reasoning": "Mentions a searchable product category."
+}}
+
+Input: "iphone"
+
+Output:
+{{
+  "intent_type": "SPECIFIC",
+  "reasoning": "Mentions a concrete purchasable product."
+}}
+
+Input: "tai nghe bluetooth"
+
+Output:
+{{
+  "intent_type": "SPECIFIC",
+  "reasoning": "Mentions a searchable product category."
+}}
+
+Input: "quà cho bạn gái"
+
+Output:
+{{
+  "intent_type": "ABSTRACT",
+  "reasoning": "Gift intent without concrete product category."
+}}
+
+Input: "đồ gì đó sang trọng"
+
+Output:
+{{
+  "intent_type": "ABSTRACT",
+  "reasoning": "Exploratory shopping intent without concrete product."
+}}
+
+--------------------------------------------------
+OUTPUT RULES
+--------------------------------------------------
+
+Return ONLY valid JSON.
+No markdown.
+No explanation outside JSON.
+
+Required format:
+
+{{
+  "intent_type": "SPECIFIC or ABSTRACT",
+  "reasoning": "brief explanation"
+}}
+"""
+        
+        try:
+            response = call_openai(
+                prompt,
+                model="gpt-4o-mini",
+                temperature=0.0,
+                max_tokens=100
+            )
+            
+            if not response:
+                logger.warning("[ContextAnalyzer] Empty LLM response for first query intent")
+                return "specific"  # Default fallback
+            
+            response_text = response.strip()
+            
+            # Remove markdown if present
+            if response_text.startswith("```"):
+                response_text = re.sub(r"^```(?:json)?\n", "", response_text)
+                response_text = re.sub(r"\n```$", "", response_text)
+            
+            data = json.loads(response_text)
+            intent_type = data.get("intent_type", "specific").lower()
+            
+            # Normalize to "specific" or "abstract"
+            if "abstract" in intent_type:
+                return "abstract"
+            else:
+                return "specific"
+                
+        except json.JSONDecodeError as e:
+            logger.warning(f"[ContextAnalyzer] JSON parse error: {e}")
+            return "specific"
+        except Exception as e:
+            logger.warning(f"[ContextAnalyzer] Error detecting first query intent: {e}")
+            return "specific"
 
 
 _analyzer = None

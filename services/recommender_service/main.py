@@ -161,7 +161,8 @@ async def analyze_query(
                 current_user_id = decoded.get("user_id") or decoded.get("sub")
                 logger.info(f"[/api/analyze] 👤 Authenticated user: {current_user_id}")
             except Exception as e:
-                logger.warning(f"[/api/analyze] ⚠️ Failed to decode JWT: {e}")
+                pass
+                # logger.warning(f"[/api/analyze] ⚠️ Failed to decode JWT: {e}")
                 # Continue without user_id
         
         if not payload.user_input or not payload.user_input.strip():

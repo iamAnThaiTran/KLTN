@@ -39,24 +39,16 @@ class AnalyzeProcessor:
         conversation_id: Optional[str] = None,
         current_user_id: Optional[int] = None
     ) -> None:
-        """
-        Process analyze job in background
-        
-        Args:
-            job_id: Job ID for tracking
-            user_input: User's search input
-            conversation_id: Optional conversation context
-            current_user_id: Optional authenticated user ID
-        """
         try:
-            logger.info(f"[Job {job_id}] 🔄 Processing: {user_input}")
             
             # ====== STEP 1: Create or fetch session ======
+            logger.info(f"[Job {job_id}] STEP 1: conversation_id input = {conversation_id}")
             if not conversation_id:
                 conversation_id = self.session_manager.create_session()
                 conversation_state = None
-                logger.info(f"[Job {job_id}] 🆕 NEW CONVERSATION: {conversation_id}")
+                logger.info(f"[Job {job_id}] Created NEW session: {conversation_id}")
             else:
+                logger.info(f"[Job {job_id}] Using existing conversation_id: {conversation_id}")
                 if not self.session_manager.session_exists(conversation_id):
                     error_msg = f"Session {conversation_id} not found"
                     logger.error(f"[Job {job_id}] {error_msg}")
@@ -64,7 +56,7 @@ class AnalyzeProcessor:
                     return
                 
                 conversation_state = self.session_manager.get_session_dict(conversation_id)
-                logger.info(f"[Job {job_id}] 📝 EXISTING CONVERSATION: {conversation_id}")
+                # logger.info(f"[Job {job_id}] Fetched existing session state: {conversation_state}")
             
             # Initialize state if needed
             if conversation_state is None:
@@ -78,33 +70,50 @@ class AnalyzeProcessor:
                     "last_crawl_params": None,
                 }
             
-            # ====== STEP 2: Reconstruct intent if follow-up ======
-            user_input_to_process = user_input
-            is_new_query = not conversation_id or "search_history" not in conversation_state
+            logger.info(f"[Job {job_id}] Session state after loading: search_history = {conversation_state.get('search_history')}, category = {conversation_state.get('category')}")
             
-            if not is_new_query and conversation_state.get("search_history"):
-                logger.info(f"[Job {job_id}] 🔄 RECONSTRUCTING INTENT (merge only)")
+            # ====== STEP 2: Reconstruct intent if follow-up, or detect intent if first query ======
+            user_input_to_process = user_input
+            has_search_history = conversation_state.get("search_history") and len(conversation_state.get("search_history", [])) > 0
+            logger.info(f"[Job {job_id}] has_search_history = {has_search_history}")
+            
+            if has_search_history:
+                # Follow-up query: reconstruct from context
+                logger.info(f"[Job {job_id}] 🔄 FOLLOW-UP QUERY detected. Previous searches: {conversation_state.get('search_history')}")
                 result_dict = self.context_analyzer.reconstruct_intent(
                     user_input=user_input,
                     conversation_state=conversation_state
                 )
                 merged_intent = result_dict["intent"]
+                intent_type = result_dict.get("intent_type", "specific")
                 user_input_to_process = merged_intent
+                logger.info(f"[Job {job_id}] Merged intent: '{merged_intent}'")
                 
-                # ⭐ Store merged intent for orchestrator to use (orchestrator will extract attributes)
                 conversation_state["merged_intent"] = merged_intent
-                logger.info(f"[Job {job_id}] ✅ Intent merged: {merged_intent}")
+                
+                # Store intent_type for orchestrator
+                conversation_state["detected_intent"] = {
+                    "intent_type": intent_type
+                }
                 
                 if result_dict.get("category_changed"):
-                    logger.info(f"[Job {job_id}] 🔄 CATEGORY CHANGE DETECTED")
                     conversation_state["search_history"] = [user_input]
                     conversation_state["extracted"] = {}
                     conversation_state["category"] = None
                     conversation_state["has_category"] = False
+            else:
+                # 🆕 First query: detect intent_type via LLM (no history needed)
+                logger.info(f"[Job {job_id}] 🆕 FIRST QUERY detected")
+                intent_type = self.context_analyzer.detect_first_query_intent_type(user_input)
+                logger.info(f"[Job {job_id}] First query - no merged intent, using raw input: '{user_input}'")
+                
+                # Store intent_type for orchestrator
+                conversation_state["detected_intent"] = {
+                    "intent_type": intent_type
+                }
             
-            # ====== STEP 3: Process with orchestrator ======
-            logger.info(f"[Job {job_id}] Processing: '{user_input_to_process}' (orchestrator will extract attributes)")
-            
+            logger.info(f"[Job {job_id}] Processing input: '{user_input}' → '{user_input_to_process}' (Intent type: {conversation_state['detected_intent']['intent_type']})")
+            logger.info(f"[Job {job_id}] Current category: {conversation_state.get('category')}, extracted: {conversation_state.get('extracted')}")
             orch_result = await self.orchestrator.process_query(
                 user_input=user_input_to_process,
                 conversation_state=conversation_state
@@ -122,7 +131,9 @@ class AnalyzeProcessor:
                 conversation_state["search_history"],
                 user_input
             )
+            logger.info(f"[Job {job_id}] Updated search history: {conversation_state['search_history']}")
             self.session_manager.set_session(conversation_id, conversation_state)
+            logger.info(f"[Job {job_id}] Session saved to session_manager")
             
             # ====== STEP 5: Save to DB if authenticated ======
             if current_user_id:
@@ -134,80 +145,54 @@ class AnalyzeProcessor:
                         category=category_for_db,
                         results_count=len(products) if products else 0
                     )
-                    logger.info(f"[Job {job_id}] ✅ Saved search history for user {current_user_id} to UserService")
+                    #logger.info(f"[Job {job_id}] ✅ Saved search history for user {current_user_id} to UserService")
                 except Exception as e:
                     logger.warning(f"[Job {job_id}] ⚠️ Failed to save search history to UserService: {e}")
             
-            # ====== STEP 6: Handle special status ======
-            products = orch_result.get("products", [])
+            # ====== STEP 6: Handle orchestrator response ======
             orch_status = orch_result.get("status")
             
-            if orch_status == "need_info":
-                logger.info(f"[Job {job_id}] 💬 Needs clarification")
-                result = {
-                    "status": "need_info",
-                    "question": orch_result.get("question"),
-                    "options": orch_result.get("options", []),
-                    "case": orch_result.get("case"),
-                    "conversation_id": conversation_id,
-                    "search_history": conversation_state.get("search_history", [])
-                }
+            # Handle special statuses (need_info, no_results, error)
+            if orch_status in ["need_info", "no_results", "error"]:
+                if orch_status == "need_info":
+                    logger.info(f"[Job {job_id}] 💬 Needs clarification")
+                    result = {
+                        "status": "need_info",
+                        "question": orch_result.get("question"),
+                        "options": orch_result.get("options", []),
+                        "case": orch_result.get("case"),
+                        "conversation_id": conversation_id,
+                        "search_history": conversation_state.get("search_history", [])
+                    }
+                elif orch_status == "no_results":
+                    logger.info(f"[Job {job_id}] 🔍 No products found")
+                    result = {
+                        "status": "no_results",
+                        "message": "Không tìm thấy sản phẩm phù hợp",
+                        "conversation_id": conversation_id,
+                        "search_history": conversation_state.get("search_history", [])
+                    }
+                else:  # error
+                    logger.error(f"[Job {job_id}] ❌ Error")
+                    error_msg = orch_result.get("message", "Lỗi xử lý")
+                    self.job_manager.set_job_error(job_id, error_msg)
+                    return
+                
                 self.job_manager.set_job_result(job_id, result)
                 return
             
-            if orch_status == "no_results":
-                logger.info(f"[Job {job_id}] 🔍 No products found")
-                result = {
-                    "status": "no_results",
-                    "message": "Không tìm thấy sản phẩm phù hợp",
-                    "conversation_id": conversation_id,
-                    "search_history": conversation_state.get("search_history", [])
-                }
-                self.job_manager.set_job_result(job_id, result)
-                return
-            
-            if orch_status == "error":
-                logger.error(f"[Job {job_id}] ❌ Error")
-                error_msg = orch_result.get("message", "Lỗi xử lý")
-                self.job_manager.set_job_error(job_id, error_msg)
-                return
-            
-            # ====== STEP 7: Fetch filters ======
-            filter_groups = []
-            category = conversation_state.get("category", "")
-            
-            if category:
-                try:
-                    # 📤 Call ProductService to fetch filters (not direct DB)
-                    available_filters = await self.product_service_client.get_filters(category)
-                    filter_groups = [
-                        {
-                            "attribute_name": f.get('name') or f.get('attribute_name'),
-                            "display_name": f.get('display_name') or f.get('name') or f.get('attribute_name'),
-                            "data_type": f.get('type') or f.get('data_type') or 'text',
-                            "options": [
-                                {
-                                    "attribute_value": val,
-                                    "product_count": 0  # ProductService doesn't return counts
-                                }
-                                for val in f.get('values', [])
-                            ] if f.get('values') else []
-                        }
-                        for f in available_filters
-                    ]
-                    logger.info(f"[Job {job_id}] ✅ Fetched {len(filter_groups)} filters from ProductService")
-                except Exception as e:
-                    logger.warning(f"[Job {job_id}] ⚠️ Failed to fetch filters: {e}. Continuing without filters...")
-                    # Don't fail - filters are optional, continue with results
-            
-            # ====== Build final response ======
+            # ====== STEP 7: Build final response from orchestrator results ======
+            # Orchestrator already processed everything and built answer
+            products = orch_result.get("products", [])
             total_products = orch_result.get("total_found", len(products))
+            category = conversation_state.get("category", "")
+            filters = orch_result.get("filters", [])  # ✅ Get filters from orchestrator
             
             result = {
                 "success": True,
                 "category": category,
-                "clarifying_hints": self._generate_hints_from_filters(category, filter_groups),
-                "filters": filter_groups,
+                "answer": orch_result.get("answer"),  # ✅ Include descriptive answer from orchestrator
+                "filters": filters,  # ✅ Include filters
                 "products": products,
                 "total": total_products,
                 "conversation_id": conversation_id,
@@ -215,6 +200,8 @@ class AnalyzeProcessor:
             }
             
             logger.info(f"[Job {job_id}] ✅ Completed: {len(products)} products found")
+            logger.info(f"[Job {job_id}] 📝 Answer: {result.get('answer', 'N/A')}")
+            logger.info(f"[Job {job_id}] 🏷️ Filters: {len(filters)} filter groups")
             self.job_manager.set_job_result(job_id, result)
             
         except Exception as e:

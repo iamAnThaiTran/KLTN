@@ -147,6 +147,17 @@ export const useProductSearch = ({ token, onAddMessage }) => {
             timestamp: new Date(),
           });
         } else if (d.products?.length) {
+          // Show answer message FIRST before products
+          if (d.answer) {
+            console.log('[UseProductSearch] 📝 Adding answer message (sync):', d.answer);
+            onAddMsgRef.current({
+              type: 'bot',
+              text: d.answer,
+              timestamp: new Date(),
+            });
+          }
+          
+          // Then show products
           appendProducts(d.products, d.filters, d.total);
         } else {
           onAddMsgRef.current({
@@ -271,6 +282,12 @@ export const useProductSearch = ({ token, onAddMessage }) => {
       console.log('[UseProductSearch] Job result received:', jobResult);
       setProductsLoading(false);
       
+      // Save conversation_id for follow-up queries
+      if (jobResult.conversation_id) {
+        console.log('[UseProductSearch] 💾 Saving conversation_id:', jobResult.conversation_id);
+        setConversationId(jobResult.conversation_id);
+      }
+      
       // Update category name from result if available
       if (jobResult.category) {
         setLastCategoryName(jobResult.category);
@@ -284,6 +301,17 @@ export const useProductSearch = ({ token, onAddMessage }) => {
           timestamp: new Date(),
         });
       } else if (jobResult.products?.length) {
+        // Show answer message FIRST before products
+        if (jobResult.answer) {
+          console.log('[UseProductSearch] 📝 Adding answer message:', jobResult.answer);
+          onAddMsgRef.current({
+            type: 'bot',
+            text: jobResult.answer,
+            timestamp: new Date(),
+          });
+        }
+        
+        // Then show products
         appendProducts(jobResult.products, jobResult.filters, jobResult.total);
       } else if (jobResult.category) {
         onAddMsgRef.current({

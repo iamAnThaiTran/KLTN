@@ -625,31 +625,31 @@ Hãy STRONGLY BIAS về REUSE existing schema. Chỉ tạo attribute mới khi t
         if self.crawl_service_client is None:
             logger.warning("⚠️ Cannot enqueue enrichment jobs: CrawlService client not available")
             return 0
+        return 1
+        # try:
+        #     logger.info(f"📤 Enqueueing enrichment job via CrawlService for {len(new_attributes)} attributes...")
+            
+        #     enrichment_task = {
+        #         "type": "enrichment",
+        #         "category_id": category_id,
+        #         "category_name": category_name,
+        #         "attributes": new_attributes,
+        #         "action": "recrawl_and_extract_attributes",
+        #         "description": f"Enrichment for new attributes: {', '.join(new_attributes)}"
+        #     }
+            
+        #     # Use CrawlService enqueue method (async, non-blocking like CASE 1)
+        #     task_id = await self.crawl_service_client.enqueue_enrichment_task(
+        #         task_data=enrichment_task,
+        #         priority="normal"
+        #     )
+            
+        #     logger.info(f"✅ Successfully enqueued enrichment job via CrawlService: {task_id}")
+        #     return 1  # Enqueued 1 enrichment task
         
-        try:
-            logger.info(f"📤 Enqueueing enrichment job via CrawlService for {len(new_attributes)} attributes...")
-            
-            enrichment_task = {
-                "type": "enrichment",
-                "category_id": category_id,
-                "category_name": category_name,
-                "attributes": new_attributes,
-                "action": "recrawl_and_extract_attributes",
-                "description": f"Enrichment for new attributes: {', '.join(new_attributes)}"
-            }
-            
-            # Use CrawlService enqueue method (async, non-blocking like CASE 1)
-            task_id = await self.crawl_service_client.enqueue_enrichment_task(
-                task_data=enrichment_task,
-                priority="normal"
-            )
-            
-            logger.info(f"✅ Successfully enqueued enrichment job via CrawlService: {task_id}")
-            return 1  # Enqueued 1 enrichment task
-        
-        except Exception as e:
-            logger.error(f"⚠️ Error enqueueing enrichment job: {str(e)}")
-            return 0
+        # except Exception as e:
+        #     logger.error(f"⚠️ Error enqueueing enrichment job: {str(e)}")
+        #     return 0
 
 
 # Example usage

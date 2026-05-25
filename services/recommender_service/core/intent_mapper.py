@@ -87,7 +87,7 @@ class IntentMapper:
             }
         """
         user_input_lower = user_input.lower()
-        logger.info(f"Mapping intent for user input: '{user_input}'")
+        #logger.info(f"Mapping intent for user input: '{user_input}'")
         
         # ===== STEP 1: Try pattern matching (FAST) =====
         for pattern, categories in self.intent_patterns.items():
@@ -110,14 +110,15 @@ class IntentMapper:
         
         # ===== STEP 2: Pattern not matched → Try LLM fallback (SMART) =====
         if self.enable_llm_fallback and os.getenv("OPENAI_API_KEY"):
-            logger.info(f"DEBUG: Pattern matching failed, trying LLM...")
+            #logger.info(f"DEBUG: Pattern matching failed, trying LLM...")
             try:
                 llm_result = self._map_intent_with_llm(user_input)
                 if llm_result["intent"] and llm_result["categories"]:
-                    logger.info(f"DEBUG: LLM mapped - {llm_result['intent']} → {llm_result['categories']}")
+                    #logger.info(f"DEBUG: LLM mapped - {llm_result['intent']} → {llm_result['categories']}")
                     return llm_result
             except Exception as e:
-                logger.info(f"DEBUG: LLM fallback failed: {e}")
+                pass
+                #logger.info(f"DEBUG: LLM fallback failed: {e}")
                 # Fall through to no-match case
         
         # ===== STEP 3: No match (pattern or LLM) =====
@@ -334,7 +335,8 @@ User: "để tặng bạn gái"
             is_new_category = len(unknown_categories) > 0
             
             if is_new_category:
-                logger.info(f"[LLM] Suggested NEW categories not in available list: {unknown_categories}")
+                pass
+                #logger.info(f"[LLM] Suggested NEW categories not in available list: {unknown_categories}")
             
             # Get clarity from LLM response (clear or abstract)
             clarity = result.get("clarity", "abstract").lower()  # default to abstract if missing
@@ -348,7 +350,7 @@ User: "để tặng bạn gái"
             # Get product_name from LLM (or fallback to user_input)
             product_name = result.get("product_name", user_input)
             
-            logger.info(f"[LLM] intent='{result.get('intent')}', product_name='{product_name}', categories={valid_categories}, clarity='{clarity}', confidence={confidence}, has_new_categories={is_new_category}")
+            #logger.info(f"[LLM] intent='{result.get('intent')}', product_name='{product_name}', categories={valid_categories}, clarity='{clarity}', confidence={confidence}, has_new_categories={is_new_category}")
             
             return {
                 "intent": result.get("intent", ""),

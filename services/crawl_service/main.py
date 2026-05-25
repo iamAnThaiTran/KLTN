@@ -313,8 +313,10 @@ async def enqueue_single_crawl(
 
 @app.post("/api/crawl/enqueue-product-details")
 async def enqueue_product_details_crawl(
-    product_ids: List[str] = Body(..., embed=True),
+    product_ids: Optional[List[str]] = Body(None, embed=True),
     spids: Optional[List[str]] = Body(None, embed=True),
+    product_urls: Optional[List[str]] = Body(None, embed=True),
+    sources: Optional[List[str]] = Body(None, embed=True),
     schema: Optional[Dict[str, Any]] = Body(None, embed=True),
     max_concurrent: int = Body(3, embed=True),
     priority: str = Body("normal", embed=True),
@@ -323,21 +325,33 @@ async def enqueue_product_details_crawl(
     """
     Enqueue product details crawl task with attribute extraction
     
-    Example:
+    ✅ SUPPORTS MULTIPLE SOURCES:
+    - Tiki: Use product_ids + spids
+    - Lazada/Shopee: Use product_urls + sources
+    
+    Example for Tiki:
     {
         "product_ids": ["276183351", "276183352", "276183353"],
         "spids": ["123", "124", "125"],
+        "sources": ["tiki"],
         "schema": {
             "category": "laptop",
-            "attributes": [
-                {
-                    "name": "RAM",
-                    "keywords": ["ram", "bộ nhớ"],
-                    "value_pattern": "(\\d+)\\s*(?:gb|ddr)"
-                }
-            ]
+            "attributes": [...]
         },
         "max_concurrent": 3,
+        "priority": "normal",
+        "max_retries": 3
+    }
+    
+    Example for Lazada (with Playwright):
+    {
+        "product_urls": [
+            "https://www.lazada.vn/products/pdp-i3086978477.html",
+            "https://www.lazada.vn/products/pdp-i2620082433.html"
+        ],
+        "sources": ["lazada"],
+        "schema": {...},
+        "max_concurrent": 5,
         "priority": "normal",
         "max_retries": 3
     }
@@ -346,13 +360,25 @@ async def enqueue_product_details_crawl(
         {
             "task_id": "product_detail_...",
             "status": "pending",
-            "products_count": 3
+            "products_count": 3,
+            "product_ids_count": 3,
+            "product_urls_count": 0,
+            "sources": ["tiki"]
         }
     """
+    # Validate input
+    if not product_ids and not product_urls:
+        raise HTTPException(
+            status_code=400,
+            detail="Either product_ids or product_urls must be provided"
+        )
+    
     db = SessionLocal()
     try:
         # Generate unique task ID
         task_id = f"product_detail_{uuid.uuid4().hex[:12]}"
+        
+        total_products = (len(product_ids) if product_ids else 0) + (len(product_urls) if product_urls else 0)
         
         # Create task record in database
         task = CrawlTask(
@@ -362,6 +388,8 @@ async def enqueue_product_details_crawl(
             attributes={
                 "product_ids": product_ids,
                 "spids": spids,
+                "product_urls": product_urls,
+                "sources": sources,
                 "schema": schema,
                 "max_concurrent": max_concurrent
             },
@@ -379,21 +407,30 @@ async def enqueue_product_details_crawl(
             task_data = {
                 "product_ids": product_ids,
                 "spids": spids,
+                "product_urls": product_urls,
+                "sources": sources or ["tiki"],  # Default to Tiki if not specified
                 "schema": schema,
                 "max_concurrent": max_concurrent,
                 "task_type": "product_details"
             }
             producer.enqueue_task(task_id, task_data, priority)
-            logger.info(f"🚀 Product details crawl task enqueued: {task_id} for {len(product_ids)} products")
+            logger.info(f"🚀 Product details crawl task enqueued: {task_id}")
+            logger.info(f"   📊 {total_products} products (product_ids={len(product_ids) if product_ids else 0}, product_urls={len(product_urls) if product_urls else 0})")
+            logger.info(f"   🌐 Sources: {sources or ['tiki']}")
         else:
             logger.warning(f"RabbitMQ producer not available, task saved locally: {task_id}")
         
         return {
             "task_id": task_id,
             "status": "pending",
-            "products_count": len(product_ids),
+            "products_count": total_products,
+            "product_ids_count": len(product_ids) if product_ids else 0,
+            "product_urls_count": len(product_urls) if product_urls else 0,
+            "sources": sources or ["tiki"],
             "estimated_completion": (datetime.utcnow() + timedelta(minutes=3)).isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         logger.error(f"❌ Enqueue product details crawl failed: {e}")

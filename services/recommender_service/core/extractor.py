@@ -48,7 +48,7 @@ class AttributeExtractor:
             # ✨ AUTO-FALLBACK: Rule-based found nothing, try LLM
             import logging
             logger = logging.getLogger(__name__)
-            logger.info(f"[AttributeExtractor] Rule-based extraction returned empty for '{user_input}' → Trying LLM fallback...")
+            #logger.info(f"[AttributeExtractor] Rule-based extraction returned empty for '{user_input}' → Trying LLM fallback...")
             
             result = self.dynamic_extractor.extract(
                 user_input, 

@@ -171,8 +171,10 @@ class CrawlServiceClient:
     
     async def enqueue_product_detail_crawl(
         self,
-        product_ids: List[str],
+        product_ids: Optional[List[str]] = None,
         spids: Optional[List[str]] = None,
+        product_urls: Optional[List[str]] = None,
+        sources: Optional[List[str]] = None,
         schema: Optional[Dict[str, Any]] = None,
         max_concurrent: int = 3,
         priority: str = "normal",
@@ -182,9 +184,13 @@ class CrawlServiceClient:
         Enqueue product details crawl task with attribute extraction via RabbitMQ
         
         🆕 Replaces direct ProductDetailCrawler usage - offloads to CrawlService
+        Supports multiple sources: Tiki (product_ids), Lazada (product_urls with Playwright)
         
         Args:
             product_ids: List of Tiki product IDs to crawl details for
+            spids: Optional list of seller IDs (for Tiki)
+            product_urls: List of product URLs to crawl (for Lazada, Shopee)
+            sources: Which sources to crawl (tiki, lazada, shopee) - auto-detected from params
             schema: Optional dynamic schema for attribute extraction
             max_concurrent: Max concurrent crawls
             priority: Task priority (high, normal, low)
@@ -194,13 +200,24 @@ class CrawlServiceClient:
             task_id (str) - Use get_task_result() to poll for completion
         """
         payload = {
-            "product_ids": product_ids,
-            "spids": spids,
             "schema": schema,
             "max_concurrent": max_concurrent,
             "priority": priority,
             "max_retries": max_retries
         }
+        
+        # Add Tiki-specific crawl data
+        if product_ids:
+            payload["product_ids"] = product_ids
+            payload["spids"] = spids
+        
+        # Add URL-based crawl data (Lazada, Shopee)
+        if product_urls:
+            payload["product_urls"] = product_urls
+        
+        # Add source list if provided
+        if sources:
+            payload["sources"] = sources
         
         result = await self._request_with_retry(
             "POST",
@@ -538,8 +555,10 @@ class CrawlServiceClient:
     
     async def crawl_product_details_sync(
         self,
-        product_ids: List[str],
+        product_ids: Optional[List[str]] = None,
         spids: Optional[List[str]] = None,
+        product_urls: Optional[List[str]] = None,
+        sources: Optional[List[str]] = None,
         category_id: Optional[int] = None,
         schema: Optional[Dict[str, Any]] = None,
         max_concurrent: int = 5,
@@ -551,10 +570,13 @@ class CrawlServiceClient:
         BLOCKING product details crawl - enqueue task and wait for completion
         
         Synchronous wrapper for product detail crawling with attribute extraction.
+        Supports multiple sources: Tiki (product_ids), Lazada/Shopee (product_urls with Playwright)
         
         Args:
             product_ids: List of Tiki product IDs to crawl details for
             spids: Optional list of seller IDs (for Tiki)
+            product_urls: List of product URLs to crawl with Playwright (for Lazada, Shopee)
+            sources: List of sources to crawl (tiki, lazada, shopee)
             category_id: Category ID from database (optional)
             schema: Optional dynamic schema for attribute extraction
             max_concurrent: Max concurrent crawls (default: 5)
@@ -569,7 +591,8 @@ class CrawlServiceClient:
             TimeoutError: If task takes too long
             Exception: If crawl task fails
         
-        Example:
+        Examples:
+            # Crawl Tiki product details using product IDs
             products = await crawl_client.crawl_product_details_sync(
                 product_ids=["276183351", "276183352"],
                 spids=["276183355", "276183356"],
@@ -577,14 +600,39 @@ class CrawlServiceClient:
                 schema=category_schema,
                 max_concurrent=5
             )
+            
+            # Crawl Lazada product details using URLs (Playwright)
+            products = await crawl_client.crawl_product_details_sync(
+                product_urls=["https://lazada.vn/...product-id-123", "https://lazada.vn/...product-id-456"],
+                sources=["lazada"],
+                category_id=5,
+                schema=category_schema,
+                max_concurrent=5
+            )
+            
+            # Crawl both Tiki and Lazada
+            products = await crawl_client.crawl_product_details_sync(
+                product_ids=["276183351"],
+                product_urls=["https://lazada.vn/..."],
+                sources=["tiki", "lazada"],
+                category_id=5,
+                max_concurrent=5
+            )
         """
-        logger.info(f"[CrawlServiceClient] 🚀 Starting blocking product details crawl for {len(product_ids)} products")
+        # Validate input
+        if not product_ids and not product_urls:
+            raise ValueError("Either product_ids or product_urls must be provided")
+        
+        total_products = (len(product_ids) if product_ids else 0) + (len(product_urls) if product_urls else 0)
+        logger.info(f"[CrawlServiceClient] 🚀 Starting blocking product details crawl for {total_products} products")
         
         # STEP 1: Enqueue product detail crawl task
         try:
             enqueue_result = await self.enqueue_product_detail_crawl(
                 product_ids=product_ids,
                 spids=spids,
+                product_urls=product_urls,
+                sources=sources,
                 schema=schema,
                 max_concurrent=max_concurrent,
                 priority="high"  # Use high priority for direct crawls

@@ -85,9 +85,9 @@ class CategoryValidator:
             return {}
         
         try:
-            logger.info("📤 Calling ProductService API to get all categories...")
+            #logger.info("📤 Calling ProductService API to get all categories...")
             response = await self.product_service_client.list_categories()
-            logger.info(f"📥 Received response from ProductService: {response}")
+            # #logger.info(f"📥 Received response from ProductService: {response}")
             
             categories = {}
             if response and isinstance(response, list):
@@ -100,7 +100,7 @@ class CategoryValidator:
                             "slug": self._slugify(cat_name)
                         }
             
-            logger.info(f"✅ Retrieved {len(categories)} categories from ProductService API")
+            #logger.info(f"✅ Retrieved {len(categories)} categories from ProductService API")
             return categories
         
         except Exception as e:
@@ -148,7 +148,7 @@ class CategoryValidator:
             }
         """
         db_categories = await self.get_db_categories()
-        logger.info(f"db_categories: {db_categories}")
+        #logger.info(f"db_categories: {db_categories}")
         db_names = {cat["name"].lower(): (cat_id, cat["name"]) for cat_id, cat in db_categories.items()}
         db_slugs = {cat["slug"]: (cat_id, cat["name"]) for cat_id, cat in db_categories.items()}
         
@@ -158,7 +158,7 @@ class CategoryValidator:
         # STEP 1: Try exact match
         if user_cat_lower in db_names:
             cat_id, cat_name = db_names[user_cat_lower]
-            logger.info(f"✅ Category '{user_category}' → exact match '{cat_name}' (id={cat_id})")
+            #logger.info(f"✅ Category '{user_category}' → exact match '{cat_name}' (id={cat_id})")
             
             # 🔄 Check nếu có new attributes để update schema
             await self._enqueue_schema_evolution_if_needed(
@@ -177,7 +177,7 @@ class CategoryValidator:
         
         if user_slug in db_slugs:
             cat_id, cat_name = db_slugs[user_slug]
-            logger.info(f"✅ Category '{user_category}' → slug match '{cat_name}' (id={cat_id})")
+            #logger.info(f"✅ Category '{user_category}' → slug match '{cat_name}' (id={cat_id})")
             
             # 🔄 Check nếu có new attributes để update schema
             await self._enqueue_schema_evolution_if_needed(
@@ -201,7 +201,7 @@ class CategoryValidator:
                 # Find this base_cat in DB
                 for cat_id, cat in db_categories.items():
                     if cat["name"].lower() == base_cat.lower():
-                        logger.info(f"✅ Category '{user_category}' → keyword match '{base_cat}' (id={cat_id})")
+                        #logger.info(f"✅ Category '{user_category}' → keyword match '{base_cat}' (id={cat_id})")
                         
                         # 🔄 Check nếu có new attributes để update schema
                         await self._enqueue_schema_evolution_if_needed(
@@ -225,7 +225,7 @@ class CategoryValidator:
                     if len(keyword_lower) > 2:
                         for cat_id, cat in db_categories.items():
                             if cat["name"].lower() == base_cat.lower():
-                                logger.info(f"✅ Category '{user_category}' → substring match '{base_cat}' (id={cat_id})")
+                                #logger.info(f"✅ Category '{user_category}' → substring match '{base_cat}' (id={cat_id})")
                                 
                                 # 🔄 Check nếu có new attributes để update schema
                                 await self._enqueue_schema_evolution_if_needed(
@@ -244,12 +244,12 @@ class CategoryValidator:
         
         # STEP 3: Category not found in DB or keywords
         # Check if we have pre-detected attributes from Comprehensive Analysis
-        logger.info(f"⚠️ Category '{user_category}' not found in DB")
-        logger.info(f"[validate_category] Detected attributes available: {detected_attributes is not None}")
+        #logger.info(f"⚠️ Category '{user_category}' not found in DB")
+        #logger.info(f"[validate_category] Detected attributes available: {detected_attributes is not None}")
         
         if detected_attributes:
             # ✅ USE DETECTED ATTRIBUTES - Don't need LLM extraction
-            logger.info(f"[validate_category] Using pre-detected attributes from Comprehensive Analysis")
+            #logger.info(f"[validate_category] Using pre-detected attributes from Comprehensive Analysis")
             
             # Extract attribute names from detected_attributes
             # Handle both formats: list of strings or list of dicts
@@ -263,7 +263,7 @@ class CategoryValidator:
                     # Format: ["ram", "cpu", "storage", ...]
                     attribute_names = [str(attr).strip() for attr in detected_attributes]
             
-            logger.info(f"[validate_category] Extracted attribute names: {attribute_names}")
+            #logger.info(f"[validate_category] Extracted attribute names: {attribute_names}")
             
             if self.product_service_client is None:
                 logger.error("⚠️ ProductServiceClient not available - cannot create category")
@@ -277,7 +277,7 @@ class CategoryValidator:
             
             # Call ProductService API to create category with detected attributes
             try:
-                logger.info(f"📤 Calling ProductService to create category '{user_category}' with {len(attribute_names)} attributes...")
+                #logger.info(f"📤 Calling ProductService to create category '{user_category}' with {len(attribute_names)} attributes...")
                 
                 result = await self.product_service_client.create_category(
                     name=user_category,
@@ -289,7 +289,7 @@ class CategoryValidator:
                 if result.get("success"):
                     category_id = result.get("id")
                     attributes_created = result.get("attributes_created", 0)
-                    logger.info(f"✅ Successfully created category '{user_category}' (id={category_id}, attributes={attributes_created})")
+                    #logger.info(f"✅ Successfully created category '{user_category}' (id={category_id}, attributes={attributes_created})")
                     
                     return {
                         "success": True,
@@ -303,7 +303,7 @@ class CategoryValidator:
                     reason = result.get("reason", "Failed to create category")
                     if "already exists" in reason.lower():
                         category_id = result.get("id")
-                        logger.info(f"✅ Category '{user_category}' already exists (id={category_id})")
+                        #logger.info(f"✅ Category '{user_category}' already exists (id={category_id})")
                         return {
                             "success": True,
                             "category": user_category,
@@ -332,7 +332,7 @@ class CategoryValidator:
                 }
         
         # FALLBACK: No detected attributes, try LLM to determine category
-        logger.info(f"⚠️ No detected attributes provided, calling LLM for validation...")
+        #logger.info(f"⚠️ No detected attributes provided, calling LLM for validation...")
         
         
         llm_result = self._validate_with_llm(user_category, db_categories)
@@ -342,7 +342,7 @@ class CategoryValidator:
                 # LLM says it should map to existing category
                 cat_id = llm_result["category_id"]
                 cat_name = db_categories[cat_id]["name"]
-                logger.info(f"✅ LLM mapped '{user_category}' → existing '{cat_name}' (id={cat_id})")
+                #logger.info(f"✅ LLM mapped '{user_category}' → existing '{cat_name}' (id={cat_id})")
                 return {
                     "success": True,
                     "category": cat_name,
@@ -354,8 +354,8 @@ class CategoryValidator:
             elif llm_result["status"] == "create_new":
                 # ✅ NEW CATEGORY DETECTED - Create via ProductService API
                 llm_attributes = llm_result.get("attributes", [])
-                logger.info(f"[CREATE_NEW] LLM detected new category: '{user_category}'")
-                logger.info(f"[CREATE_NEW] LLM suggested attributes: {llm_attributes}")
+                #logger.info(f"[CREATE_NEW] LLM detected new category: '{user_category}'")
+                #logger.info(f"[CREATE_NEW] LLM suggested attributes: {llm_attributes}")
                 
                 if self.product_service_client is None:
                     logger.error("⚠️ ProductServiceClient not available - cannot create category")
@@ -369,7 +369,7 @@ class CategoryValidator:
                 
                 # Call ProductService API to create category
                 try:
-                    logger.info(f"📤 Calling ProductService to create category '{user_category}'...")
+                    #logger.info(f"📤 Calling ProductService to create category '{user_category}'...")
                     # Use await instead of asyncio.run() since we're already in async context
                     result = await self.product_service_client.create_category(
                         name=user_category,
@@ -381,7 +381,7 @@ class CategoryValidator:
                     if result.get("success"):
                         category_id = result.get("id")
                         attributes_created = result.get("attributes_created", 0)
-                        logger.info(f"✅ Successfully created category '{user_category}' (id={category_id}, attributes={attributes_created})")
+                        #logger.info(f"✅ Successfully created category '{user_category}' (id={category_id}, attributes={attributes_created})")
                         
                         return {
                             "success": True,
@@ -395,7 +395,7 @@ class CategoryValidator:
                         reason = result.get("reason", "Failed to create category")
                         if "already exists" in reason.lower():
                             category_id = result.get("id")
-                            logger.info(f"✅ Category '{user_category}' already exists (id={category_id})")
+                            #logger.info(f"✅ Category '{user_category}' already exists (id={category_id})")
                             return {
                                 "success": True,
                                 "category": user_category,
@@ -565,13 +565,13 @@ NHẮC NHỜ:
             data = json.loads(json_str)
             
             # Log LLM detection result
-            logger.info(f"[LLM DETECTION] Product name: '{data.get('product_name', 'N/A')}'")
-            logger.info(f"[LLM DETECTION] Description: '{data.get('description', 'N/A')}'")
-            logger.info(f"[LLM DETECTION] Action: {data.get('action', 'N/A')}")
+            #logger.info(f"[LLM DETECTION] Product name: '{data.get('product_name', 'N/A')}'")
+            #logger.info(f"[LLM DETECTION] Description: '{data.get('description', 'N/A')}'")
+            #logger.info(f"[LLM DETECTION] Action: {data.get('action', 'N/A')}")
             
             if data["action"] == "map_to_existing":
                 mapped_cat = data.get("mapped_to", "").lower().strip()
-                logger.info(f"[LLM DETECTION] Mapped to existing category: '{mapped_cat}'")
+                #logger.info(f"[LLM DETECTION] Mapped to existing category: '{mapped_cat}'")
                 # Find this base_cat in DB
                 for cat_id, cat in db_categories.items():
                     if cat["name"].lower() == mapped_cat:
@@ -586,13 +586,13 @@ NHẮC NHỜ:
             
             elif data["action"] == "create_new":
                 attributes = data.get("attributes", [])
-                logger.info(f"[LLM DETECTION] ⭐ CREATE NEW CATEGORY")
-                logger.info(f"[LLM DETECTION] Category: '{user_category}'")
-                logger.info(f"[LLM DETECTION] Suggested Attributes: {attributes}")
-                logger.info(f"[LLM DETECTION] Attributes count: {len(attributes)}")
-                if attributes:
-                    for attr in attributes:
-                        logger.info(f"[LLM DETECTION]   - {attr}")
+                #logger.info(f"[LLM DETECTION] ⭐ CREATE NEW CATEGORY")
+                #logger.info(f"[LLM DETECTION] Category: '{user_category}'")
+                #logger.info(f"[LLM DETECTION] Suggested Attributes: {attributes}")
+                #logger.info(f"[LLM DETECTION] Attributes count: {len(attributes)}")
+                # if attributes:
+                #     for attr in attributes:
+                #         #logger.info(f"[LLM DETECTION]   - {attr}")
                 
                 return {
                     "success": True,
@@ -622,7 +622,7 @@ NHẮC NHỜ:
             detected_attributes: Danh sách attributes detect được
         """
         if not detected_attributes:
-            logger.info(f"ℹ️  No detected attributes to check for schema evolution")
+            #logger.info(f"ℹ️  No detected attributes to check for schema evolution")
             return
         
         # Extract attribute names
@@ -637,11 +637,11 @@ NHẮC NHỜ:
                 attribute_names = [str(attr).strip() for attr in detected_attributes]
         
         if not attribute_names:
-            logger.info(f"ℹ️  No attributes to check for schema evolution")
+            #logger.info(f"ℹ️  No attributes to check for schema evolution")
             return
         
-        logger.info(f"🔍 Checking schema evolution for category '{category_name}' (id={category_id})")
-        logger.info(f"   Detected attributes: {attribute_names}")
+        #logger.info(f"🔍 Checking schema evolution for category '{category_name}' (id={category_id})")
+        #logger.info(f"   Detected attributes: {attribute_names}")
         
         try:
             # Call schema evolution service (async, non-blocking)
@@ -652,13 +652,13 @@ NHẮC NHỜ:
                 new_attributes=attribute_names
             )
             
-            if result.get("success"):
-                if result.get("new_attributes_added"):
-                    logger.info(f"✨ Schema evolved: {result}")
-                else:
-                    logger.info(f"ℹ️  No new attributes needed")
-            else:
-                logger.warning(f"⚠️ Schema evolution warning: {result.get('reason')}")
+            # if result.get("success"):
+            #     if result.get("new_attributes_added"):
+            #         #logger.info(f"✨ Schema evolved: {result}")
+            #     else:
+            #         #logger.info(f"ℹ️  No new attributes needed")
+            # else:
+            #     logger.warning(f"⚠️ Schema evolution warning: {result.get('reason')}")
         
         except Exception as e:
             logger.warning(f"⚠️ Error checking schema evolution: {str(e)}")

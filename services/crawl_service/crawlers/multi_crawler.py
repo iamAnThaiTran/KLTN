@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Any
 import unicodedata
 
 from .tiki_crawler import TikiCrawler
+from .lazada_crawler import LazadaCrawler
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ class MultiCrawler:
     
     def __init__(self):
         self.tiki_crawler = TikiCrawler()
+        self.lazada_crawler = LazadaCrawler()
     
     async def crawl(
         self,
@@ -29,17 +31,20 @@ class MultiCrawler:
         """
         Crawl from multiple sources and aggregate results
         
+        ⚠️ TEMPORARY: Tiki disabled - Only Lazada enabled for testing
+        
         Args:
             category: Product category (e.g., "smartphone", "giày")
             attributes: Product attributes (brand, price range, etc.)
-            sources: List of sources to crawl (default: ["tiki"])
+            sources: List of sources to crawl (default: ["lazada"] - was ["tiki"])
             max_products_per_source: Max products per source
         
         Returns:
             List of combined and deduplicated products
         """
         attributes = attributes or {}
-        sources = sources or ["tiki"]
+        # ⚠️ TEMPORARY: Testing Lazada only - Tiki disabled
+        sources = ["tiki"]  # Changed from ["tiki"] to ["lazada"]
         
         logger.info(f"🔍 MultiCrawler: category='{category}', sources={sources}")
         logger.info(f"📋 Attributes: {attributes}")
@@ -53,8 +58,12 @@ class MultiCrawler:
         # Crawl from each source
         tasks = []
         
+        # ⚠️ TEMPORARY: Tiki disabled for testing
         if "tiki" in sources:
             tasks.append(self._crawl_tiki(search_query, max_products_per_source))
+        
+        if "lazada" in sources:
+            tasks.append(self._crawl_lazada(search_query, max_products_per_source))
         
         # Run crawls in parallel
         if tasks:
@@ -82,6 +91,17 @@ class MultiCrawler:
             return products
         except Exception as e:
             logger.error(f"❌ Tiki error: {e}")
+            return []
+    
+    async def _crawl_lazada(self, query: str, max_products: int) -> List[Dict[str, Any]]:
+        """Crawl from Lazada"""
+        try:
+            crawler = LazadaCrawler()
+            products = await crawler.crawl(query, max_products)
+            logger.info(f"✅ Lazada: {len(products)} products")
+            return products
+        except Exception as e:
+            logger.error(f"❌ Lazada error: {e}")
             return []
     
     def _build_search_query(self, category: str, attributes: Dict) -> str:
