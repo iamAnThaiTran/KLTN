@@ -177,28 +177,104 @@ export const useProductSearch = ({ token, onAddMessage }) => {
   }, [appendProducts]);
  
   // ─────────────────────────────────────────────────────────────
-  // sendToBackend — quick-reply
+  // sendToBackend — quick-reply (with loading animation & async job pattern)
   // ─────────────────────────────────────────────────────────────
   const sendToBackend = useCallback(async (userInput) => {
+    setProductsLoading(true);
+    setOriginalUserInput(userInput);
+
     try {
-      const res = await axios.post(`${API_BASE_URL}/api/query`, {
+      const res = await axios.post(`${API_BASE_URL}/api/analyze`, {
         user_input:      userInput,
         conversation_id: conversationIdRef.current,
+      }, {
+        headers: {
+          ...(tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {}),
+          'Content-Type': 'application/json',
+        },
       });
+      
       const d = res.data;
-      if (d.conversation_id) setConversationId(d.conversation_id);
-      if (d.status === 'results' && d.products?.length) {
-        appendProducts(d.products, d.filters, d.total_found);
-      } else if (d.question) {
-        onAddMsgRef.current({
-          type: 'bot',
-          text: d.question,
-          quickReplies: d.options?.map(o => o.label || o.value || o) ?? null,
-          timestamp: new Date(),
-        });
+      
+      if (!d.success) {
+        onAddMsgRef.current({ type: 'bot', text: `❌ ${d.error}`, timestamp: new Date() });
+        setProductsLoading(false);
+        return;
+      }
+
+      // Handle conversation metadata
+      if (d.conversation_id) {
+        setConversationId(d.conversation_id);
+      }
+      
+      // Check if response contains jobId (async) or products (sync fallback)
+      if (d.jobId) {
+        console.log('[UseProductSearch] 📤 Job created (sendToBackend):', d.jobId);
+        // Start polling for results
+        setJobId(d.jobId);
+        // Keep productsLoading true until polling completes
+      } else if (d.category) {
+        // Sync fallback or direct response
+        setLastCategoryName(d.category);
+        setSelectedFilters({});
+        
+        if (d.selected_attributes && Object.keys(d.selected_attributes).length > 0) {
+          const extracted = {};
+          Object.entries(d.selected_attributes).forEach(([attr, value]) => {
+            if (value == null) return;
+            extracted[attr] = Array.isArray(value) ? value.map(v => String(v)) : [String(value)];
+          });
+          setExtractedAttributes(extracted);
+        } else {
+          setExtractedAttributes({});
+        }
+        
+        if (d.status === 'need_info' && d.question) {
+          onAddMsgRef.current({
+            type: 'bot',
+            text: d.question,
+            quickReplies: d.options?.map(o => o.label || o.value || o) ?? null,
+            timestamp: new Date(),
+          });
+        } else if (d.products?.length) {
+          // Show answer message FIRST before products
+          if (d.answer) {
+            console.log('[UseProductSearch] 📝 Adding answer message (sendToBackend):', d.answer);
+            onAddMsgRef.current({
+              type: 'bot',
+              text: d.answer,
+              timestamp: new Date(),
+            });
+          }
+          
+          // Then show products
+          appendProducts(d.products, d.filters, d.total);
+        } else if (d.status === 'results' && d.products?.length) {
+          appendProducts(d.products, d.filters, d.total_found);
+        } else {
+          onAddMsgRef.current({
+            type: 'bot',
+            text: `ℹ️ Hiện tại chưa có sản phẩm "${d.category}" trong kho.\n\nVui lòng thử mô tả khác.`,
+            timestamp: new Date(),
+          });
+        }
+        setProductsLoading(false);
+      } else {
+        // No category returned - treat as question response
+        if (d.question) {
+          onAddMsgRef.current({
+            type: 'bot',
+            text: d.question,
+            quickReplies: d.options?.map(o => o.label || o.value || o) ?? null,
+            timestamp: new Date(),
+          });
+        }
+        setProductsLoading(false);
       }
     } catch (err) {
-      onAddMsgRef.current({ type: 'bot', text: `❌ Lỗi: ${err.response?.data?.detail || err.message}`, timestamp: new Date() });
+      const msg = err.response?.data?.detail || err.message || 'Có lỗi xảy ra';
+      onAddMsgRef.current({ type: 'bot', text: `❌ Lỗi: ${msg}`, timestamp: new Date() });
+      setProductsLoading(false);
     }
   }, [appendProducts]);
  

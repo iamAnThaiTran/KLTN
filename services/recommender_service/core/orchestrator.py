@@ -287,6 +287,18 @@ class RecommendationOrchestrator:
         self,
         comprehensive_analysis: Dict[str, Any]
     ) -> Dict[str, Any]:
+        """
+        Convert comprehensive LLM analysis to attributes dict.
+        
+        Returns ALL attributes (including null values) for ProductService crawling.
+        
+        Priority:
+        1. user_value (explicit user input)
+        2. expected_values[0] (LLM inferred value)
+        3. null (schema hint for crawling, naturally skipped in ranking)
+        
+        Ranking automatically skips null values (_calculate_attribute_match_score returns 0.0).
+        """
         attributes_dict = {}
         
         attributes_list = comprehensive_analysis.get("extracted_attributes") or comprehensive_analysis.get("attributes")
@@ -297,16 +309,23 @@ class RecommendationOrchestrator:
                 if not attr_name:
                     continue
                 
+                # Priority 1: user_value
                 user_value = attr.get("user_value")
                 if user_value is not None:
                     attributes_dict[attr_name] = user_value
                     continue
                 
+                # Priority 2: expected_values (use first value if available)
                 expected_values = attr.get("expected_values")
                 if expected_values and isinstance(expected_values, list) and len(expected_values) > 0:
                     value = expected_values[0]
-                    attributes_dict[attr_name] = value
-                    continue
+                    if value is not None:
+                        attributes_dict[attr_name] = value
+                        continue
+                
+                # Priority 3: Include null as schema hint for crawling
+                # Ranking will skip this (score=0.0) but ProductService can use it for crawling
+                attributes_dict[attr_name] = None
         
         elif isinstance(attributes_list, dict):
             for name, attr_obj in attributes_list.items():
@@ -314,8 +333,15 @@ class RecommendationOrchestrator:
                     user_value = attr_obj.get("user_value")
                     if user_value is not None:
                         attributes_dict[name] = user_value
+                    else:
+                        expected_values = attr_obj.get("expected_values")
+                        if expected_values and isinstance(expected_values, list) and len(expected_values) > 0:
+                            attributes_dict[name] = expected_values[0]
+                        else:
+                            attributes_dict[name] = None
                 else:
                     attributes_dict[name] = attr_obj
+        
         return attributes_dict
     
     def _calculate_attribute_match_score(self, expected_value: Any, product_value: Any) -> float:
@@ -661,8 +687,11 @@ class RecommendationOrchestrator:
         
         # STEP 4: Get products - DB or crawl+detail if needed
         # ✅ ProductServiceClient handles ALL crawling logic internally
-        #logger.info(f"[CASE 1] 📤 Requesting products from ProductServiceClient (DB or crawl if needed)...")
+        # ✅ Full attribute schema (including null expected_values) stays in conversation_state["comprehensive_analysis"]
+        # ✅ ProductService will use comprehensive_analysis from state for detailed crawling decisions
+        
         logger.info(f"[CASE 1] 📤 Requesting products for category_id={category_id}, category_name='{validated_category}', attributes={attributes_for_search}, limit=50")
+        
         products = await self.product_service_client.get_or_crawl_products(
             category_id=category_id,
             category_name=validated_category,
@@ -1057,7 +1086,7 @@ OUTPUT FORMAT
 """
         
         try:
-            response = call_openai(prompt, model="gpt-4o-mini", temperature=0.3, max_tokens=400)
+            response = call_openai(prompt, model="gpt-4o-mini", temperature=0.3, max_tokens=1000)
             if not response:
                 return {
                     "status": "need_info",
