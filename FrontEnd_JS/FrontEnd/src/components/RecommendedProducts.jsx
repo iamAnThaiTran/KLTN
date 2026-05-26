@@ -25,12 +25,14 @@ const RecommendedProducts = ({ onProductClick }) => {
         console.log('[RecommendedProducts] Fetching personalized recommendations for user:', user?.id)
         // Authenticated user: get personalized recommendations
         const data = await SearchHistoryService.getRecommendedProducts(token);
+        console.log("🚀 ~ fetchRecommendations ~ data:", data)
         
         if (data.status === 'success') {
-          setProducts(data.recommended_products || []);
+          setProducts(data.products || []);
           setRecommendationType('personalized');
           setTopCategories(data.top_categories || []);
           setTopBrands(data.top_brands || []);
+          setLoading(false);
         } else if (data.status === 'unauthenticated') {
           // Fallback to public recommendations
           fetchPublicRecommendations();
@@ -63,9 +65,11 @@ const RecommendedProducts = ({ onProductClick }) => {
       } else {
         setError('Unable to load trending products');
       }
+      setLoading(false);
     } catch (err) {
       console.error('[RecommendedProducts] Error fetching public recommendations:', err);
       setError('Unable to load trending products');
+      setLoading(false);
     }
   };
 
@@ -331,33 +335,6 @@ function ProductCard({ product, onClick }) {
       }}>
         {formatPrice(productPrice)}
       </div>
-
-      {/* Recommendation reason if available */}
-      {product.recommendation_reason && (
-        <div style={{
-          fontSize: 10,
-          color: '#94a3b8',
-          lineHeight: 1.3,
-          display: '-webkit-box',
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: 'vertical',
-          overflow: 'hidden',
-          fontStyle: 'italic'
-        }}>
-          💡 {product.recommendation_reason}
-        </div>
-      )}
-
-      {/* Rating if available */}
-      {product.rating && (
-        <div style={{
-          fontSize: 11,
-          color: '#f59e0b',
-          marginTop: 4
-        }}>
-          ⭐ {product.rating}
-        </div>
-      )}
     </div>
   );
 }

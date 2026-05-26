@@ -135,7 +135,12 @@ class AnalyzeProcessor:
             self.session_manager.set_session(conversation_id, conversation_state)
             logger.info(f"[Job {job_id}] Session saved to session_manager")
             
-            # ====== STEP 5: Save to DB if authenticated ======
+            # ====== STEP 5: Extract results from orchestrator (needed for save logic) ======
+            orch_status = orch_result.get("status")
+            products = orch_result.get("products", [])
+            results_count = len(products) if products else 0
+            
+            # ====== STEP 6: Save to DB if authenticated ======
             if current_user_id:
                 try:
                     category_for_db = conversation_state.get("category")
@@ -143,14 +148,13 @@ class AnalyzeProcessor:
                         user_id=str(current_user_id),
                         query=user_input,
                         category=category_for_db,
-                        results_count=len(products) if products else 0
+                        results_count=results_count
                     )
-                    #logger.info(f"[Job {job_id}] ✅ Saved search history for user {current_user_id} to UserService")
+                    logger.info(f"[Job {job_id}] ✅ Saved search history for user {current_user_id} to UserService")
                 except Exception as e:
                     logger.warning(f"[Job {job_id}] ⚠️ Failed to save search history to UserService: {e}")
             
-            # ====== STEP 6: Handle orchestrator response ======
-            orch_status = orch_result.get("status")
+            # ====== STEP 7: Handle orchestrator response ======
             
             # Handle special statuses (need_info, no_results, error)
             if orch_status in ["need_info", "no_results", "error"]:

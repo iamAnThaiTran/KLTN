@@ -265,7 +265,7 @@ Hãy STRONGLY BIAS về REUSE existing schema. Chỉ tạo attribute mới khi t
         try:
             # Call LLM via client
             # Note: Adjust based on your actual LLM client implementation
-            response = await self.llm_client.complete(
+            response = await self.llm_client.call_openai_async(
                 prompt=prompt,
                 temperature=0.3,  # Low temperature for consistency
                 max_tokens=200
@@ -489,6 +489,24 @@ Hãy STRONGLY BIAS về REUSE existing schema. Chỉ tạo attribute mới khi t
             
             if not truly_new_attrs:
                 logger.info(f"ℹ️  No new attributes to add to category '{category_name}'")
+                
+                # Build attribute mapping for orchestrator
+                attribute_mapping = {}
+                for detected, details in validation_details.items():
+                    decision = details["decision"]
+                    mapped_to = details.get("mapped_to")
+                    
+                    if decision == "reuse" and mapped_to is not None:
+                        # Only include reuse mappings with valid mapped_to
+                        attribute_mapping[detected] = mapped_to
+                    elif decision == "ignore":
+                        # Skip ignored attributes (they're not attributes, just features)
+                        logger.debug(f"⏭️  Skipping ignored attribute '{detected}' from mapping")
+                        continue
+                    elif decision == "new_attribute":
+                        # Shouldn't happen here, but include for completeness
+                        attribute_mapping[detected] = detected
+                
                 return {
                     "success": True,
                     "category_id": category_id,
@@ -496,7 +514,8 @@ Hãy STRONGLY BIAS về REUSE existing schema. Chỉ tạo attribute mới khi t
                     "products_synced": 0,
                     "enrichment_jobs_enqueued": 0,
                     "reason": "No new attributes detected",
-                    "validation_details": validation_details
+                    "validation_details": validation_details,
+                    "attribute_mapping": attribute_mapping
                 }
             
             logger.info(f"✨ New attributes to add: {truly_new_attrs}")
@@ -537,13 +556,31 @@ Hãy STRONGLY BIAS về REUSE existing schema. Chỉ tạo attribute mới khi t
                 products_count=products_synced
             )
             
+            # Build attribute mapping for orchestrator
+            attribute_mapping = {}
+            for detected, details in validation_details.items():
+                decision = details["decision"]
+                mapped_to = details.get("mapped_to")
+                
+                if decision == "reuse" and mapped_to is not None:
+                    # Only include reuse mappings with valid mapped_to
+                    attribute_mapping[detected] = mapped_to
+                elif decision == "ignore":
+                    # Skip ignored attributes (they're not attributes, just features)
+                    logger.debug(f"⏭️  Skipping ignored attribute '{detected}' from mapping")
+                    continue
+                elif decision == "new_attribute":
+                    # Newly added attributes map to themselves
+                    attribute_mapping[detected] = detected
+            
             return {
                 "success": True,
                 "category_id": category_id,
                 "new_attributes_added": truly_new_attrs,
                 "products_synced": products_synced,
                 "enrichment_jobs_enqueued": enrichment_jobs_enqueued,
-                "validation_details": validation_details
+                "validation_details": validation_details,
+                "attribute_mapping": attribute_mapping
             }
         
         except Exception as e:
@@ -651,27 +688,3 @@ Hãy STRONGLY BIAS về REUSE existing schema. Chỉ tạo attribute mới khi t
         #     logger.error(f"⚠️ Error enqueueing enrichment job: {str(e)}")
         #     return 0
 
-
-# Example usage
-if __name__ == "__main__":
-    # Test fuzzy matching and semantic validation
-    async def test_detection():
-        evolution_service = CategorySchemaEvolution()
-        
-        existing = ["hãng", "loại cửa", "khối lượng giặt"]
-        detected = ["thương hiệu", "AI DD", "độ ồn"]
-        
-        # Test 1: Without LLM (fuzzy match only)
-        print("\n=== TEST 1: Fuzzy matching only ===")
-        truly_new, details = await evolution_service.detect_new_attributes(
-            existing, detected, "washing_machine"
-        )
-        print(f"Truly new: {truly_new}")
-        print(f"Details: {json.dumps(details, ensure_ascii=False, indent=2)}")
-        
-        # Expected output:
-        # - "thương hiệu" → reuse "hãng" (high fuzzy match)
-        # - "AI DD" → ignore (common feature)
-        # - "độ ồn" → new_attribute (unresolved, no LLM)
-    
-    asyncio.run(test_detection())

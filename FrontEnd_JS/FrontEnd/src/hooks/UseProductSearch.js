@@ -319,9 +319,8 @@ export const useProductSearch = ({ token, onAddMessage }) => {
  
   const resetFilters = useCallback(() => {
     setSelectedFilters({});
-    if (lastCategoryNameRef.current)
-      searchWithFilters(lastCategoryNameRef.current, {}, extractedAttrRef.current);
-  }, [searchWithFilters]);
+    // Chỉ clear bộ lọc, không gọi API
+  }, []);
  
   // ── snapshot ──
   const snapshot = useMemo(() => ({

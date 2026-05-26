@@ -12,7 +12,7 @@ Handles:
 - Comparison history
 """
 
-from fastapi import FastAPI, HTTPException, Body, Query
+from fastapi import FastAPI, HTTPException, Body, Query, Request
 import logging
 from typing import Optional, List, Dict, Any
 from sqlalchemy import create_engine, text
@@ -734,7 +734,7 @@ async def get_comparison_history(user_id: str, limit: int = 20, offset: int = 0)
 
 @app.get("/api/users/me/recommendation-criteria")
 async def get_my_recommendation_criteria(
-    request,
+    request: Request,
     days: int = 90
 ):
     """
@@ -755,22 +755,33 @@ async def get_my_recommendation_criteria(
     token = auth_header.replace("Bearer ", "")
     
     # Extract user_id from token
-    # In production, use proper JWT validation
+    # Use same JWT_SECRET as auth_routes.py for consistency
     try:
         import jwt
         import os
         
-        jwt_secret = os.getenv("JWT_SECRET_KEY", "your-secret-key")
+        # Get JWT secret from environment - MUST match auth_routes.py
+        # Default: "your-secret-key-change-in-production" (36 bytes - sufficient for HS256)
+        jwt_secret = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
+        
+        # Decode token with signature verification
         decoded_token = jwt.decode(token, jwt_secret, algorithms=["HS256"])
         user_id = decoded_token.get("user_id") or decoded_token.get("sub")
         
         if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token format")
+            raise HTTPException(status_code=401, detail="Invalid token format - no user_id or sub")
+            
+    except jwt.ExpiredSignatureError:
+        logger.warning("Token expired")
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidSignatureError:
+        logger.warning(f"Invalid token signature - ensure JWT_SECRET matches across services")
+        raise HTTPException(status_code=401, detail="Invalid token signature")
     except jwt.InvalidTokenError as e:
         logger.warning(f"Invalid token: {e}")
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     except Exception as e:
-        logger.warning(f"Token parsing error: {e}")
+        logger.error(f"Token parsing error: {e}")
         raise HTTPException(status_code=401, detail="Token validation failed")
     
     # Now call the existing function with extracted user_id

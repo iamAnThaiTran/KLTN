@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 class CategoryValidator:
     """Validate và normalize categories trước khi crawl"""
     
-    def __init__(self, product_service_client=None, schema_evolution_service=None, rabbitmq_producer=None):
+    def __init__(self, product_service_client=None, schema_evolution_service=None, rabbitmq_producer=None, llm_client=None):
         # Construct DATABASE_URL from environment variables if not already set
         self.db_url = os.getenv(
             "DATABASE_URL",
@@ -38,10 +38,24 @@ class CategoryValidator:
         # Import khi cần để tránh circular import
         self._universal_keywords = None
         self._llm_utils = None
+        self._llm_client = llm_client
         self._schema_evolution_service = None
         self.product_service_client = product_service_client  # HTTP client to ProductService
         self._product_service_client_for_evolution = product_service_client
         self._rabbitmq_producer = rabbitmq_producer
+    
+    @property
+    def llm_client(self):
+        """Lazy load LLM client"""
+        if self._llm_client is None:
+            # Try to load from LLMClient
+            try:
+                from services.llm_client import LLMClient
+                self._llm_client = LLMClient()
+            except (ImportError, Exception) as e:
+                logger.warning(f"⚠️ Could not initialize LLM client: {e}")
+                self._llm_client = None
+        return self._llm_client
     
     @property
     def schema_evolution_service(self):
@@ -49,7 +63,8 @@ class CategoryValidator:
         if self._schema_evolution_service is None:
             from services.category_schema_evolution import CategorySchemaEvolution
             self._schema_evolution_service = CategorySchemaEvolution(
-                product_service_client=self._product_service_client_for_evolution
+                product_service_client=self._product_service_client_for_evolution,
+                llm_client=self.llm_client
             )
         return self._schema_evolution_service
     
@@ -144,7 +159,8 @@ class CategoryValidator:
                 "category": str,  # Category name tìm thấy hoặc tạo mới
                 "category_id": int | None,  # ID trong DB (None nếu mới)
                 "status": "found" | "normalized" | "created_from_api",
-                "reason": str
+                "reason": str,
+                "attribute_mapping": {"llm_name": "db_name", ...}  # ✅ NEW: Map LLM attrs to DB attrs
             }
         """
         db_categories = await self.get_db_categories()
@@ -160,8 +176,8 @@ class CategoryValidator:
             cat_id, cat_name = db_names[user_cat_lower]
             #logger.info(f"✅ Category '{user_category}' → exact match '{cat_name}' (id={cat_id})")
             
-            # 🔄 Check nếu có new attributes để update schema
-            await self._enqueue_schema_evolution_if_needed(
+            # 🔄 Check nếu có new attributes để update schema + get mapping
+            attr_mapping = await self._enqueue_schema_evolution_if_needed(
                 category_id=cat_id,
                 category_name=cat_name,
                 detected_attributes=detected_attributes
@@ -172,15 +188,16 @@ class CategoryValidator:
                 "category": cat_name,
                 "category_id": cat_id,
                 "status": "found",
-                "reason": "Exact match with database category"
+                "reason": "Exact match with database category",
+                "attribute_mapping": attr_mapping or {}
             }
         
         if user_slug in db_slugs:
             cat_id, cat_name = db_slugs[user_slug]
             #logger.info(f"✅ Category '{user_category}' → slug match '{cat_name}' (id={cat_id})")
             
-            # 🔄 Check nếu có new attributes để update schema
-            await self._enqueue_schema_evolution_if_needed(
+            # 🔄 Check nếu có new attributes để update schema + get mapping
+            attr_mapping = await self._enqueue_schema_evolution_if_needed(
                 category_id=cat_id,
                 category_name=cat_name,
                 detected_attributes=detected_attributes
@@ -191,7 +208,8 @@ class CategoryValidator:
                 "category": cat_name,
                 "category_id": cat_id,
                 "status": "found",
-                "reason": "Slug match with database category"
+                "reason": "Slug match with database category",
+                "attribute_mapping": attr_mapping or {}
             }
         
         # STEP 2: Try UNIVERSAL_KEYWORDS match
@@ -203,8 +221,8 @@ class CategoryValidator:
                     if cat["name"].lower() == base_cat.lower():
                         #logger.info(f"✅ Category '{user_category}' → keyword match '{base_cat}' (id={cat_id})")
                         
-                        # 🔄 Check nếu có new attributes để update schema
-                        await self._enqueue_schema_evolution_if_needed(
+                        # 🔄 Check nếu có new attributes để update schema + get mapping
+                        attr_mapping = await self._enqueue_schema_evolution_if_needed(
                             category_id=cat_id,
                             category_name=cat["name"],
                             detected_attributes=detected_attributes
@@ -215,7 +233,8 @@ class CategoryValidator:
                             "category": cat["name"],
                             "category_id": cat_id,
                             "status": "normalized",
-                            "reason": f"Matched via keyword '{base_cat}'"
+                            "reason": f"Matched via keyword '{base_cat}'",
+                            "attribute_mapping": attr_mapping or {}
                         }
             
             # Check substring match
@@ -227,8 +246,8 @@ class CategoryValidator:
                             if cat["name"].lower() == base_cat.lower():
                                 #logger.info(f"✅ Category '{user_category}' → substring match '{base_cat}' (id={cat_id})")
                                 
-                                # 🔄 Check nếu có new attributes để update schema
-                                await self._enqueue_schema_evolution_if_needed(
+                                # 🔄 Check nếu có new attributes để update schema + get mapping
+                                attr_mapping = await self._enqueue_schema_evolution_if_needed(
                                     category_id=cat_id,
                                     category_name=cat["name"],
                                     detected_attributes=detected_attributes
@@ -239,7 +258,8 @@ class CategoryValidator:
                                     "category": cat["name"],
                                     "category_id": cat_id,
                                     "status": "normalized",
-                                    "reason": f"Matched via substring '{keyword}'"
+                                    "reason": f"Matched via substring '{keyword}'",
+                                    "attribute_mapping": attr_mapping or {}
                                 }
         
         # STEP 3: Category not found in DB or keywords
@@ -611,7 +631,7 @@ NHẮC NHỜ:
         category_id: int,
         category_name: str,
         detected_attributes: list = None
-    ) -> None:
+    ) -> Dict[str, str]:
         """
         Check nếu có new attributes so với category schema
         Nếu có → enqueue schema evolution job (non-blocking)
@@ -620,10 +640,14 @@ NHẮC NHỜ:
             category_id: ID của category
             category_name: Tên category
             detected_attributes: Danh sách attributes detect được
+        
+        Returns:
+            Mapping của LLM attribute names → DB attribute names
+            Example: {"chế độ phun": "chế độ phun", "ram": "ram"}
         """
         if not detected_attributes:
             #logger.info(f"ℹ️  No detected attributes to check for schema evolution")
-            return
+            return {}
         
         # Extract attribute names
         attribute_names = []
@@ -638,28 +662,30 @@ NHẮC NHỜ:
         
         if not attribute_names:
             #logger.info(f"ℹ️  No attributes to check for schema evolution")
-            return
+            return {}
         
         #logger.info(f"🔍 Checking schema evolution for category '{category_name}' (id={category_id})")
         #logger.info(f"   Detected attributes: {attribute_names}")
         
         try:
             # Call schema evolution service (async, non-blocking)
-            # This will enqueue enrichment jobs if needed
+            # This will enqueue enrichment jobs if needed and return attribute mapping
             result = await self.schema_evolution_service.evolve_category_schema(
                 category_id=category_id,
                 category_name=category_name,
                 new_attributes=attribute_names
             )
             
-            # if result.get("success"):
-            #     if result.get("new_attributes_added"):
-            #         #logger.info(f"✨ Schema evolved: {result}")
-            #     else:
-            #         #logger.info(f"ℹ️  No new attributes needed")
-            # else:
-            #     logger.warning(f"⚠️ Schema evolution warning: {result.get('reason')}")
+            # Extract attribute mapping from result
+            # Schema evolution service returns: {"llm_attr_name": "db_attr_name", ...}
+            attr_mapping = result.get("attribute_mapping", {})
+            
+            if attr_mapping:
+                logger.info(f"[Schema Evolution] Attribute mapping for orchestrator: {attr_mapping}")
+            
+            return attr_mapping or {}
         
         except Exception as e:
             logger.warning(f"⚠️ Error checking schema evolution: {str(e)}")
             # Don't fail the validation flow, just log warning
+            return {}

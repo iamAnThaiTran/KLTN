@@ -54,7 +54,6 @@ export const SearchHistoryModal = ({ isOpen, onClose, token, onQuerySelect }) =>
   };
 
   const handleDeleteHistory = async (id) => {
-    // TODO: Implement delete functionality
     console.log('Delete history item:', id);
   };
 

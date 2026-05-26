@@ -448,7 +448,7 @@ class RecommendationOrchestrator:
             return products
         
         #logger.info(f"[Rank] Starting ranking for {len(products)} products")
-        #logger.info(f"[Rank] Expected attributes: {expected_attributes}")
+        logger.info(f"[Rank] Expected attributes: {expected_attributes}")
         
         # Calculate score for each product
         ranked_products = []
@@ -634,8 +634,8 @@ class RecommendationOrchestrator:
             user_category=category,
             detected_attributes=detected_attributes_names if detected_attributes_names else None
         )
+        logger.info(f"[CASE 1] Category validation result: {validation_result}")
         if not validation_result["success"]:
-            #logger.info(f"[CASE 1] ❌ Category validation failed: {validation_result['reason']}")
             return {
                 "status": "error",
                 "message": f"Không thể xác định danh mục sản phẩm '{category}'. {validation_result['reason']}",
@@ -661,16 +661,28 @@ class RecommendationOrchestrator:
         
         # STEP 3: Extract attributes for search
         comprehensive_analysis = conversation_state.get("comprehensive_analysis", {})
-        attributes_for_search = self._convert_comprehensive_attributes_to_dict(comprehensive_analysis)
+        llm_attributes = self._convert_comprehensive_attributes_to_dict(comprehensive_analysis)
         
-        #logger.info(f"[CASE 1] ✨ Extracted attributes for search: {attributes_for_search}")
+        # 🔄 Normalize LLM attribute names using mapping from schema evolution
+        attribute_mapping = validation_result.get("attribute_mapping", {})
+        attributes_for_search = {}
         
-        # Store LLM attributes to state
+        for llm_attr_name, llm_attr_value in llm_attributes.items():
+            # Use mapped name if available, otherwise keep LLM name
+            db_attr_name = attribute_mapping.get(llm_attr_name, llm_attr_name)
+            attributes_for_search[db_attr_name] = llm_attr_value
+            
+            if db_attr_name != llm_attr_name:
+                logger.info(f"[CASE 1] 🔄 Normalized attribute: '{llm_attr_name}' → '{db_attr_name}'")
+        
+        logger.info(f"[CASE 1] ✨ Extracted attributes for search (normalized): {attributes_for_search}")
+        
+        # Store normalized attributes to state
         conversation_state["extracted"] = attributes_for_search.copy()
         
         # FALLBACK: If LLM attributes empty, use rule-based extraction
         if not attributes_for_search or len(attributes_for_search) == 0:
-            #logger.info(f"[CASE 1] 💡 LLM attributes empty → Using rule-based extraction")
+            logger.info(f"[CASE 1] 💡 LLM attributes empty → Using rule-based extraction")
             extract_result = self.attribute_extractor.extract(
                 user_input,
                 validated_category,
@@ -683,7 +695,7 @@ class RecommendationOrchestrator:
                 product_name = conversation_state.get("detected_intent", {}).get("product_name", "").strip()
                 if product_name and product_name.lower() != validated_category.lower():
                     attributes_for_search["loai"] = product_name
-                    #logger.info(f"[CASE 1] 💡 No attributes → Using product_name as search hint: '{product_name}'")
+                    logger.info(f"[CASE 1] 💡 No attributes → Using product_name as search hint: '{product_name}'")
         
         # STEP 4: Get products - DB or crawl+detail if needed
         # ✅ ProductServiceClient handles ALL crawling logic internally

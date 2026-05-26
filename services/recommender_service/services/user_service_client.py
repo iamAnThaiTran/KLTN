@@ -16,12 +16,12 @@ class UserServiceClient:
     HTTP client for communicating with UserService.
     Handles user authentication, preferences, history, and alerts.
     
-    UserService runs on port 8004
+    UserService runs on port 8000 internally (8004 externally on host)
     """
     
     def __init__(
         self,
-        base_url: str = "http://user-service:8004",
+        base_url: str = "http://user-service:8000",
         timeout: float = 30.0,
         max_retries: int = 3,
         retry_delay: float = 1.0

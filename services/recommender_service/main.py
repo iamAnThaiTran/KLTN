@@ -156,7 +156,8 @@ async def analyze_query(
             try:
                 import jwt
                 import os
-                jwt_secret = os.getenv("JWT_SECRET", "your-secret-key")
+                # Use same JWT_SECRET as auth_routes.py for consistency
+                jwt_secret = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
                 decoded = jwt.decode(token, jwt_secret, algorithms=["HS256"])
                 current_user_id = decoded.get("user_id") or decoded.get("sub")
                 logger.info(f"[/api/analyze] 👤 Authenticated user: {current_user_id}")

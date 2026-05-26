@@ -157,16 +157,17 @@ const UserMenu = ({ user, onLogout, onSearchHistoryClick, onCompareClick, onFavo
             <div style={{ fontWeight:700, fontSize:14, color:'#1e1b4b' }}>{getUserName()}</div>
             <div style={{ fontSize:12, color:'#94a3b8', marginTop:2 }}>{user?.email}</div>
           </div>
-          {[{icon:<Heart size={15}/>,label:'Sản phẩm yêu thích',color:'#e11d48',action:'favorites'},{icon:<Clock size={15}/>,label:'Lịch sử tìm kiếm',color:'#6366f1',action:'history'},{icon:<Tag size={15}/>,label:'So sánh sản phẩm',color:'#f59e0b',action:'compare'}].map((item,i)=>(
+          {[{icon:<Heart size={15}/>,label:'Sản phẩm yêu thích',color:'#e11d48',action:'favorites'},{icon:<Tag size={15}/>,label:'So sánh sản phẩm',color:'#f59e0b',action:'compare'}].map((item,i)=>(
             <button key={i} onClick={()=>{
               console.log('🔍 Menu item clicked:', item.action);
               setOpen(false);
               if(item.action === 'favorites') {
                 console.log('❤️ Opening favorites');
                 onFavoritesClick();
-              } else if(item.action === 'history') {
-                console.log('🕐 Opening history');
-                onSearchHistoryClick();
+              
+              // } else if(item.action === 'history') {
+              //   console.log('🕐 Opening history');
+              //   onSearchHistoryClick();
               } else if(item.action === 'compare') {
                 console.log('🏷️ Opening compare');
                 onCompareClick();
