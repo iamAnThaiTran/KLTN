@@ -830,13 +830,6 @@ Think like:
 - concrete categories
 - common ecommerce keywords
 - highly purchasable entities
-- popular brands
-- price-oriented shopping terms
-- common ecommerce filters like:
-  - brand
-  - price range
-  - budget
-  - usage
 
 --------------------------------------------------
 
@@ -1395,6 +1388,24 @@ Generate ONLY attributes that satisfy ALL conditions:
 
 4. Realistically searchable by users
 
+IMPORTANT:
+
+Also prioritize COMMON E-COMMERCE ATTRIBUTES when relevant:
+
+* brand
+* price
+* budget range
+* storage
+* size
+* color
+* material
+
+These attributes are highly valuable for:
+* retrieval
+* filtering
+* ranking
+* comparison
+
 Prefer attributes with:
 
 * finite enumerated values
@@ -1756,7 +1767,7 @@ FINAL RULES
                 prompt,
                 model="gpt-4o-mini",
                 temperature=0.0,
-                max_tokens=1000  # 🔧 INCREASED from 500 to prevent JSON truncation
+                max_tokens=1500  # 🔧 INCREASED from 500 to prevent JSON truncation
             )
 
             if not response:
