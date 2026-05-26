@@ -82,7 +82,7 @@ const ProductCard = ({ product, index, isFavorited, onToggleFavorite, onOpen }) 
             onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.15)'}
             onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
           >
-            <Heart size={16} fill={isFavorited ? '#fff' : 'none'} />
+            <Heart size={16} fill={isFavorited ? '#e11d48' : 'none'} />
           </button>
         </div>
       )}
@@ -116,10 +116,10 @@ const ProductsBubble = ({ msg, favoriteProductIds, onToggleFavorite, onOpen }) =
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(148px,1fr))', gap: 12 }}>
       {msg.products.map((product, i) => (
         <ProductCard
-          key={product.id || i}
+          key={product.product_id || product.id || i}
           product={product}
           index={i}
-          isFavorited={favoriteProductIds.has(product.id)}
+          isFavorited={favoriteProductIds.has(product.product_id || product.id)}
           onToggleFavorite={() => onToggleFavorite(product)}
           onOpen={onOpen}
         />
