@@ -100,10 +100,10 @@ export default function ComparisonResultFromApi({ data, onBack, onOpenHistory })
         }
         .comparison-content {
           background: #fff;
-          border-radius: 12px;
+          border-radius: 0;
           padding: 24px;
-          margin-bottom: 16px;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+          margin-bottom: 0;
+          box-shadow: none;
         }
         .comparison-content h1, 
         .comparison-content h2, 
@@ -172,27 +172,34 @@ export default function ComparisonResultFromApi({ data, onBack, onOpenHistory })
         <div style={{ fontSize: 32 }}>🔍</div>
       </div>
 
-      {/* Products Overview Row */}
-      {snapshot_a && snapshot_b && (
-        <div style={{
-          padding: '24px',
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 16,
-        }}>
-          <ProductCard product={snapshot_a} label="Sản phẩm A" />
-          <ProductCard product={snapshot_b} label="Sản phẩm B" />
-        </div>
-      )}
-
-      {/* Comparison Content */}
+      {/* Scrollable Container - includes products and content */}
       <div style={{
         flex: 1,
         overflowY: 'auto',
-        padding: '0 24px 24px 24px',
+        padding: '0',
       }}>
-        <div className="comparison-content">
-          <MarkdownRenderer content={comparison} />
+        {/* Products Overview Row - now scrolls with content */}
+        {snapshot_a && snapshot_b && (
+          <div style={{
+            padding: '24px',
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 16,
+            backgroundColor: '#f5f7fa',
+            flexShrink: 0,
+          }}>
+            <ProductCard product={snapshot_a} label="Sản phẩm A" />
+            <ProductCard product={snapshot_b} label="Sản phẩm B" />
+          </div>
+        )}
+
+        {/* Comparison Content */}
+        <div style={{
+          padding: '0',
+        }}>
+          <div className="comparison-content">
+            <MarkdownRenderer content={comparison} />
+          </div>
         </div>
       </div>
 

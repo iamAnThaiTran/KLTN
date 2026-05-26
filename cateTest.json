@@ -1,0 +1,1860 @@
+[
+  {
+    "id": 1,
+    "domain": "tech",
+    "query": "laptop gaming RTX 4060 dưới 25 triệu",
+    "expected_category": "laptop",
+    "expected_attributes": {
+      "gpu": "RTX 4060",
+      "max_price": 25000000,
+      "usage": "gaming"
+    },
+    "query_type": "multi_attribute",
+    "difficulty": "medium"
+  },
+  {
+    "id": 2,
+    "domain": "tech",
+    "query": "máy học AI cho sinh viên",
+    "expected_category": "laptop",
+    "expected_attributes": { "usage": "AI" },
+    "query_type": "semantic",
+    "difficulty": "hard"
+  },
+  {
+    "id": 3,
+    "domain": "tech",
+    "query": "laptop code backend",
+    "expected_category": "laptop",
+    "expected_attributes": { "usage": "programming" },
+    "query_type": "semantic",
+    "difficulty": "hard"
+  },
+  {
+    "id": 4,
+    "domain": "tech",
+    "query": "MacBook nhẹ pin lâu để đi học",
+    "expected_category": "laptop",
+    "expected_attributes": {
+      "brand": "Apple",
+      "weight": "light",
+      "battery": "long"
+    },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 5,
+    "domain": "tech",
+    "query": "laptop Dell i7 RAM 16GB SSD 512GB",
+    "expected_category": "laptop",
+    "expected_attributes": {
+      "brand": "Dell",
+      "cpu": "Intel Core i7",
+      "ram": "16GB",
+      "storage": "512GB SSD"
+    },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 6,
+    "domain": "tech",
+    "query": "laptop dưới 20 triệu cho dân văn phòng",
+    "expected_category": "laptop",
+    "expected_attributes": { "max_price": 20000000, "usage": "office" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 7,
+    "domain": "tech",
+    "query": "máy tính xách tay pin trâu để làm việc cả ngày",
+    "expected_category": "laptop",
+    "expected_attributes": { "battery": "long", "usage": "office" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 8,
+    "domain": "tech",
+    "query": "Asus Ryzen 7 RTX 4050",
+    "expected_category": "laptop",
+    "expected_attributes": {
+      "brand": "Asus",
+      "cpu": "AMD Ryzen 7",
+      "gpu": "RTX 4050"
+    },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 9,
+    "domain": "tech",
+    "query": "laptop mỏng nhẹ cho nữ",
+    "expected_category": "laptop",
+    "expected_attributes": { "weight": "light" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 10,
+    "domain": "tech",
+    "query": "máy render video RAM 32GB",
+    "expected_category": "laptop",
+    "expected_attributes": { "usage": "video editing", "ram": "32GB" },
+    "query_type": "semantic",
+    "difficulty": "hard"
+  },
+  {
+    "id": 11,
+    "domain": "tech",
+    "query": "điện thoại pin trâu cho mẹ",
+    "expected_category": "smartphone",
+    "expected_attributes": { "battery": "high", "target_user": "elderly" },
+    "query_type": "semantic",
+    "difficulty": "hard"
+  },
+  {
+    "id": 12,
+    "domain": "tech",
+    "query": "iPhone chụp ảnh đẹp dưới 20 triệu",
+    "expected_category": "smartphone",
+    "expected_attributes": {
+      "brand": "Apple",
+      "camera": "high",
+      "max_price": 20000000
+    },
+    "query_type": "multi_attribute",
+    "difficulty": "medium"
+  },
+  {
+    "id": 13,
+    "domain": "tech",
+    "query": "điện thoại Android màn 120Hz",
+    "expected_category": "smartphone",
+    "expected_attributes": { "refresh_rate": "120Hz" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 14,
+    "domain": "tech",
+    "query": "smartphone cho game thủ pin khỏe",
+    "expected_category": "smartphone",
+    "expected_attributes": { "target_user": "gamer", "battery": "high" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 15,
+    "domain": "tech",
+    "query": "Samsung màn hình to cho người lớn tuổi",
+    "expected_category": "smartphone",
+    "expected_attributes": {
+      "brand": "Samsung",
+      "screen_size": "large",
+      "target_user": "elderly"
+    },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 16,
+    "domain": "tech",
+    "query": "máy nào quay vlog ổn dưới 15 triệu",
+    "expected_category": "smartphone",
+    "expected_attributes": { "camera": "good video", "max_price": 15000000 },
+    "query_type": "conversational",
+    "difficulty": "hard"
+  },
+  {
+    "id": 17,
+    "domain": "tech",
+    "query": "điện thoại Xiaomi pin 6000mAh",
+    "expected_category": "smartphone",
+    "expected_attributes": { "brand": "Xiaomi", "battery": "6000mAh" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 18,
+    "domain": "tech",
+    "query": "máy cho học sinh cấp 2 dùng bền",
+    "expected_category": "smartphone",
+    "expected_attributes": { "target_user": "student" },
+    "query_type": "semantic",
+    "difficulty": "hard"
+  },
+  {
+    "id": 19,
+    "domain": "tech",
+    "query": "điện thoại camera đẹp để chụp đồ ăn",
+    "expected_category": "smartphone",
+    "expected_attributes": { "camera": "food photography" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 20,
+    "domain": "tech",
+    "query": "smartphone dưới 10 triệu",
+    "expected_category": "smartphone",
+    "expected_attributes": { "max_price": 10000000 },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 21,
+    "domain": "tech",
+    "query": "tai nghe chống ồn để đi máy bay",
+    "expected_category": "headphone",
+    "expected_attributes": { "noise_canceling": true, "usage": "travel" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 22,
+    "domain": "tech",
+    "query": "AirPods không dây",
+    "expected_category": "headphone",
+    "expected_attributes": { "brand": "Apple", "wireless": true },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 23,
+    "domain": "tech",
+    "query": "tai nghe gaming có mic",
+    "expected_category": "headphone",
+    "expected_attributes": { "usage": "gaming" },
+    "query_type": "semantic",
+    "difficulty": "easy"
+  },
+  {
+    "id": 24,
+    "domain": "tech",
+    "query": "Sony WH chống ồn nghe nhạc chill",
+    "expected_category": "headphone",
+    "expected_attributes": {
+      "brand": "Sony",
+      "noise_canceling": true,
+      "usage": "music"
+    },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 25,
+    "domain": "tech",
+    "query": "tai nghe bluetooth cho dân chạy bộ",
+    "expected_category": "headphone",
+    "expected_attributes": { "wireless": true, "usage": "sports" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 26,
+    "domain": "tech",
+    "query": "headphone có dây để mix nhạc",
+    "expected_category": "headphone",
+    "expected_attributes": { "wireless": false, "usage": "studio" },
+    "query_type": "multi_attribute",
+    "difficulty": "medium"
+  },
+  {
+    "id": 27,
+    "domain": "tech",
+    "query": "tai nghe nào đeo lâu không đau tai",
+    "expected_category": "headphone",
+    "expected_attributes": { "usage": "long use" },
+    "query_type": "conversational",
+    "difficulty": "hard"
+  },
+  {
+    "id": 28,
+    "domain": "tech",
+    "query": "Bose chống ồn",
+    "expected_category": "headphone",
+    "expected_attributes": { "brand": "Bose", "noise_canceling": true },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 29,
+    "domain": "tech",
+    "query": "bàn phím cơ wireless layout 75",
+    "expected_category": "keyboard",
+    "expected_attributes": { "wireless": true, "layout": "75%" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 30,
+    "domain": "tech",
+    "query": "keyboard switch đỏ",
+    "expected_category": "keyboard",
+    "expected_attributes": { "switch_type": "red" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 31,
+    "domain": "tech",
+    "query": "bàn phím gõ code yên tĩnh",
+    "expected_category": "keyboard",
+    "expected_attributes": { "switch_type": "brown" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 32,
+    "domain": "tech",
+    "query": "keyboard fullsize không dây",
+    "expected_category": "keyboard",
+    "expected_attributes": { "layout": "fullsize", "wireless": true },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 33,
+    "domain": "tech",
+    "query": "bàn phím nhỏ gọn mang cafe làm việc",
+    "expected_category": "keyboard",
+    "expected_attributes": { "layout": "65%", "wireless": true },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 34,
+    "domain": "tech",
+    "query": "chuột gaming DPI cao",
+    "expected_category": "mouse",
+    "expected_attributes": { "usage": "gaming", "dpi": "high" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 35,
+    "domain": "tech",
+    "query": "mouse không dây cho văn phòng",
+    "expected_category": "mouse",
+    "expected_attributes": { "wireless": true, "usage": "office" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 36,
+    "domain": "tech",
+    "query": "chuột nào cầm lâu đỡ mỏi tay",
+    "expected_category": "mouse",
+    "expected_attributes": { "usage": "office" },
+    "query_type": "conversational",
+    "difficulty": "hard"
+  },
+  {
+    "id": 37,
+    "domain": "tech",
+    "query": "chuột DPI 26000",
+    "expected_category": "mouse",
+    "expected_attributes": { "dpi": "26000" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 38,
+    "domain": "tech",
+    "query": "mouse cho designer",
+    "expected_category": "mouse",
+    "expected_attributes": { "usage": "design" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 39,
+    "domain": "tech",
+    "query": "màn hình 27 inch 144Hz 2K",
+    "expected_category": "monitor",
+    "expected_attributes": {
+      "size": "27 inch",
+      "refresh_rate": "144Hz",
+      "resolution": "2K"
+    },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 40,
+    "domain": "tech",
+    "query": "monitor cho dân edit ảnh",
+    "expected_category": "monitor",
+    "expected_attributes": { "resolution": "4K" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 41,
+    "domain": "tech",
+    "query": "màn hình gaming 240Hz",
+    "expected_category": "monitor",
+    "expected_attributes": { "refresh_rate": "240Hz" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 42,
+    "domain": "tech",
+    "query": "màn hình nhỏ gọn cho bàn hẹp",
+    "expected_category": "monitor",
+    "expected_attributes": { "size": "24 inch" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 43,
+    "domain": "tech",
+    "query": "monitor 32 inch 4K",
+    "expected_category": "monitor",
+    "expected_attributes": { "size": "32 inch", "resolution": "4K" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 44,
+    "domain": "tech",
+    "query": "camera quay vlog Sony",
+    "expected_category": "camera",
+    "expected_attributes": { "usage": "vlog", "brand": "Sony" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 45,
+    "domain": "tech",
+    "query": "máy ảnh chụp du lịch nhỏ gọn",
+    "expected_category": "camera",
+    "expected_attributes": { "usage": "travel" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 46,
+    "domain": "tech",
+    "query": "camera 4K để stream",
+    "expected_category": "camera",
+    "expected_attributes": { "resolution": "4K", "usage": "streaming" },
+    "query_type": "multi_attribute",
+    "difficulty": "medium"
+  },
+  {
+    "id": 47,
+    "domain": "tech",
+    "query": "Canon cho người mới học chụp",
+    "expected_category": "camera",
+    "expected_attributes": { "brand": "Canon", "usage": "beginner" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 48,
+    "domain": "tech",
+    "query": "máy ảnh nào quay video đẹp ban đêm",
+    "expected_category": "camera",
+    "expected_attributes": { "usage": "low light video" },
+    "query_type": "conversational",
+    "difficulty": "hard"
+  },
+  {
+    "id": 49,
+    "domain": "tech",
+    "query": "đồng hồ thông minh chống nước đi bơi",
+    "expected_category": "smartwatch",
+    "expected_attributes": { "waterproof": true, "sport_mode": "swimming" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 50,
+    "domain": "tech",
+    "query": "smartwatch pin dùng cả tuần",
+    "expected_category": "smartwatch",
+    "expected_attributes": { "battery": "7 days" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 51,
+    "domain": "tech",
+    "query": "đồng hồ cho người tập gym",
+    "expected_category": "smartwatch",
+    "expected_attributes": { "sport_mode": "gym" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 52,
+    "domain": "tech",
+    "query": "smartwatch chống nước pin lâu",
+    "expected_category": "smartwatch",
+    "expected_attributes": { "waterproof": true, "battery": "long" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 53,
+    "domain": "fashion",
+    "query": "giày chạy bộ Adidas size 42 màu đen",
+    "expected_category": "shoe",
+    "expected_attributes": {
+      "brand": "Adidas",
+      "size": "42",
+      "color": "đen",
+      "usage": "running"
+    },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 54,
+    "domain": "fashion",
+    "query": "sneaker trắng cho nữ",
+    "expected_category": "shoe",
+    "expected_attributes": { "color": "trắng", "gender": "female" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 55,
+    "domain": "fashion",
+    "query": "giày đi làm lịch sự cho nam",
+    "expected_category": "shoe",
+    "expected_attributes": { "gender": "male", "usage": "office" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 56,
+    "domain": "fashion",
+    "query": "giày chống trượt để đi phượt",
+    "expected_category": "shoe",
+    "expected_attributes": { "usage": "hiking" },
+    "query_type": "semantic",
+    "difficulty": "hard"
+  },
+  {
+    "id": 57,
+    "domain": "fashion",
+    "query": "Nike size 43 chơi bóng rổ",
+    "expected_category": "shoe",
+    "expected_attributes": {
+      "brand": "Nike",
+      "size": "43",
+      "usage": "basketball"
+    },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 58,
+    "domain": "fashion",
+    "query": "đôi nào mang êm chân đi nhiều",
+    "expected_category": "shoe",
+    "expected_attributes": { "usage": "walking" },
+    "query_type": "conversational",
+    "difficulty": "hard"
+  },
+  {
+    "id": 59,
+    "domain": "fashion",
+    "query": "áo thun cotton màu trắng size L",
+    "expected_category": "tshirt",
+    "expected_attributes": {
+      "material": "cotton",
+      "color": "trắng",
+      "size": "L"
+    },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 60,
+    "domain": "fashion",
+    "query": "áo phông mặc mát mùa hè",
+    "expected_category": "tshirt",
+    "expected_attributes": { "material": "cotton" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 61,
+    "domain": "fashion",
+    "query": "tshirt đen oversize",
+    "expected_category": "tshirt",
+    "expected_attributes": { "color": "đen", "size": "oversize" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 62,
+    "domain": "fashion",
+    "query": "áo mặc đi gym nhanh khô",
+    "expected_category": "tshirt",
+    "expected_attributes": { "material": "polyester" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 63,
+    "domain": "fashion",
+    "query": "quần jean nam slim fit",
+    "expected_category": "jeans",
+    "expected_attributes": { "gender": "male", "fit_type": "slim" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 64,
+    "domain": "fashion",
+    "query": "jeans nữ cạp cao",
+    "expected_category": "jeans",
+    "expected_attributes": { "gender": "female", "fit_type": "high waist" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 65,
+    "domain": "fashion",
+    "query": "quần bò size 30 ôm vừa",
+    "expected_category": "jeans",
+    "expected_attributes": { "waist_size": "30", "fit_type": "slim" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 66,
+    "domain": "fashion",
+    "query": "jean rộng kiểu streetwear",
+    "expected_category": "jeans",
+    "expected_attributes": { "fit_type": "baggy" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 67,
+    "domain": "fashion",
+    "query": "áo khoác chống nước đi trekking",
+    "expected_category": "jacket",
+    "expected_attributes": { "waterproof": true, "usage": "trekking" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 68,
+    "domain": "fashion",
+    "query": "jacket da nam",
+    "expected_category": "jacket",
+    "expected_attributes": { "material": "leather" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 69,
+    "domain": "fashion",
+    "query": "áo khoác mặc trời lạnh nhẹ",
+    "expected_category": "jacket",
+    "expected_attributes": { "usage": "winter" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 70,
+    "domain": "fashion",
+    "query": "áo gió chống mưa",
+    "expected_category": "jacket",
+    "expected_attributes": { "waterproof": true, "material": "nylon" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 71,
+    "domain": "fashion",
+    "query": "balo chống nước đi học",
+    "expected_category": "backpack",
+    "expected_attributes": { "waterproof": true, "usage": "school" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 72,
+    "domain": "fashion",
+    "query": "backpack 20L du lịch ngắn ngày",
+    "expected_category": "backpack",
+    "expected_attributes": { "capacity": "20L", "usage": "travel" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 73,
+    "domain": "fashion",
+    "query": "balo laptop đi làm",
+    "expected_category": "backpack",
+    "expected_attributes": { "usage": "office" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 74,
+    "domain": "fashion",
+    "query": "túi đeo lưng cho dân hiking",
+    "expected_category": "backpack",
+    "expected_attributes": { "usage": "hiking" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 75,
+    "domain": "home_appliance",
+    "query": "tủ lạnh inverter 400 lít",
+    "expected_category": "refrigerator",
+    "expected_attributes": { "inverter": true, "capacity": "400L" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 76,
+    "domain": "home_appliance",
+    "query": "tủ lạnh cho gia đình 4 người",
+    "expected_category": "refrigerator",
+    "expected_attributes": { "capacity": "350L" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 77,
+    "domain": "home_appliance",
+    "query": "fridge tiết kiệm điện",
+    "expected_category": "refrigerator",
+    "expected_attributes": { "inverter": true },
+    "query_type": "semantic",
+    "difficulty": "easy"
+  },
+  {
+    "id": 78,
+    "domain": "home_appliance",
+    "query": "máy giặt inverter 10kg",
+    "expected_category": "washing_machine",
+    "expected_attributes": { "inverter": true, "load_size": "10kg" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 79,
+    "domain": "home_appliance",
+    "query": "máy giặt cho chăn ga",
+    "expected_category": "washing_machine",
+    "expected_attributes": { "load_size": "12kg" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 80,
+    "domain": "home_appliance",
+    "query": "máy giặt tiết kiệm điện nước",
+    "expected_category": "washing_machine",
+    "expected_attributes": { "inverter": true },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 81,
+    "domain": "home_appliance",
+    "query": "điều hòa 1.5HP inverter",
+    "expected_category": "air_conditioner",
+    "expected_attributes": { "horsepower": "1.5HP", "inverter": true },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 82,
+    "domain": "home_appliance",
+    "query": "máy lạnh cho phòng 20m2",
+    "expected_category": "air_conditioner",
+    "expected_attributes": { "horsepower": "1.5HP" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 83,
+    "domain": "home_appliance",
+    "query": "điều hòa tiết kiệm điện cho phòng ngủ",
+    "expected_category": "air_conditioner",
+    "expected_attributes": { "inverter": true },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 84,
+    "domain": "home_appliance",
+    "query": "máy hút bụi không dây",
+    "expected_category": "vacuum_cleaner",
+    "expected_attributes": { "cordless": true },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 85,
+    "domain": "home_appliance",
+    "query": "hút bụi cầm tay dọn xe hơi",
+    "expected_category": "vacuum_cleaner",
+    "expected_attributes": { "cordless": true },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 86,
+    "domain": "home_appliance",
+    "query": "nồi cơm điện 1.8L",
+    "expected_category": "rice_cooker",
+    "expected_attributes": { "capacity": "1.8L" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 87,
+    "domain": "home_appliance",
+    "query": "nồi nấu cho gia đình đông người",
+    "expected_category": "rice_cooker",
+    "expected_attributes": { "capacity": "2L" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 88,
+    "domain": "furniture",
+    "query": "ghế ngồi lâu không đau lưng",
+    "expected_category": "office_chair",
+    "expected_attributes": { "ergonomic": true, "usage": "office" },
+    "query_type": "semantic",
+    "difficulty": "hard"
+  },
+  {
+    "id": 89,
+    "domain": "furniture",
+    "query": "ghế công thái học lưới",
+    "expected_category": "office_chair",
+    "expected_attributes": { "ergonomic": true, "material": "mesh" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 90,
+    "domain": "furniture",
+    "query": "chair gaming ngồi stream",
+    "expected_category": "office_chair",
+    "expected_attributes": { "usage": "gaming" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 91,
+    "domain": "furniture",
+    "query": "ghế da cho sếp",
+    "expected_category": "office_chair",
+    "expected_attributes": { "material": "leather", "usage": "office" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 92,
+    "domain": "furniture",
+    "query": "bàn nâng hạ mặt gỗ",
+    "expected_category": "desk",
+    "expected_attributes": { "adjustable_height": true, "material": "wood" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 93,
+    "domain": "furniture",
+    "query": "desk cho setup tối giản",
+    "expected_category": "desk",
+    "expected_attributes": { "material": "wood" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 94,
+    "domain": "furniture",
+    "query": "bàn làm việc đổi được chiều cao",
+    "expected_category": "desk",
+    "expected_attributes": { "adjustable_height": true },
+    "query_type": "semantic",
+    "difficulty": "easy"
+  },
+  {
+    "id": 95,
+    "domain": "beauty",
+    "query": "skincare cho da dầu mụn",
+    "expected_category": "skincare",
+    "expected_attributes": { "skin_type": "oily", "usage": "acne treatment" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 96,
+    "domain": "beauty",
+    "query": "đồ dưỡng ẩm cho da khô",
+    "expected_category": "skincare",
+    "expected_attributes": { "skin_type": "dry", "usage": "moisturizing" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 97,
+    "domain": "beauty",
+    "query": "routine phục hồi da nhạy cảm",
+    "expected_category": "skincare",
+    "expected_attributes": { "skin_type": "sensitive", "usage": "repair" },
+    "query_type": "semantic",
+    "difficulty": "hard"
+  },
+  {
+    "id": 98,
+    "domain": "beauty",
+    "query": "serum trị thâm sau mụn",
+    "expected_category": "skincare",
+    "expected_attributes": { "usage": "dark spot treatment" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 99,
+    "domain": "beauty",
+    "query": "nước hoa nam mùi gỗ",
+    "expected_category": "perfume",
+    "expected_attributes": { "gender": "male", "scent_type": "woody" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 100,
+    "domain": "beauty",
+    "query": "perfume nữ ngọt nhẹ",
+    "expected_category": "perfume",
+    "expected_attributes": { "gender": "female", "scent_type": "sweet" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 101,
+    "domain": "beauty",
+    "query": "mùi nào đi làm không quá gắt",
+    "expected_category": "perfume",
+    "expected_attributes": { "scent_type": "fresh" },
+    "query_type": "conversational",
+    "difficulty": "hard"
+  },
+  {
+    "id": 102,
+    "domain": "beauty",
+    "query": "nước hoa unisex thơm sạch",
+    "expected_category": "perfume",
+    "expected_attributes": { "gender": "unisex", "scent_type": "fresh" },
+    "query_type": "multi_attribute",
+    "difficulty": "medium"
+  },
+  {
+    "id": 103,
+    "domain": "beauty",
+    "query": "dầu gội cho tóc dầu",
+    "expected_category": "shampoo",
+    "expected_attributes": { "hair_type": "oily" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 104,
+    "domain": "beauty",
+    "query": "shampoo phục hồi tóc nhuộm",
+    "expected_category": "shampoo",
+    "expected_attributes": { "hair_type": "dyed" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 105,
+    "domain": "beauty",
+    "query": "dầu gội giảm gãy rụng",
+    "expected_category": "shampoo",
+    "expected_attributes": { "hair_type": "damaged" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 106,
+    "domain": "sports",
+    "query": "xe đạp địa hình cho nam",
+    "expected_category": "bicycle",
+    "expected_attributes": { "terrain": "mountain", "target_user": "male" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 107,
+    "domain": "sports",
+    "query": "bicycle đi phố cho nữ",
+    "expected_category": "bicycle",
+    "expected_attributes": { "terrain": "urban", "target_user": "female" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 108,
+    "domain": "sports",
+    "query": "xe đạp cho học sinh cấp 1",
+    "expected_category": "bicycle",
+    "expected_attributes": { "target_user": "children" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 109,
+    "domain": "sports",
+    "query": "xe leo núi khung 17 inch",
+    "expected_category": "bicycle",
+    "expected_attributes": { "terrain": "mountain", "frame_size": "17 inch" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 110,
+    "domain": "sports",
+    "query": "tạ tay 10kg",
+    "expected_category": "dumbbell",
+    "expected_attributes": { "weight": "10kg" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 111,
+    "domain": "sports",
+    "query": "dumbbell cho nữ tập tại nhà",
+    "expected_category": "dumbbell",
+    "expected_attributes": { "weight": "3kg" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 112,
+    "domain": "sports",
+    "query": "máy chạy bộ gấp gọn",
+    "expected_category": "treadmill",
+    "expected_attributes": { "folding": true },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 113,
+    "domain": "sports",
+    "query": "treadmill cho căn hộ nhỏ",
+    "expected_category": "treadmill",
+    "expected_attributes": { "folding": true },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 114,
+    "domain": "pet",
+    "query": "thức ăn mèo vị cá cho mèo con",
+    "expected_category": "cat_food",
+    "expected_attributes": { "flavor": "fish", "age": "kitten" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 115,
+    "domain": "pet",
+    "query": "hạt cho mèo già dễ tiêu",
+    "expected_category": "cat_food",
+    "expected_attributes": { "age": "senior" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 116,
+    "domain": "pet",
+    "query": "cat food vị gà",
+    "expected_category": "cat_food",
+    "expected_attributes": { "flavor": "chicken" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 117,
+    "domain": "pet",
+    "query": "ổ nằm chó size L",
+    "expected_category": "dog_bed",
+    "expected_attributes": { "size": "L" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 118,
+    "domain": "pet",
+    "query": "giường cho corgi",
+    "expected_category": "dog_bed",
+    "expected_attributes": { "size": "M" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 119,
+    "domain": "pet",
+    "query": "nệm chó cỡ lớn",
+    "expected_category": "dog_bed",
+    "expected_attributes": { "size": "XL" },
+    "query_type": "semantic",
+    "difficulty": "easy"
+  },
+  {
+    "id": 120,
+    "domain": "tech",
+    "query": "máy tính cho lập trình viên AI",
+    "expected_category": "laptop",
+    "expected_attributes": { "usage": "AI" },
+    "query_type": "semantic",
+    "difficulty": "hard"
+  },
+  {
+    "id": 121,
+    "domain": "tech",
+    "query": "laptop Ryzen 9 RAM 32GB",
+    "expected_category": "laptop",
+    "expected_attributes": { "cpu": "AMD Ryzen 9", "ram": "32GB" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 122,
+    "domain": "tech",
+    "query": "máy nhẹ dưới 1.5kg",
+    "expected_category": "laptop",
+    "expected_attributes": { "weight": "under 1.5kg" },
+    "query_type": "multi_attribute",
+    "difficulty": "medium"
+  },
+  {
+    "id": 123,
+    "domain": "tech",
+    "query": "laptop nào compile code nhanh",
+    "expected_category": "laptop",
+    "expected_attributes": { "usage": "programming" },
+    "query_type": "conversational",
+    "difficulty": "hard"
+  },
+  {
+    "id": 124,
+    "domain": "tech",
+    "query": "điện thoại cho bố mẹ dễ nhìn",
+    "expected_category": "smartphone",
+    "expected_attributes": { "screen_size": "large", "target_user": "elderly" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 125,
+    "domain": "tech",
+    "query": "máy pin khỏe xem Youtube cả ngày",
+    "expected_category": "smartphone",
+    "expected_attributes": { "battery": "high" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 126,
+    "domain": "tech",
+    "query": "smartphone gaming 144Hz",
+    "expected_category": "smartphone",
+    "expected_attributes": { "target_user": "gamer", "refresh_rate": "144Hz" },
+    "query_type": "multi_attribute",
+    "difficulty": "medium"
+  },
+  {
+    "id": 127,
+    "domain": "tech",
+    "query": "điện thoại màn nhỏ dễ cầm",
+    "expected_category": "smartphone",
+    "expected_attributes": { "screen_size": "small" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 128,
+    "domain": "tech",
+    "query": "tai nghe để học online",
+    "expected_category": "headphone",
+    "expected_attributes": { "usage": "study" },
+    "query_type": "semantic",
+    "difficulty": "easy"
+  },
+  {
+    "id": 129,
+    "domain": "tech",
+    "query": "headphone bluetooth chống ồn",
+    "expected_category": "headphone",
+    "expected_attributes": { "wireless": true, "noise_canceling": true },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 130,
+    "domain": "tech",
+    "query": "tai nghe nào họp zoom rõ mic",
+    "expected_category": "headphone",
+    "expected_attributes": { "usage": "office" },
+    "query_type": "conversational",
+    "difficulty": "hard"
+  },
+  {
+    "id": 131,
+    "domain": "tech",
+    "query": "keyboard layout TKL",
+    "expected_category": "keyboard",
+    "expected_attributes": { "layout": "TKL" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 132,
+    "domain": "tech",
+    "query": "bàn phím cho coder ban đêm",
+    "expected_category": "keyboard",
+    "expected_attributes": { "switch_type": "brown" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 133,
+    "domain": "tech",
+    "query": "mouse wireless DPI 16000",
+    "expected_category": "mouse",
+    "expected_attributes": { "wireless": true, "dpi": "16000" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 134,
+    "domain": "tech",
+    "query": "chuột cho FPS",
+    "expected_category": "mouse",
+    "expected_attributes": { "usage": "FPS gaming" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 135,
+    "domain": "tech",
+    "query": "monitor văn phòng chống mỏi mắt",
+    "expected_category": "monitor",
+    "expected_attributes": { "refresh_rate": "75Hz" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 136,
+    "domain": "tech",
+    "query": "màn hình 24 inch Full HD",
+    "expected_category": "monitor",
+    "expected_attributes": { "size": "24 inch", "resolution": "Full HD" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 137,
+    "domain": "tech",
+    "query": "camera livestream bán hàng",
+    "expected_category": "camera",
+    "expected_attributes": { "usage": "streaming" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 138,
+    "domain": "tech",
+    "query": "máy ảnh du lịch quay 4K",
+    "expected_category": "camera",
+    "expected_attributes": { "usage": "travel", "resolution": "4K" },
+    "query_type": "multi_attribute",
+    "difficulty": "medium"
+  },
+  {
+    "id": 139,
+    "domain": "tech",
+    "query": "đồng hồ chạy bộ chống nước",
+    "expected_category": "smartwatch",
+    "expected_attributes": { "sport_mode": "running", "waterproof": true },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 140,
+    "domain": "tech",
+    "query": "smartwatch cho dân văn phòng",
+    "expected_category": "smartwatch",
+    "expected_attributes": { "battery": "long" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 141,
+    "domain": "fashion",
+    "query": "giày trắng đi học",
+    "expected_category": "shoe",
+    "expected_attributes": { "color": "trắng", "usage": "school" },
+    "query_type": "semantic",
+    "difficulty": "easy"
+  },
+  {
+    "id": 142,
+    "domain": "fashion",
+    "query": "shoe nữ size 37 màu hồng",
+    "expected_category": "shoe",
+    "expected_attributes": {
+      "gender": "female",
+      "size": "37",
+      "color": "hồng"
+    },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 143,
+    "domain": "fashion",
+    "query": "áo thun đen cotton form rộng",
+    "expected_category": "tshirt",
+    "expected_attributes": {
+      "color": "đen",
+      "material": "cotton",
+      "size": "oversize"
+    },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 144,
+    "domain": "fashion",
+    "query": "áo mặc nhà mềm mát",
+    "expected_category": "tshirt",
+    "expected_attributes": { "material": "cotton" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 145,
+    "domain": "fashion",
+    "query": "jeans nam size 32 straight",
+    "expected_category": "jeans",
+    "expected_attributes": {
+      "gender": "male",
+      "waist_size": "32",
+      "fit_type": "straight"
+    },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 146,
+    "domain": "fashion",
+    "query": "quần bò cho người thích rộng rãi",
+    "expected_category": "jeans",
+    "expected_attributes": { "fit_type": "relaxed" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 147,
+    "domain": "fashion",
+    "query": "jacket mặc đi phượt trời mưa",
+    "expected_category": "jacket",
+    "expected_attributes": { "usage": "travel", "waterproof": true },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 148,
+    "domain": "fashion",
+    "query": "áo khoác jean",
+    "expected_category": "jacket",
+    "expected_attributes": { "material": "denim" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 149,
+    "domain": "fashion",
+    "query": "balo 30L leo núi",
+    "expected_category": "backpack",
+    "expected_attributes": { "capacity": "30L", "usage": "hiking" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 150,
+    "domain": "fashion",
+    "query": "backpack chống nước cho biker",
+    "expected_category": "backpack",
+    "expected_attributes": { "waterproof": true, "usage": "motorbike" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 151,
+    "domain": "home_appliance",
+    "query": "tủ lạnh mini cho phòng trọ",
+    "expected_category": "refrigerator",
+    "expected_attributes": { "capacity": "90L" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 152,
+    "domain": "home_appliance",
+    "query": "fridge inverter 500L",
+    "expected_category": "refrigerator",
+    "expected_attributes": { "inverter": true, "capacity": "500L" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 153,
+    "domain": "home_appliance",
+    "query": "máy giặt cho nhà có em bé",
+    "expected_category": "washing_machine",
+    "expected_attributes": { "load_size": "10kg" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 154,
+    "domain": "home_appliance",
+    "query": "washing machine inverter 8kg",
+    "expected_category": "washing_machine",
+    "expected_attributes": { "inverter": true, "load_size": "8kg" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 155,
+    "domain": "home_appliance",
+    "query": "điều hòa cho phòng nhỏ tiết kiệm điện",
+    "expected_category": "air_conditioner",
+    "expected_attributes": { "horsepower": "1HP", "inverter": true },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 156,
+    "domain": "home_appliance",
+    "query": "air conditioner 2HP",
+    "expected_category": "air_conditioner",
+    "expected_attributes": { "horsepower": "2HP" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 157,
+    "domain": "home_appliance",
+    "query": "máy hút bụi robot không dây",
+    "expected_category": "vacuum_cleaner",
+    "expected_attributes": { "cordless": true },
+    "query_type": "ambiguous",
+    "difficulty": "medium"
+  },
+  {
+    "id": 158,
+    "domain": "home_appliance",
+    "query": "vacuum cleaner dùng cho chung cư",
+    "expected_category": "vacuum_cleaner",
+    "expected_attributes": { "cordless": true },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 159,
+    "domain": "home_appliance",
+    "query": "nồi cơm nhỏ cho 2 người",
+    "expected_category": "rice_cooker",
+    "expected_attributes": { "capacity": "1L" },
+    "query_type": "semantic",
+    "difficulty": "easy"
+  },
+  {
+    "id": 160,
+    "domain": "home_appliance",
+    "query": "rice cooker 1.2L",
+    "expected_category": "rice_cooker",
+    "expected_attributes": { "capacity": "1.2L" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 161,
+    "domain": "furniture",
+    "query": "ghế mesh ergonomic",
+    "expected_category": "office_chair",
+    "expected_attributes": { "material": "mesh", "ergonomic": true },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 162,
+    "domain": "furniture",
+    "query": "ghế cho coder ngồi nhiều",
+    "expected_category": "office_chair",
+    "expected_attributes": { "ergonomic": true, "usage": "office" },
+    "query_type": "semantic",
+    "difficulty": "hard"
+  },
+  {
+    "id": 163,
+    "domain": "furniture",
+    "query": "desk nâng hạ cho setup dual monitor",
+    "expected_category": "desk",
+    "expected_attributes": { "adjustable_height": true },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 164,
+    "domain": "furniture",
+    "query": "bàn mặt gỗ tối giản",
+    "expected_category": "desk",
+    "expected_attributes": { "material": "wood" },
+    "query_type": "semantic",
+    "difficulty": "easy"
+  },
+  {
+    "id": 165,
+    "domain": "beauty",
+    "query": "skincare cho da hỗn hợp",
+    "expected_category": "skincare",
+    "expected_attributes": { "skin_type": "combination" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 166,
+    "domain": "beauty",
+    "query": "bộ dưỡng trắng da",
+    "expected_category": "skincare",
+    "expected_attributes": { "usage": "brightening" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 167,
+    "domain": "beauty",
+    "query": "perfume mùi citrus cho hè",
+    "expected_category": "perfume",
+    "expected_attributes": { "scent_type": "citrus" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 168,
+    "domain": "beauty",
+    "query": "nước hoa nữ floral",
+    "expected_category": "perfume",
+    "expected_attributes": { "gender": "female", "scent_type": "floral" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 169,
+    "domain": "beauty",
+    "query": "dầu gội cho tóc xoăn",
+    "expected_category": "shampoo",
+    "expected_attributes": { "hair_type": "curly" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 170,
+    "domain": "beauty",
+    "query": "shampoo cho tóc khô xơ",
+    "expected_category": "shampoo",
+    "expected_attributes": { "hair_type": "dry" },
+    "query_type": "semantic",
+    "difficulty": "easy"
+  },
+  {
+    "id": 171,
+    "domain": "sports",
+    "query": "xe đạp road cho người mới",
+    "expected_category": "bicycle",
+    "expected_attributes": { "terrain": "road", "target_user": "beginner" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 172,
+    "domain": "sports",
+    "query": "bicycle khung 15 inch cho nữ",
+    "expected_category": "bicycle",
+    "expected_attributes": { "frame_size": "15 inch", "target_user": "female" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 173,
+    "domain": "sports",
+    "query": "tạ tay 5kg tập tay",
+    "expected_category": "dumbbell",
+    "expected_attributes": { "weight": "5kg" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 174,
+    "domain": "sports",
+    "query": "dumbbell nhẹ cho người mới",
+    "expected_category": "dumbbell",
+    "expected_attributes": { "weight": "2kg" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 175,
+    "domain": "sports",
+    "query": "máy chạy bộ gấp được cho phòng nhỏ",
+    "expected_category": "treadmill",
+    "expected_attributes": { "folding": true },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 176,
+    "domain": "sports",
+    "query": "treadmill folding",
+    "expected_category": "treadmill",
+    "expected_attributes": { "folding": true },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 177,
+    "domain": "pet",
+    "query": "cat food cho mèo trưởng thành vị bò",
+    "expected_category": "cat_food",
+    "expected_attributes": { "age": "adult", "flavor": "beef" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 178,
+    "domain": "pet",
+    "query": "đồ ăn cho mèo kén ăn",
+    "expected_category": "cat_food",
+    "expected_attributes": { "flavor": "tuna" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 179,
+    "domain": "pet",
+    "query": "dog bed size S",
+    "expected_category": "dog_bed",
+    "expected_attributes": { "size": "S" },
+    "query_type": "clear",
+    "difficulty": "easy"
+  },
+  {
+    "id": 180,
+    "domain": "pet",
+    "query": "ổ nằm cho chó nhỏ",
+    "expected_category": "dog_bed",
+    "expected_attributes": { "size": "S" },
+    "query_type": "semantic",
+    "difficulty": "easy"
+  },
+  {
+    "id": 181,
+    "domain": "tech",
+    "query": "máy cho sinh viên IT",
+    "expected_category": "laptop",
+    "expected_attributes": { "usage": "programming" },
+    "query_type": "ambiguous",
+    "difficulty": "hard"
+  },
+  {
+    "id": 182,
+    "domain": "tech",
+    "query": "điện thoại cho người hay đi công tác",
+    "expected_category": "smartphone",
+    "expected_attributes": { "battery": "high" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 183,
+    "domain": "tech",
+    "query": "tai nghe văn phòng chống ồn",
+    "expected_category": "headphone",
+    "expected_attributes": { "usage": "office", "noise_canceling": true },
+    "query_type": "multi_attribute",
+    "difficulty": "medium"
+  },
+  {
+    "id": 184,
+    "domain": "tech",
+    "query": "bàn phím cho game FPS",
+    "expected_category": "keyboard",
+    "expected_attributes": { "switch_type": "red" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 185,
+    "domain": "tech",
+    "query": "chuột làm việc không cần dây",
+    "expected_category": "mouse",
+    "expected_attributes": { "wireless": true, "usage": "office" },
+    "query_type": "semantic",
+    "difficulty": "easy"
+  },
+  {
+    "id": 186,
+    "domain": "tech",
+    "query": "màn hình xem phim 4K",
+    "expected_category": "monitor",
+    "expected_attributes": { "resolution": "4K" },
+    "query_type": "semantic",
+    "difficulty": "easy"
+  },
+  {
+    "id": 187,
+    "domain": "tech",
+    "query": "camera cho travel blogger",
+    "expected_category": "camera",
+    "expected_attributes": { "usage": "travel" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 188,
+    "domain": "tech",
+    "query": "đồng hồ thông minh cho bơi lội",
+    "expected_category": "smartwatch",
+    "expected_attributes": { "sport_mode": "swimming", "waterproof": true },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 189,
+    "domain": "fashion",
+    "query": "giày cho người chạy marathon",
+    "expected_category": "shoe",
+    "expected_attributes": { "usage": "running" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 190,
+    "domain": "fashion",
+    "query": "áo thun mặc đi biển",
+    "expected_category": "tshirt",
+    "expected_attributes": { "material": "cotton" },
+    "query_type": "semantic",
+    "difficulty": "easy"
+  },
+  {
+    "id": 191,
+    "domain": "fashion",
+    "query": "jeans nữ skinny",
+    "expected_category": "jeans",
+    "expected_attributes": { "gender": "female", "fit_type": "skinny" },
+    "query_type": "multi_attribute",
+    "difficulty": "easy"
+  },
+  {
+    "id": 192,
+    "domain": "fashion",
+    "query": "áo khoác cho biker",
+    "expected_category": "jacket",
+    "expected_attributes": { "usage": "motorbike" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 193,
+    "domain": "fashion",
+    "query": "balo cho sinh viên",
+    "expected_category": "backpack",
+    "expected_attributes": { "usage": "school" },
+    "query_type": "semantic",
+    "difficulty": "easy"
+  },
+  {
+    "id": 194,
+    "domain": "home_appliance",
+    "query": "tủ lạnh cho căn hộ mini",
+    "expected_category": "refrigerator",
+    "expected_attributes": { "capacity": "150L" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 195,
+    "domain": "home_appliance",
+    "query": "máy giặt ít tốn điện",
+    "expected_category": "washing_machine",
+    "expected_attributes": { "inverter": true },
+    "query_type": "semantic",
+    "difficulty": "easy"
+  },
+  {
+    "id": 196,
+    "domain": "home_appliance",
+    "query": "điều hòa inverter cho mùa hè",
+    "expected_category": "air_conditioner",
+    "expected_attributes": { "inverter": true },
+    "query_type": "semantic",
+    "difficulty": "easy"
+  },
+  {
+    "id": 197,
+    "domain": "furniture",
+    "query": "ghế làm việc cho setup ở nhà",
+    "expected_category": "office_chair",
+    "expected_attributes": { "usage": "office" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 198,
+    "domain": "beauty",
+    "query": "skincare cho da dễ kích ứng",
+    "expected_category": "skincare",
+    "expected_attributes": { "skin_type": "sensitive" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 199,
+    "domain": "sports",
+    "query": "xe đạp cho dân commuting",
+    "expected_category": "bicycle",
+    "expected_attributes": { "terrain": "urban" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  },
+  {
+    "id": 200,
+    "domain": "pet",
+    "query": "đệm cho chó husky",
+    "expected_category": "dog_bed",
+    "expected_attributes": { "size": "XL" },
+    "query_type": "semantic",
+    "difficulty": "medium"
+  }
+]
