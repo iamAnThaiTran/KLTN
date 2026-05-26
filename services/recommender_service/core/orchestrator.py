@@ -830,6 +830,13 @@ Think like:
 - concrete categories
 - common ecommerce keywords
 - highly purchasable entities
+- popular brands
+- price-oriented shopping terms
+- common ecommerce filters like:
+  - brand
+  - price range
+  - budget
+  - usage
 
 --------------------------------------------------
 
