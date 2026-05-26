@@ -84,6 +84,7 @@ class AnalyzeProcessor:
                     user_input=user_input,
                     conversation_state=conversation_state
                 )
+                logger.info(f"[Job {job_id}] LLM reconstruction result: {result_dict}")
                 merged_intent = result_dict["intent"]
                 intent_type = result_dict.get("intent_type", "specific")
                 user_input_to_process = merged_intent
@@ -111,6 +112,8 @@ class AnalyzeProcessor:
                 conversation_state["detected_intent"] = {
                     "intent_type": intent_type
                 }
+                
+                
             
             logger.info(f"[Job {job_id}] Processing input: '{user_input}' → '{user_input_to_process}' (Intent type: {conversation_state['detected_intent']['intent_type']})")
             logger.info(f"[Job {job_id}] Current category: {conversation_state.get('category')}, extracted: {conversation_state.get('extracted')}")

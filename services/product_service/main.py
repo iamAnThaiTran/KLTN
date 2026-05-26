@@ -1385,58 +1385,6 @@ async def save_sku_attributes(sku_code: str, body: Dict[str, Any] = Body(...)):
 async def query_products_by_category(
     body: Dict[str, Any] = Body(...)
 ):
-    """
-    Query products by category_id + optional attributes/filters
-    
-    ✅ STRATEGY: Return products with attributes, let Recommender rank
-    
-    Called by Recommender Service to get products for a category.
-    - Applies STRICT filtering: brand, price range only (DB-level)
-    - Returns ALL matching products + their attributes
-    - Recommender Service ranks by attribute match score
-    - UI always has products to display (even if not exact attribute match)
-    
-    Request body:
-    {
-        "category_id": 5,
-        "attributes": {
-            "brand": "Nike",
-            "color": "đen",              ← Not filtered in DB
-            "size": "42",                ← Not filtered in DB
-            "price_min": 1000000,        ← Filtered in DB
-            "price_max": 5000000,        ← Filtered in DB
-            ...
-        },
-        "limit": 50
-    }
-    
-    Returns:
-    {
-        "products": [
-            {
-                "id": 123,
-                "product_id": "276183351",
-                "spid": "276183355",
-                "title": "Giày thể thao nam...",
-                "brand": "Nike",
-                "price": 620000,
-                "original_price": 1000000,
-                "stock": 10,
-                "thumbnail": "https://...",
-                "category_id": 5,
-                "rating": 4.5,
-                "search_count": 150,
-                "attributes": [           ← ✅ For Recommender to rank
-                    {"name": "color", "value": "đen"},
-                    {"name": "size", "value": "42"},
-                    {"name": "material", "value": "da"}
-                ],
-                ...
-            },
-            ...
-        ]
-    }
-    """
     db = SessionLocal()
     try:
         from sqlalchemy import text as sql_text
@@ -1449,87 +1397,29 @@ async def query_products_by_category(
             logger.warning("❌ category_id is required")
             raise HTTPException(status_code=400, detail="category_id is required")
         
-        # Verify category exists
         category = db.query(Category).filter(Category.id == category_id).first()
         if not category:
             logger.warning(f"❌ Category {category_id} not found")
-            return {"products": []}  # Return empty list - will trigger crawl
+            return {"products": []}
         
         logger.info(f"🔍 Querying products: category={category.name} (id={category_id}), attributes={attributes}")
         
-        # Identify which attributes are dynamic (stored in sku_attributes table)
-        # vs fixed (brand, price, etc.) - for logging purposes
-        dynamic_attribute_filters = {}
-        
-        # Start with products in this category
-        query = db.query(Product, SKU).join(
+        results = db.query(Product, SKU).join(
             SKU, Product.id == SKU.product_id
         ).filter(
             Product.category_id == category_id
-        )
-        
-        # Apply attribute filters
-        
-        # Filter by brand if provided
-        if "brand" in attributes and attributes["brand"]:
-            brand_filter = attributes["brand"]
-            if isinstance(brand_filter, list):
-                query = query.filter(Product.brand.in_(brand_filter))
-            else:
-                query = query.filter(Product.brand == brand_filter)
-            logger.info(f"  Applied brand filter: {brand_filter}")
-        
-        # Filter by price range
-        price_min = attributes.get("price_min")
-        price_max = attributes.get("price_max")
-        
-        # Handle alternative price keys: 'gia', 'price', 'price_range'
-        if not price_min and not price_max:
-            for price_key in ["gia", "price", "price_range"]:
-                if price_key in attributes:
-                    price_value = attributes[price_key]
-                    if isinstance(price_value, list) and price_value:
-                        if isinstance(price_value[0], dict):
-                            price_min = price_value[0].get("min", price_min)
-                            price_max = price_value[0].get("max", price_max)
-                    elif isinstance(price_value, dict):
-                        price_min = price_value.get("min", price_min)
-                        price_max = price_value.get("max", price_max)
-        
-        if price_min is not None or price_max is not None:
-            if price_min and price_max:
-                query = query.filter(SKU.price.between(price_min, price_max))
-                logger.info(f"  Applied price filter: {price_min}-{price_max}")
-            elif price_min:
-                query = query.filter(SKU.price >= price_min)
-                logger.info(f"  Applied min price filter: >= {price_min}")
-            elif price_max:
-                query = query.filter(SKU.price <= price_max)
-                logger.info(f"  Applied max price filter: <= {price_max}")
-        
-        # Collect dynamic attribute filters for logging (not for DB filtering)
-        # Recommender Service will use these to rank products by attribute match
-        for attr_name, attr_value in attributes.items():
-            if attr_name not in ["brand", "price_min", "price_max", "gia", "price", "price_range"] and attr_value:
-                dynamic_attribute_filters[attr_name] = attr_value
-        
-        # Execute query and get results (only apply brand/price filters)
-        # Don't filter by other attributes here - let Recommender Service rank by match score
-        results = query.order_by(SKU.id).limit(limit).all()
+        ).order_by(SKU.rating.desc()).limit(limit).all()
         
         if not results:
-            logger.info(f"✅ No products found in DB for category {category.name}")
-            return {"products": []}  # Return empty list - will trigger crawl
+            logger.info(f"No products found in DB for category {category.name}")
+            return {"products": []}
         
-        # Extract SKU IDs to fetch attributes
         sku_ids = [sku.id for product, sku in results]
         
-        # Fetch all attributes for these SKUs
         sku_attributes_raw = db.query(SKUAttribute).filter(
             SKUAttribute.sku_id.in_(sku_ids)
         ).all()
         
-        # Organize attributes by SKU ID
         sku_attrs_map = {}
         for attr in sku_attributes_raw:
             if attr.sku_id not in sku_attrs_map:
@@ -1539,13 +1429,8 @@ async def query_products_by_category(
                 "value": attr.attribute_value
             })
         
-        # Format all results with attributes
-        # Recommender Service will handle ranking based on requested attributes
         products_list = []
         for product, sku in results:
-            # Get attributes for this SKU
-            attrs = sku_attrs_map.get(sku.id, [])
-            
             products_list.append({
                 "id": product.id,
                 "product_id": product.tiki_product_id,
@@ -1562,14 +1447,10 @@ async def query_products_by_category(
                 "source": product.source,
                 "rating": float(sku.rating) if sku.rating else 0,
                 "search_count": sku.search_count or 0,
-                "attributes": attrs  # ✅ Include SKU attributes for Recommender to rank
+                "attributes": sku_attrs_map.get(sku.id, [])
             })
         
-        # Log requested attributes for reference (Recommender will rank by these)
-        if dynamic_attribute_filters:
-            logger.info(f"  📊 Requested attribute filters (for Recommender ranking): {dynamic_attribute_filters}")
-        
-        logger.info(f"✅ Found {len(products_list)} products in DB with attributes (Recommender will rank by requested filters)")
+        logger.info(f"✅ Found {len(products_list)} products → Recommender will rank by: {list(attributes.keys())}")
         return {"products": products_list}
     
     except HTTPException:
@@ -1579,7 +1460,6 @@ async def query_products_by_category(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
-
 # ============================================================================
 # Recommendations APIs
 # ============================================================================

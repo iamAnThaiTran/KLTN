@@ -42,13 +42,26 @@ KNOWN_CATEGORIES = {
     'giày thể thao': 'shoe',
     'áo': 'clothing',
     'áo thun': 'clothing',
+    'áo sơ mi': 'clothing',
     'điện thoại': 'phone',
     'máy tính': 'computer',
     'bột giặt': 'detergent',
     'sơ mi': 'clothing',
     'quần': 'clothing',
     'tai nghe': 'headphones',
+    'tai nghe bluetooth': 'headphones',
     'đồng hồ': 'watch',
+    'máy lọc không khí': 'air_purifier',
+    'robot hút bụi': 'robot_vacuum',
+    'nồi chiên không dầu': 'air_fryer',
+    'máy pha cà phê': 'coffee_maker',
+    'bàn phím cơ': 'mechanical_keyboard',
+    'kem chống nắng': 'sunscreen',
+    'sữa rửa mặt': 'facial_cleanser',
+    'ghế gaming': 'gaming_chair',
+    'ghế công thái học': 'ergonomic_chair',
+    'ipad': 'tablet',
+    'laptop gaming': 'gaming_laptop',
 }
 
 class ContextAnalyzer:
@@ -86,7 +99,7 @@ class ContextAnalyzer:
                 ],
                 model="gpt-4o-mini",
                 temperature=0.3,
-                max_tokens=300
+                max_tokens=3000
             )
             
             # call_openai() already returns the string content directly
@@ -286,22 +299,28 @@ class ContextAnalyzer:
                         "new_category": brand
                     }
         
-        # 🚫 Pattern 2: Unknown brand forced into context
-        # If we're unsure → prefer treating as category change (safer)
+        # 🚫 Pattern 2: Unknown brand forced into context (CONSERVATIVE CHECK ONLY)
+        # ⚠️ IMPORTANT: This check should be VERY conservative to avoid overriding valid LLM decisions
         input_lower = user_input.lower().strip()
-        if input_lower not in KNOWN_BRANDS and self._classify_input(user_input) == 'unknown':
-            # Input is unknown and small → might be new brand or category
-            # Be conservative: treat as potential category change
-            if result.get("category_changed") == False and current_category:
-                logger.warning(f"[Validate] ⚠️ Unknown term '{input_lower}' merged with '{current_category}'")
-                # Check if it should be category change instead
-                if len(input_lower.split()) == 1 and len(input_lower) > 2:
-                    # Looks like new brand/term → mark as category change
-                    return {
-                        "intent": user_input,
-                        "category_changed": True,
-                        "new_category": user_input
-                    }
+        
+        # ONLY override if ALL conditions met:
+        # 1. Input is truly unknown (not a known brand, color, size, etc.)
+        # 2. Input is a single short word (likely a brand/term)
+        # 3. LLM said category_changed=False (merge)
+        # 4. There's a current category context
+        if (result.get("category_changed") == False 
+            and current_category
+            and input_lower not in KNOWN_BRANDS 
+            and self._classify_input(user_input) == 'unknown'):
+            
+            # Only treat as category change if it looks like a standalone brand/term
+            words = input_lower.split()
+            if len(words) == 1 and 2 < len(input_lower) < 20:  # Realistic brand/term length
+                # Soft warning, not override
+                logger.warning(f"[Validate] ⚠️ Unknown term '{input_lower}' in category '{current_category}' (LLM merged but term is unknown)")
+                # Trust LLM's decision (category_changed=False) - only log the uncertainty
+                # Don't force override unless very confident
+                # This preserves LLM's semantic understanding
         
         # ✅ Looks good
         return result
@@ -323,7 +342,7 @@ class ContextAnalyzer:
         try:
             # Try to parse as JSON
             data = json.loads(response_text)
-            
+            logger.info(f"[ContextAnalyzer] LLM JSON response: {data}")
             # Validate required fields
             if "intent" not in data:
                 raise ValueError("Missing 'intent' field")
@@ -331,8 +350,19 @@ class ContextAnalyzer:
             category_changed = data.get("category_changed", False)
             new_category = data.get("new_category", None)
             
-            # Infer intent_type if not provided by LLM
-            intent_type = data.get("intent_type") or self._infer_intent_type(category_changed, new_category)
+            # ⚠️ CRITICAL: Handle field name mismatch
+            # Prompt outputs "query_type", but we expect "intent_type"
+            # Try both names for compatibility
+            intent_type = data.get("intent_type") or data.get("query_type")
+            
+            # Only infer if LLM didn't provide it (true fallback, not override)
+            if not intent_type:
+                logger.warning(f"[ContextAnalyzer] ⚠️ LLM did not provide intent_type/query_type, inferring from category_changed")
+                intent_type = self._infer_intent_type(category_changed, new_category)
+            
+            # 🔧 NORMALIZE to lowercase to avoid case sensitivity issues downstream
+            # LLM returns "SPECIFIC"/"ABSTRACT" but orchestrator expects "specific"/"abstract"
+            intent_type = str(intent_type).strip().lower() if intent_type else "specific"
             
             return {
                 "intent": data.get("intent", response_text).strip(),
@@ -352,7 +382,15 @@ class ContextAnalyzer:
                     data = json.loads(json_str)
                     category_changed = data.get("category_changed", False)
                     new_category = data.get("new_category", None)
-                    intent_type = data.get("intent_type") or self._infer_intent_type(category_changed, new_category)
+                    # ⚠️ CRITICAL: Handle field name mismatch (query_type vs intent_type)
+                    intent_type = data.get("intent_type") or data.get("query_type")
+                    if not intent_type:
+                        logger.warning(f"[ContextAnalyzer] ⚠️ Fallback parse: inferring intent_type")
+                        intent_type = self._infer_intent_type(category_changed, new_category)
+                    
+                    # 🔧 NORMALIZE to lowercase to avoid case sensitivity issues downstream
+                    intent_type = str(intent_type).strip().lower() if intent_type else "specific"
+                    
                     return {
                         "intent": data.get("intent", response_text).strip(),
                         "category_changed": category_changed,
@@ -375,13 +413,25 @@ class ContextAnalyzer:
         """
         Infer intent_type (specific | abstract) from context.
         
-        Logic:
-        - If category_changed=True → "abstract" (user is exploring new category)
-        - If category_changed=False → "specific" (user refining current category)
+        ⚠️ IMPORTANT: This is a FALLBACK ONLY when LLM doesn't provide classification.
+        The logic here is imperfect because it cannot understand semantic meaning.
+        
+        Fallback logic:
+        - If category_changed=True, assume user is exploring → "abstract"
+        - Otherwise → "specific" (most common case)
+        
+        NOTE: This can produce wrong results (e.g., user switches from "áo" to "robot hút bụi")
+        That switch is SPECIFIC, not ABSTRACT. But this function can't know that.
+        Real classification should come from LLM's semantic analysis.
         """
         if category_changed:
-            return "abstract"  # User exploring new category
-        return "specific"  # User refining current category
+            # Conservative fallback: category switch might indicate exploration
+            # But this is NOT guaranteed (e.g., "áo" -> "robot hút bụi" is still SPECIFIC)
+            logger.debug(f"[ContextAnalyzer] Fallback: category_changed=True, assuming abstract")
+            return "abstract"
+        
+        # Default fallback: most intents are specific (user knows what they want)
+        return "specific"
     
     def _infer_category_from_history(self, search_history: list) -> str:
         """
@@ -430,20 +480,19 @@ class ContextAnalyzer:
                 category_text = "Category: Unknown (first request)"
         
         prompt = f"""
-You are a Vietnamese ecommerce shopping intent analyzer.
+You are a Vietnamese ecommerce conversational intent merger.
 
-Your job:
-Reconstruct the user's shopping intent using:
-- previous conversation context
-- latest user input
+Your task:
+Merge the latest user input with previous shopping context
+to reconstruct the user's CURRENT shopping intent.
 
-The system supports ONLY TWO query types:
+The system supports ONLY TWO intent types:
 
 - SPECIFIC
 - ABSTRACT
 
 ==================================================
-CONVERSATION STATE
+CONVERSATION CONTEXT
 ==================================================
 
 Search history:
@@ -454,151 +503,242 @@ Search history:
 {category_text}
 
 ==================================================
-NEW USER INPUT
+LATEST USER INPUT
 ==================================================
 
 "{user_input}"
 
 ==================================================
-CORE DEFINITIONS
+CORE PRINCIPLE
 ==================================================
 
---------------------------------------------------
+The MOST IMPORTANT rule:
+
+If the reconstructed intent contains ANY purchasable
+commercial product, product category, brand,
+or ecommerce item,
+the intent MUST be classified as SPECIFIC.
+
+This rule has ABSOLUTE PRIORITY over:
+- mood
+- vibe
+- lifestyle
+- activity
+- purpose
+- personality
+- aesthetic
+- adjectives
+- specs
+- attributes
+
+==================================================
 SPECIFIC
---------------------------------------------------
+==================================================
 
-A query is SPECIFIC ONLY IF it contains
-a CONCRETE PURCHASABLE PRODUCT ENTITY.
+A reconstructed intent is SPECIFIC if it contains
+ANY purchasable product entity.
 
-This includes:
-- products
+Product entities include:
 - product categories
+- commercial goods
+- electronics
+- appliances
+- fashion items
+- beauty products
+- furniture
+- household items
 - brands
-- concrete ecommerce items
-
-Examples:
-- laptop
-- tai nghe
-- iphone
-- áo nam
-- nike
-- bàn học
-- ghế gaming
-- đèn ngủ
+- model names
 
 IMPORTANT:
-Broad shopping queries are STILL SPECIFIC
-IF they contain a product noun.
+Product entities may contain MULTIPLE WORDS.
 
 Examples:
-- "áo cute"
-- "tai nghe gaming"
-- "đèn ngủ chill"
-- "ghế công thái học"
+- máy lọc không khí
+- robot hút bụi
+- nồi chiên không dầu
+- máy pha cà phê
+- bàn phím cơ
+- kem chống nắng
+- tai nghe bluetooth
+- ghế công thái học
 
---------------------------------------------------
+A SINGLE product entity is enough for SPECIFIC.
+
+Examples:
+- "giày"
+- "laptop"
+- "iphone"
+- "xiaomi"
+- "máy lọc không khí"
+
+→ ALL are SPECIFIC.
+
+Brands ALWAYS imply SPECIFIC.
+
+Examples:
+- nike
+- adidas
+- apple
+- samsung
+- xiaomi
+- asus
+
+Specs, purposes, adjectives, and attributes
+DO NOT change SPECIFIC into ABSTRACT.
+
+Examples:
+- "laptop gaming"
+- "tai nghe chống ồn"
+- "máy lọc không khí phòng 30m2"
+- "máy lọc không khí xiaomi hepa độ ồn thấp"
+- "ghế gaming cho dân IT"
+
+→ ALL remain SPECIFIC.
+
+==================================================
 ABSTRACT
---------------------------------------------------
+==================================================
 
-A query is ABSTRACT IF:
-- it does NOT contain a concrete product/category/brand
-AND
-- it expresses:
-  - emotion
-  - mood
-  - vibe
-  - lifestyle
-  - purpose
-  - personality
-  - aesthetic
-  - gift intent
-  - exploratory shopping intent
+ABSTRACT applies ONLY IF:
+- there is NO product entity
+- NO product category
+- NO brand
+- NO ecommerce item
+
+AND the intent expresses ONLY:
+- mood
+- emotion
+- vibe
+- lifestyle
+- activity
+- purpose
+- personality
+- gift intent
+- aesthetic
 
 Examples:
 - "tôi đang stress"
-- "quà cho bạn gái"
+- "cute"
 - "minimalist"
-- "cho dân IT"
-- "để học online"
+- "gaming"
 - "vibe hàn quốc"
+- "quà cho bạn gái"
+- "để học online"
 
 ==================================================
-CRITICAL HARD RULES
+INTENT MERGING RULES
 ==================================================
 
-1. Emotions are NOT products.
+The latest user input may:
 
-NOT purchasable:
-- stress
-- chill
-- productive
-- thư giãn
+1. refine previous intent
+2. add attributes/specs
+3. switch product category
+4. switch into abstract discovery intent
+
+--------------------------------------------------
+REFINEMENT
+--------------------------------------------------
+
+If the latest input logically modifies or extends
+the previous product search,
+merge them together.
+
+Examples:
+
+History: "áo nam"
+Input: "đen"
+
+→ merged:
+"áo nam màu đen"
 
 --------------------------------------------------
 
-2. Activities are NOT products.
+History: "laptop"
+Input: "gaming"
 
-Examples:
-- gaming
-- đi học
-- đi làm
-- camping
-
-These are ABSTRACT
-unless product noun exists.
+→ merged:
+"laptop gaming"
 
 --------------------------------------------------
 
-3. Aesthetics/adjectives are NOT products.
+History: "máy lọc không khí"
+Input: "xiaomi phòng 30m2"
+
+→ merged:
+"máy lọc không khí xiaomi phòng 30m2"
+
+--------------------------------------------------
+CATEGORY SWITCH
+--------------------------------------------------
+
+If the latest input introduces a completely different
+product/topic unrelated to the previous one,
+replace the old intent.
 
 Examples:
-- cute
-- pastel
-- minimalist
-- vintage
 
-These are ABSTRACT
-unless product noun exists.
+History: "áo nam"
+Input: "robot hút bụi"
+
+→ new intent:
+"robot hút bụi"
 
 --------------------------------------------------
 
-4. Purpose is NOT product.
+History: "laptop gaming"
+Input: "kem chống nắng"
+
+→ new intent:
+"kem chống nắng"
+
+--------------------------------------------------
+ABSTRACT SWITCH
+--------------------------------------------------
+
+If the latest input contains NO product entity
+and clearly expresses mood/lifestyle/emotion/purpose,
+switch to ABSTRACT.
 
 Examples:
-- để học online
-- để ngủ ngon
-- để thư giãn
 
-These are ABSTRACT
-unless product noun exists.
+History: "áo nam"
+Input: "tôi đang stress"
+
+→ ABSTRACT
+
+--------------------------------------------------
+
+History: "laptop"
+Input: "minimalist"
+
+→ ABSTRACT
 
 ==================================================
-CONVERSATION RECONSTRUCTION RULES
+CATEGORY CHANGE RULE
 ==================================================
 
-The latest input may:
+category_changed = true ONLY IF:
+- the user switches to a different product/topic
+- OR switches from SPECIFIC ↔ ABSTRACT
 
-1. refine previous search
-OR
-2. switch to another category
-OR
-3. switch into ABSTRACT discovery intent
+category_changed = false IF:
+- the latest input only refines/modifies existing intent
 
---------------------------------------------------
-Examples:
---------------------------------------------------
+When uncertain:
+prefer false.
 
-History:
-"áo nam"
+==================================================
+IMPORTANT EDGE CASES
+==================================================
 
-Input:
-"đen"
-
-→ refine previous search
+History: "máy lọc không khí"
+Input: "xiaomi hepa độ ồn thấp"
 
 Output:
 {{
-  "intent": "áo nam màu đen",
+  "intent": "máy lọc không khí xiaomi hepa độ ồn thấp",
   "query_type": "SPECIFIC",
   "category_changed": false,
   "new_category": null
@@ -606,17 +746,12 @@ Output:
 
 --------------------------------------------------
 
-History:
-"áo nam"
-
-Input:
-"nike"
-
-→ refine previous search
+History: ""
+Input: "máy lọc không khí xiaomi phòng 30m2"
 
 Output:
 {{
-  "intent": "áo nam nike",
+  "intent": "máy lọc không khí xiaomi phòng 30m2",
   "query_type": "SPECIFIC",
   "category_changed": false,
   "new_category": null
@@ -624,85 +759,8 @@ Output:
 
 --------------------------------------------------
 
-History:
-"áo nam"
-
-Input:
-"bột giặt"
-
-→ new category
-
-Output:
-{{
-  "intent": "bột giặt",
-  "query_type": "SPECIFIC",
-  "category_changed": true,
-  "new_category": "bột giặt"
-}}
-
---------------------------------------------------
-
-History:
-"áo nam"
-
-Input:
-"tôi đang stress"
-
-→ switch into abstract discovery
-
-Output:
-{{
-  "intent": "người dùng muốn giảm stress",
-  "query_type": "ABSTRACT",
-  "category_changed": true,
-  "new_category": null
-}}
-
---------------------------------------------------
-
-History:
-"áo"
-
-Input:
-"cute"
-
-→ refine existing product
-
-Output:
-{{
-  "intent": "áo cute",
-  "query_type": "SPECIFIC",
-  "category_changed": false,
-  "new_category": null
-}}
-
---------------------------------------------------
-
-History:
-""
-
-Input:
-"cute"
-
-→ no product noun exists
-
-Output:
-{{
-  "intent": "người dùng muốn phong cách dễ thương",
-  "query_type": "ABSTRACT",
-  "category_changed": false,
-  "new_category": null
-}}
-
---------------------------------------------------
-
-History:
-"laptop"
-
-Input:
-"gaming"
-
-→ refine existing product
+History: "laptop"
+Input: "gaming"
 
 Output:
 {{
@@ -714,13 +772,8 @@ Output:
 
 --------------------------------------------------
 
-History:
-""
-
-Input:
-"gaming"
-
-→ no product noun
+History: ""
+Input: "gaming"
 
 Output:
 {{
@@ -730,41 +783,18 @@ Output:
   "new_category": null
 }}
 
-==================================================
-DECISION PROCESS
-==================================================
+--------------------------------------------------
 
-STEP 1:
-Check whether the FINAL reconstructed intent
-contains a concrete product noun.
+History: "áo nam"
+Input: "robot hút bụi"
 
-IF YES:
-→ SPECIFIC
-
-IF NO:
-→ ABSTRACT
-
-==================================================
-CATEGORY CHANGE RULES
-==================================================
-
-category_changed refers ONLY to conversation flow.
-
-Examples:
-- áo → đen
-  = false
-
-- laptop → gaming
-  = false
-
-- áo → bột giặt
-  = true
-
-- laptop → tôi đang stress
-  = true
-
-When uncertain:
-prefer category_changed=true.
+Output:
+{{
+  "intent": "robot hút bụi",
+  "query_type": "SPECIFIC",
+  "category_changed": true,
+  "new_category": "robot hút bụi"
+}}
 
 ==================================================
 OUTPUT RULES
@@ -772,16 +802,18 @@ OUTPUT RULES
 
 Return ONLY valid JSON.
 
-Required format:
+Do NOT output markdown.
+Do NOT explain outside JSON.
+
+Format:
 
 {{
-  "intent": "reconstructed intent",
+  "intent": "merged/reconstructed intent",
   "query_type": "SPECIFIC or ABSTRACT",
   "category_changed": true or false,
   "new_category": "new category if changed, else null"
 }}
-""" 
-        
+"""
         return prompt
 
     def detect_first_query_intent_type(self, user_input: str) -> str:
@@ -802,10 +834,9 @@ Required format:
         import json
         
         prompt = f"""
-You are a Vietnamese ecommerce shopping intent classifier.
+You are a Vietnamese ecommerce intent classifier.
 
-Your task:
-Classify the user's FIRST shopping query into ONLY ONE type:
+Your task is to classify the user's FIRST query into EXACTLY ONE type:
 
 - SPECIFIC
 - ABSTRACT
@@ -817,178 +848,147 @@ USER QUERY
 "{user_input}"
 
 ==================================================
-CORE DEFINITIONS
+CORE CLASSIFICATION PRINCIPLE
 ==================================================
 
---------------------------------------------------
+The MOST IMPORTANT rule:
+
+If the query refers to ANY purchasable commercial product,
+product category, brand, or ecommerce item,
+the query MUST be classified as SPECIFIC.
+
+This rule has ABSOLUTE PRIORITY over:
+- mood
+- purpose
+- activity
+- lifestyle
+- aesthetic
+- personality
+- adjectives
+- specs
+- attributes
+- vague modifiers
+
+==================================================
 SPECIFIC
---------------------------------------------------
+==================================================
 
-A query is SPECIFIC ONLY IF it contains
-a CONCRETE PURCHASABLE PRODUCT ENTITY.
+A query is SPECIFIC if it contains ANY purchasable product entity.
 
-This includes:
-- products
+A purchasable product entity includes:
 - product categories
+- commercial goods
+- appliances
+- electronics
+- beauty products
+- household items
+- fashion items
+- furniture
 - brands
-- concrete ecommerce items
-
-Examples:
-- "laptop"
-- "tai nghe"
-- "iphone"
-- "áo nam"
-- "máy giặt"
-- "nike"
-- "airpods"
-- "bàn học"
-- "đèn ngủ"
+- model names
 
 IMPORTANT:
-Broad shopping queries are STILL SPECIFIC
-IF they contain a concrete product noun.
+Product entities may contain MULTIPLE WORDS.
+
+Examples of multi-word product entities:
+- máy lọc không khí
+- robot hút bụi
+- nồi chiên không dầu
+- máy pha cà phê
+- kem chống nắng
+- sữa rửa mặt
+- bàn phím cơ
+- tai nghe bluetooth
+- điện thoại gaming
+- ghế công thái học
+
+A SINGLE product entity is already enough for SPECIFIC.
 
 Examples:
-- "áo cute"
-- "đèn ngủ chill"
-- "bàn học tối giản"
-- "tai nghe gaming"
+- "giày" → SPECIFIC
+- "laptop" → SPECIFIC
+- "iphone" → SPECIFIC
+- "xiaomi" → SPECIFIC
+- "máy lọc không khí" → SPECIFIC
 
---------------------------------------------------
-ABSTRACT
---------------------------------------------------
-
-A query is ABSTRACT IF:
-- it does NOT contain a concrete product/category/brand
-AND
-- it expresses:
-  - emotion
-  - mood
-  - vibe
-  - lifestyle
-  - purpose
-  - personality
-  - aesthetic
-  - gift intent
-  - exploratory shopping intent
-
-Examples:
-- "tôi đang stress"
-- "minimalist"
-- "vibe hàn quốc"
-- "quà cho bạn gái"
-- "đồ gì đó chill chill"
-- "cho dân IT"
-- "để học online"
-
-==================================================
-CRITICAL HARD RULES
-==================================================
-
-1. Emotions are NOT products.
-
-These are NOT purchasable entities:
-- stress
-- chill
-- productive
-- cute
-- sang trọng
-- minimalist
-- vintage
-- gaming
-- học tập
-- thư giãn
-
---------------------------------------------------
-
-2. Activities are NOT products.
-
-Examples:
-- đi học
-- đi làm
-- đi biển
-- gaming
-- camping
-
-These are ABSTRACT
-UNLESS a concrete product noun exists.
-
---------------------------------------------------
-
-3. Adjectives/aesthetics are NOT products.
-
-Examples:
-- cute
-- basic
-- vintage
-- pastel
-- minimalist
-
-These are ABSTRACT
-UNLESS a concrete product noun exists.
-
---------------------------------------------------
-
-4. Purpose is NOT product.
-
-Examples:
-- để học online
-- để thư giãn
-- để ngủ ngon
-
-These are ABSTRACT
-UNLESS a product noun exists.
-
---------------------------------------------------
-
-5. Brand-only queries are SPECIFIC.
+Brands ALWAYS imply SPECIFIC.
 
 Examples:
 - nike
 - adidas
 - apple
 - samsung
+- xiaomi
+- asus
+- oppo
+
+Specs, attributes, purposes, and adjectives
+DO NOT change SPECIFIC into ABSTRACT.
+
+Examples:
+- "laptop gaming" → SPECIFIC
+- "tai nghe chống ồn" → SPECIFIC
+- "máy lọc không khí phòng 30m2" → SPECIFIC
+- "máy lọc không khí xiaomi hepa độ ồn thấp" → SPECIFIC
+- "robot hút bụi lau nhà" → SPECIFIC
+- "ipad ram 8gb 128gb" → SPECIFIC
+- "ghế gaming cho dân IT" → SPECIFIC
+- "đèn ngủ chill" → SPECIFIC
 
 ==================================================
-DECISION PROCESS
+ABSTRACT
 ==================================================
 
-STEP 1:
-Check whether the query contains a concrete purchasable product entity.
+A query is ABSTRACT ONLY IF:
+- it contains ZERO purchasable product entities
+- ZERO brands
+- ZERO product categories
+- ZERO ecommerce goods
 
-IF YES:
-→ SPECIFIC
-
-IF NO:
-→ continue.
-
---------------------------------------------------
-
-STEP 2:
-Check whether the query expresses:
+AND the query expresses ONLY:
+- mood
 - emotion
 - vibe
 - lifestyle
 - purpose
-- gift intent
-- personality
+- activity
 - aesthetic
-without concrete product noun.
+- personality
+- gift intent
 
-IF YES:
-→ ABSTRACT
+ABSTRACT examples:
+- "tôi đang stress"
+- "cute"
+- "minimalist"
+- "gaming"
+- "vibe hàn quốc"
+- "quà cho bạn gái"
+- "cho dân IT"
+- "để học online"
+- "đồ chill chill"
 
 ==================================================
-EDGE CASE EXAMPLES
+IMPORTANT EDGE CASES
 ==================================================
 
 Input:
-"tôi đang stress quá"
+"máy lọc không khí xiaomi phòng 30m2 hepa độ ồn thấp"
 
 Output:
 {{
-  "intent_type": "ABSTRACT",
-  "reasoning": "Emotional intent without concrete product."
+  "intent_type": "SPECIFIC",
+  "reasoning": "Contains purchasable product entity: máy lọc không khí and brand: xiaomi."
+}}
+
+--------------------------------------------------
+
+Input:
+"robot hút bụi cho nhà nhỏ"
+
+Output:
+{{
+  "intent_type": "SPECIFIC",
+  "reasoning": "Contains purchasable product entity: robot hút bụi."
 }}
 
 --------------------------------------------------
@@ -999,69 +999,48 @@ Input:
 Output:
 {{
   "intent_type": "ABSTRACT",
-  "reasoning": "Activity intent without product noun."
+  "reasoning": "Activity only. No purchasable product entity."
 }}
 
 --------------------------------------------------
 
 Input:
-"cute"
+"tôi đang stress"
 
 Output:
 {{
   "intent_type": "ABSTRACT",
-  "reasoning": "Aesthetic adjective without product noun."
+  "reasoning": "Emotion only. No purchasable product entity."
 }}
 
---------------------------------------------------
+==================================================
+DECISION PROCESS
+==================================================
 
-Input:
-"để học online"
+STEP 1:
+Detect whether the query contains ANY purchasable product entity,
+brand, product category, or ecommerce item.
 
-Output:
-{{
-  "intent_type": "ABSTRACT",
-  "reasoning": "Purpose intent without concrete product."
-}}
+If YES:
+Return SPECIFIC immediately.
 
---------------------------------------------------
+STEP 2:
+Only if NO product entity exists,
+check whether the query is purely emotional,
+lifestyle-based, aesthetic, activity-based,
+or purpose-only.
 
-Input:
-"laptop gaming"
-
-Output:
-{{
-  "intent_type": "SPECIFIC",
-  "reasoning": "Contains concrete product noun."
-}}
-
---------------------------------------------------
-
-Input:
-"đèn ngủ cute"
-
-Output:
-{{
-  "intent_type": "SPECIFIC",
-  "reasoning": "Contains concrete product noun."
-}}
-
---------------------------------------------------
-
-Input:
-"nike"
-
-Output:
-{{
-  "intent_type": "SPECIFIC",
-  "reasoning": "Brand is searchable ecommerce entity."
-}}
+If YES:
+Return ABSTRACT.
 
 ==================================================
 OUTPUT RULES
 ==================================================
 
 Return ONLY valid JSON.
+
+Do NOT output markdown.
+Do NOT explain outside JSON.
 
 Format:
 
@@ -1072,10 +1051,15 @@ Format:
 """
         try:
             response = call_openai(
-                prompt,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
                 model="gpt-4o-mini",
                 temperature=0.0,
-                max_tokens=100
+                max_tokens=1000
             )
             
             if not response:

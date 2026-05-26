@@ -21,7 +21,7 @@ class TikiCrawler:
         self.base_url = "https://tiki.vn/search"
         self.timeout = 30000  # 30 seconds in milliseconds
     
-    async def crawl(self, query: str, max_products: int = 20) -> List[Dict[str, Any]]:
+    async def crawl(self, query: str, max_products: int = 50) -> List[Dict[str, Any]]:
         """
         Crawl products from Tiki using Playwright
         

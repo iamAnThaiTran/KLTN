@@ -294,7 +294,9 @@ export default function ProductSearchWithFilters() {
                     {expandedFilters[filter.attribute_name] && (
                       <div className="filter-options">
                         {filter.options && filter.options.length > 0 ? (
-                          filter.options.map((option, idx) => (
+                          filter.options
+                            .filter(option => option.attribute_value && option.attribute_value !== 'None' && option.attribute_value !== 'null')
+                            .map((option, idx) => (
                             <div 
                               key={`${filter.attribute_name}-${option.attribute_value}-${idx}`}
                               className="filter-option-wrapper"

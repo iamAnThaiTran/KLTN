@@ -526,6 +526,11 @@ class RecommendationOrchestrator:
         # Get intent_type from detected_intent (from analyze_processor)
         detected_intent = conversation_state.get("detected_intent", {})
         intent_type = detected_intent.get("intent_type", "none")
+        
+        # 🔧 NORMALIZE to lowercase to avoid case sensitivity bugs
+        # LLM may return "SPECIFIC"/"ABSTRACT" but we compare with lowercase
+        intent_type = str(intent_type).strip().lower() if intent_type else "none"
+        
         confidence = detected_intent.get("confidence", 0.0)
         
         # CASE 4: Abstract intent (user exploring new category)
@@ -1368,7 +1373,39 @@ ATTRIBUTE GENERATION RULES
 ==========================
 
 Generate ONLY attributes that satisfy ALL conditions:
+IMPORTANT:
 
+Even if the query is broad or generic,
+you SHOULD still generate COMMON RETRIEVAL ATTRIBUTES
+for the detected category.
+
+For generic product queries:
+- expected_values may be null
+- but useful retrieval attributes should still exist
+
+Examples:
+
+Query:
+"giày"
+
+Possible attributes:
+- brand
+- size
+- màu sắc
+- chất liệu
+- kiểu dáng
+- giới tính
+
+Query:
+"điện thoại"
+
+Possible attributes:
+- brand
+- ram
+- storage
+- pin
+- màn hình
+- màu sắc
 1. Commonly written EXPLICITLY in Vietnamese e-commerce data
 
 2. Useful for:
@@ -1734,7 +1771,7 @@ Return ONLY valid JSON.
 ==================================================
 FINAL RULES
 ===========
-
+* For concrete product categories, NEVER return an empty attributes list
 * Return ONLY JSON
 
 * No markdown
