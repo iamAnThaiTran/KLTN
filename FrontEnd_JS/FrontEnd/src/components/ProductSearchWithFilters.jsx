@@ -271,8 +271,9 @@ export default function ProductSearchWithFilters() {
             {/* Dynamic Filters */}
             {filters.length > 0 ? (
               <div className="filters-list">
-                {filters.map((filter) => (
-                  <div 
+                {filters.map((filter) => {
+                  console.log("🚀 ~ ProductSearchWithFilters ~ filter.options:", filter.options)
+                  return <div 
                     key={filter.attribute_name}
                     className="filter-group"
                   >
@@ -349,8 +350,8 @@ export default function ProductSearchWithFilters() {
                         )}
                       </div>
                     )}
-                  </div>
-                ))}
+                  </div>;
+                })}
               </div>
             ) : (
               <p className="no-filters">Không có bộ lọc nào</p>

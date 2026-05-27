@@ -669,7 +669,7 @@ class ProductServiceClient:
             limit=limit
         )
         
-        if db_products and len(db_products) >= 10:
+        if db_products and len(db_products) >= 0:
             # DB HIT - sufficient products found
             #logger.info(f"[ProductServiceClient] ✅ DB HIT: Found {len(db_products)} products in database")
             return db_products

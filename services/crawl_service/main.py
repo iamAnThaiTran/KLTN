@@ -492,7 +492,7 @@ async def enqueue_enrichment_task(
             category="enrichment",
             category_id=category_id,
             attributes={
-                "type": type,
+                "type": "enrichment",
                 "category_name": category_name,
                 "attributes": attributes,
                 "action": action,
@@ -510,7 +510,7 @@ async def enqueue_enrichment_task(
         producer = get_rabbitmq_producer()
         if producer:
             task_data = {
-                "type": type,
+                "type": "enrichment",
                 "category_id": category_id,
                 "category_name": category_name,
                 "attributes": attributes,

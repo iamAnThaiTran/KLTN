@@ -733,7 +733,9 @@ def process_task(task_message: Dict[str, Any]) -> bool:
         # Route based on task type
         if task.category == "enrichment":
             # 🆕 Enrichment task - recrawl and extract new attributes
-            result = execute_enrichment_task(task.attributes)
+            enrichment_data = task.attributes.copy() if task.attributes else {}
+            enrichment_data["category_id"] = task.category_id  # ✅ Add category_id from database
+            result = execute_enrichment_task(enrichment_data)
             
         elif task.category == "product_details":
             # 🆕 Product details crawl with attribute extraction

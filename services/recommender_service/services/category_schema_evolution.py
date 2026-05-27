@@ -134,6 +134,7 @@ class CategorySchemaEvolution:
         1. Check nếu là common feature → ignore
         2. Check fuzzy match → reuse
         3. Call LLM để quyết định: reuse / ignore / new_attribute
+        4. Hybrid fallback: nếu low fuzzy + low llm confidence → default NEW_ATTRIBUTE
         
         Args:
             detected_attribute: Attribute cần validate
@@ -146,7 +147,7 @@ class CategorySchemaEvolution:
                 "mapped_to": Optional[str],  # Nếu reuse
                 "confidence": float,  # ∈ [0, 1]
                 "reason": str,
-                "validation_method": "common_feature" | "fuzzy_match" | "llm"
+                "validation_method": "common_feature" | "fuzzy_match" | "llm" | "fallback"
             }
         """
         try:
@@ -160,7 +161,7 @@ class CategorySchemaEvolution:
                     "validation_method": "common_feature"
                 }
             
-            # STEP 2: Try fuzzy match
+            # STEP 2: Try fuzzy match (track score for fallback logic)
             fuzzy_result = self._fuzzy_match_attribute(detected_attribute, existing_attributes)
             if fuzzy_result:
                 matched_attr, score = fuzzy_result
@@ -171,6 +172,16 @@ class CategorySchemaEvolution:
                     "reason": f"High fuzzy match similarity ({score:.2%}) with existing attribute",
                     "validation_method": "fuzzy_match"
                 }
+            
+            # Get fuzzy score even if below threshold (for fallback logic)
+            fuzzy_best_score = 0.0
+            detected_norm = self._normalize_attribute_name(detected_attribute)
+            for existing_attr in existing_attributes:
+                existing_norm = self._normalize_attribute_name(existing_attr)
+                if detected_norm != existing_norm:
+                    similarity = SequenceMatcher(None, detected_norm, existing_norm).ratio()
+                    if similarity > fuzzy_best_score:
+                        fuzzy_best_score = similarity
             
             # STEP 3: LLM semantic validation (only for unresolved)
             if self.llm_client is None:
@@ -197,6 +208,20 @@ class CategorySchemaEvolution:
                 existing_attributes,
                 category_name
             )
+            
+            # STEP 4: Hybrid fallback logic
+            # If fuzzy score is low (<0.5) AND LLM is uncertain (<0.7 confidence), default to NEW_ATTRIBUTE
+            if fuzzy_best_score < 0.5 and llm_response.get("confidence", 0) < 0.7:
+                if llm_response["decision"] == "ignore":
+                    logger.info(f"⚙️  [FALLBACK] Overriding IGNORE → NEW_ATTRIBUTE for '{detected_attribute}' "
+                              f"(fuzzy: {fuzzy_best_score:.2%}, llm_conf: {llm_response['confidence']:.0%})")
+                    llm_response = {
+                        "decision": "new_attribute",
+                        "mapped_to": None,
+                        "confidence": 0.6,
+                        "reason": f"Low fuzzy match ({fuzzy_best_score:.0%}) + uncertain LLM ({llm_response['confidence']:.0%}) → defaulting to new_attribute",
+                        "validation_method": "fallback"
+                    }
             
             # Cache result
             self._llm_validation_cache[cache_key] = llm_response
@@ -230,7 +255,7 @@ class CategorySchemaEvolution:
         Returns:
             Validation decision dict
         """
-        # Build prompt với strong bias về reuse schema
+        # Build prompt với balanced approach
         prompt = f"""
 Bạn là schema evolution expert cho ecommerce search system.
 
@@ -238,18 +263,22 @@ Category: {category_name}
 Existing Attributes: {', '.join(existing_attributes)}
 Detected Attribute: {detected_attribute}
 
-Task: Quyết định xử lý detected attribute.
+Task: Quyết định xử lý detected attribute một cách công bằng.
 
 Quy tắc (ưu tiên từ cao đến thấp):
-1. REUSE: Nếu detected attribute có CÙNG ý NGHĨA với existing attribute (chỉ khác wording)
+1. REUSE: Chỉ nếu detected attribute có CÙNG ý NGHĨA với existing attribute (chỉ khác wording)
    VÍ DỤ: "thương hiệu" vs "hãng" → REUSE "hãng"
            "kiểu cửa" vs "loại cửa" → REUSE "loại cửa"
+   ⚠️  Không ép vào REUSE nếu chỉ có shared keywords. Phải cùng meaning.
    
 2. IGNORE: Nếu detected attribute là product feature/value, KHÔNG phải true attribute
    VÍ DỤ: "inverter", "AI DD", "OLED", "4K", "smart", "WiFi" → IGNORE
+   Nhưng "màu sắc", "kích thước", "dung lượng" là TRUE ATTRIBUTES → không IGNORE
    
-3. NEW_ATTRIBUTE: Chỉ nếu thực sự mới và là true attribute
-   VÍ DỤ: "độ ồn" (nếu category có type "washing machine") → NEW_ATTRIBUTE
+3. NEW_ATTRIBUTE: Nếu thực sự mới, meaningful, và có thể dùng để filter products
+   VÍ DỤ: "độ ồn" (nếu category là "máy giặt") → NEW_ATTRIBUTE
+           "màu sắc" (nếu laptop category chưa có) → NEW_ATTRIBUTE
+   Ưu tiên này khi không chắc chắn giữa REUSE vs NEW_ATTRIBUTE.
 
 Response format (JSON):
 {{
@@ -259,7 +288,7 @@ Response format (JSON):
     "reason": "short reason"
 }}
 
-Hãy STRONGLY BIAS về REUSE existing schema. Chỉ tạo attribute mới khi thực sự cần.
+⚖️  BALANCED APPROACH: Không bias về REUSE. Tạo NEW_ATTRIBUTE khi cần thiết để schema evolve.
 """
         
         try:
@@ -641,20 +670,7 @@ Hãy STRONGLY BIAS về REUSE existing schema. Chỉ tạo attribute mới khi t
         new_attributes: List[str],
         products_count: int
     ) -> int:
-        """
-        Enqueue background enrichment jobs via CrawlService (like CASE 1 pattern)
-        
-        Uses CrawlServiceClient to enqueue enrichment tasks. Non-blocking.
-        
-        Args:
-            category_id: ID của category
-            category_name: Tên category
-            new_attributes: Danh sách attributes cần enrich
-            products_count: Số products cần enrich
-        
-        Returns:
-            Số enrichment jobs được enqueue
-        """
+
         if products_count == 0:
             logger.info("ℹ️  No products to enrich")
             return 0
@@ -662,29 +678,28 @@ Hãy STRONGLY BIAS về REUSE existing schema. Chỉ tạo attribute mới khi t
         if self.crawl_service_client is None:
             logger.warning("⚠️ Cannot enqueue enrichment jobs: CrawlService client not available")
             return 0
-        return 1
-        # try:
-        #     logger.info(f"📤 Enqueueing enrichment job via CrawlService for {len(new_attributes)} attributes...")
+        try:
+            logger.info(f"📤 Enqueueing enrichment job via CrawlService for {len(new_attributes)} attributes...")
             
-        #     enrichment_task = {
-        #         "type": "enrichment",
-        #         "category_id": category_id,
-        #         "category_name": category_name,
-        #         "attributes": new_attributes,
-        #         "action": "recrawl_and_extract_attributes",
-        #         "description": f"Enrichment for new attributes: {', '.join(new_attributes)}"
-        #     }
+            enrichment_task = {
+                "type": "enrichment",
+                "category_id": category_id,
+                "category_name": category_name,
+                "attributes": new_attributes,
+                "action": "recrawl_and_extract_attributes",
+                "description": f"Enrichment for new attributes: {', '.join(new_attributes)}"
+            }
             
-        #     # Use CrawlService enqueue method (async, non-blocking like CASE 1)
-        #     task_id = await self.crawl_service_client.enqueue_enrichment_task(
-        #         task_data=enrichment_task,
-        #         priority="normal"
-        #     )
+            # Use CrawlService enqueue method (async, non-blocking like CASE 1)
+            task_id = await self.crawl_service_client.enqueue_enrichment_task(
+                task_data=enrichment_task,
+                priority="normal"
+            )
             
-        #     logger.info(f"✅ Successfully enqueued enrichment job via CrawlService: {task_id}")
-        #     return 1  # Enqueued 1 enrichment task
+            logger.info(f"✅ Successfully enqueued enrichment job via CrawlService: {task_id}")
+            return 1  # Enqueued 1 enrichment task
         
-        # except Exception as e:
-        #     logger.error(f"⚠️ Error enqueueing enrichment job: {str(e)}")
-        #     return 0
+        except Exception as e:
+            logger.error(f"⚠️ Error enqueueing enrichment job: {str(e)}")
+            return 0
 

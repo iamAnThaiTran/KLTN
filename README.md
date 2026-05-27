@@ -1,5 +1,31 @@
 # Hệ thống thu thập, so sánh và gợi ý sản phẩm TMĐT
 
+## Giới thiệu
+Hệ thống hỗ trợ:
+- Thu thập dữ liệu sản phẩm từ sàn TMĐT
+- Phân tích yêu cầu người dùng bằng LLM
+- Gợi ý loại sản phẩm và thuộc tính phù hợp
+- So sánh sản phẩm theo mức độ tương đồng thuộc tính
+
+---
+
+## Công nghệ sử dụng
+- Frontend: ReactJS + Vite
+- Backend: FastAPI
+- Database: PostgreSQL
+- Docker & Docker Compose
+- OpenAI API / GPT-4o mini
+
+---
+
+## Yêu cầu môi trường
+- Docker
+- Docker Compose
+
+Kiểm tra:
+```bash
+docker --version
+docker compose version
 ## Yêu cầu môi trường
 - Docker
 - Docker Compose

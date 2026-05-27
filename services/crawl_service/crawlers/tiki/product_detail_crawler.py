@@ -679,43 +679,125 @@ class ProductDetailCrawler:
         fallback_to_regex: bool = True,
     ) -> List[Dict[str, Any]]:
         """
-        Crawl multiple products with LLM extraction.
+        Crawl multiple products with batched LLM extraction (optimized).
+        
+        ⚡ OPTIMIZATION: Batch all products into 1-2 LLM calls instead of N calls
         
         Args:
             product_ids: List of Tiki product IDs
             schema: Dynamic schema for attribute extraction
-            max_concurrent: Maximum concurrent crawls
+            max_concurrent: Maximum concurrent crawls (for fetching details)
             fallback_to_regex: If True, fall back to regex on LLM failure
         
         Returns:
             List of crawl results
         """
-        semaphore = asyncio.Semaphore(max_concurrent)
-
-        async def _crawl(product_id: str):
-            async with semaphore:
-                return await self.crawl_tiki_product_details_with_llm(
-                    product_id=product_id,
-                    schema=schema,
-                    fallback_to_regex=fallback_to_regex,
-                )
-
         logger.info(
-            f"📥 Crawling {len(product_ids)} products (LLM mode, "
+            f"📥 Crawling {len(product_ids)} products (LLM batch mode, "
             f"max_concurrent={max_concurrent})"
         )
-        results = await asyncio.gather(
-            *[_crawl(pid) for pid in product_ids],
+        
+        # STEP 1: Fetch all product details concurrently
+        semaphore = asyncio.Semaphore(max_concurrent)
+        
+        async def _fetch_details(product_id: str) -> Optional[Dict[str, Any]]:
+            async with semaphore:
+                try:
+                    session = await self._get_session()
+                    raw = await self._fetch_product_detail(session, product_id)
+                    if raw:
+                        product = self._parse_product_detail(raw)
+                        product["product_id"] = product_id
+                        logger.debug(f"✅ Fetched: {product.get('name', 'Unknown')[:50]}")
+                        return product
+                except Exception as e:
+                    logger.error(f"❌ Error fetching product {product_id}: {e}")
+                return None
+        
+        logger.info(f"🕷️ Fetching details for {len(product_ids)} products...")
+        products = await asyncio.gather(
+            *[_fetch_details(pid) for pid in product_ids],
             return_exceptions=False,
         )
-        logger.info(f"✅ Done: {len(results)} products crawled with LLM")
+        products = [p for p in products if p]  # Filter out None
+        logger.info(f"✅ Fetched {len(products)} products")
+        
+        if not products:
+            logger.warning("⚠️ No products fetched")
+            return []
+        
+        # STEP 2: Batch LLM extraction - 1 call for all products (optimized)
+        extracted_results = {}
+        if schema and self.use_llm and self.llm_extractor:
+            logger.info(f"🤖 Calling LLM once for {len(products)} products (batched)...")
+            
+            # Prepare batch for LLM
+            llm_batch = [
+                {
+                    "product_id": p.get("product_id", "unknown"),
+                    "text": self._build_product_text_for_llm(p),
+                }
+                for p in products
+            ]
+            
+            # Convert schema once
+            llm_schema = self._convert_schema_to_llm_schema(schema)
+            
+            if llm_schema:
+                try:
+                    # Single LLM call for all products (instead of N calls)
+                    llm_results = await self.llm_extractor.extract_batch(
+                        products=llm_batch,
+                        schema=llm_schema,
+                    )
+                    
+                    logger.info(f"✅ LLM extraction done for {len(llm_results)} products")
+                    
+                    # Store results by product_id
+                    for result in llm_results:
+                        extracted_results[result.product_id] = {
+                            "attributes": result.attributes,
+                            "confidence": result.confidence,
+                            "error": result.error,
+                            "extraction_method": result.extraction_method,
+                        }
+                except Exception as e:
+                    logger.error(f"❌ LLM batch extraction failed: {e}")
+                    if fallback_to_regex:
+                        logger.info("🔄 Falling back to regex for all products...")
+        
+        # STEP 3: Build results with LLM extraction or fallback
+        results = []
+        for product in products:
+            product_id = product.get("product_id", "unknown")
+            
+            if product_id in extracted_results:
+                # Use LLM results
+                llm_result = extracted_results[product_id]
+                extraction_method = llm_result["extraction_method"]
+                extracted_attrs = llm_result["attributes"]
+            else:
+                # Fallback to regex
+                if fallback_to_regex and schema:
+                    extraction_method = "regex"
+                    extracted_attrs = self.extract_attributes_from_schema(product, schema)
+                else:
+                    extraction_method = "none"
+                    extracted_attrs = {}
+            
+            results.append({
+                "status": "success",
+                "product": product,
+                "extracted_attributes": extracted_attrs,
+                "extraction_method": extraction_method,
+            })
         
         # Print stats
         success_count = sum(1 for r in results if r.get("status") == "success")
         llm_count = sum(1 for r in results if r.get("extraction_method") == "llm")
         logger.info(
             f"📊 Results: {success_count} successful, "
-            f"{llm_count} via LLM, {len(results) - llm_count} fallback"
+            f"{llm_count} via LLM, {len(results) - llm_count} fallback/regex"
         )
         
         return list(results)

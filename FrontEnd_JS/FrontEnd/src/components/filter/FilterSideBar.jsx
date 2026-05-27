@@ -201,23 +201,47 @@ const FilterSidebar = ({ filters, selectedFilters, onToggle, onApply, onReset, r
                 </button>
 
                 {isOpen && (
-                  <div style={{ padding: '8px 14px 12px', display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                    {filter.options?.map((opt, oi) => {
-                      const key    = `${filter.attribute_name}:${opt.attribute_value}`;
-                      const active = !!selectedFilters[key];
-                      return (
-                        <button
-                          key={oi}
-                          className={`fchip${active ? ' on' : ''}`}
-                          onClick={() => onToggle(key)}
-                          disabled={isApplying}
-                        >
-                          {opt.attribute_value}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+  <div style={{ padding: '8px 14px 12px', display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+    {filter.options
+      ?.filter((opt) => {
+        const value = opt.attribute_value;
+
+        // Loại null / undefined
+        if (value == null) return false;
+
+        // Convert sang string để check
+        const str = String(value).trim();
+
+        // Loại chuỗi rỗng hoặc "None"
+        if (!str || str.toLowerCase() === "none") return false;
+
+        // Loại JSON lỗi / skipped format
+        if (
+          str.includes('"match_type": "skipped"') ||
+          str.includes('\\"match_type\\": \\"skipped\\"')
+        ) {
+          return false;
+        }
+
+        return true;
+      })
+      .map((opt, oi) => {
+        const key = `${filter.attribute_name}:${opt.attribute_value}`;
+        const active = !!selectedFilters[key];
+
+        return (
+          <button
+            key={oi}
+            className={`fchip${active ? ' on' : ''}`}
+            onClick={() => onToggle(key)}
+            disabled={isApplying}
+          >
+            {opt.attribute_value}
+          </button>
+        );
+      })}
+  </div>
+)}
               </div>
             );
           })}

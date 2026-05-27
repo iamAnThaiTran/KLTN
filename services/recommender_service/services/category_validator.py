@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 class CategoryValidator:
     """Validate và normalize categories trước khi crawl"""
     
-    def __init__(self, product_service_client=None, schema_evolution_service=None, rabbitmq_producer=None, llm_client=None):
+    def __init__(self, product_service_client=None, schema_evolution_service=None, rabbitmq_producer=None, llm_client=None, crawl_service_client=None):
         # Construct DATABASE_URL from environment variables if not already set
         self.db_url = os.getenv(
             "DATABASE_URL",
@@ -42,6 +42,7 @@ class CategoryValidator:
         self._schema_evolution_service = None
         self.product_service_client = product_service_client  # HTTP client to ProductService
         self._product_service_client_for_evolution = product_service_client
+        self._crawl_service_client = crawl_service_client  # HTTP client to CrawlService
         self._rabbitmq_producer = rabbitmq_producer
     
     @property
@@ -64,6 +65,7 @@ class CategoryValidator:
             from services.category_schema_evolution import CategorySchemaEvolution
             self._schema_evolution_service = CategorySchemaEvolution(
                 product_service_client=self._product_service_client_for_evolution,
+                crawl_service_client=self._crawl_service_client,
                 llm_client=self.llm_client
             )
         return self._schema_evolution_service

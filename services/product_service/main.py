@@ -432,6 +432,73 @@ async def get_category(category_id: int):
     finally:
         db.close()
 
+@app.get("/api/categories/{category_id}/products")
+async def get_category_products(category_id: int):
+    """
+    Get all products of a category (for enrichment tasks)
+    
+    Returns:
+    {
+        "category_id": 5,
+        "category_name": "Laptop",
+        "product_ids": ["276183351", "276183352", ...],
+        "spids": ["123", "124", ...],
+        "products_count": 150,
+        "products": [
+            {
+                "id": 1,
+                "product_id": "276183351",
+                "spid": "123",
+                "title": "Laptop Dell",
+                "brand": "Dell",
+                "thumbnail": "...",
+                "source": "tiki"
+            },
+            ...
+        ]
+    }
+    """
+    db = SessionLocal()
+    try:
+        category = db.query(Category).filter(Category.id == category_id).first()
+        if not category:
+            raise HTTPException(status_code=404, detail="Category not found")
+        
+        # Get all products in category
+        products = db.query(Product).filter(
+            Product.category_id == category_id,
+            Product.is_active == True
+        ).all()
+        
+        logger.info(f"✅ Retrieved {len(products)} products for category '{category.name}' (id={category_id})")
+        
+        return {
+            "category_id": category_id,
+            "category_name": category.name,
+            "product_ids": [p.tiki_product_id for p in products if p.tiki_product_id],
+            "spids": [p.tiki_spid for p in products if p.tiki_spid],
+            "products_count": len(products),
+            "products": [
+                {
+                    "id": p.id,
+                    "product_id": p.tiki_product_id,
+                    "spid": p.tiki_spid,
+                    "title": p.title,
+                    "brand": p.brand,
+                    "thumbnail": p.thumbnail,
+                    "source": p.source
+                }
+                for p in products
+            ]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get category products failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
 @app.post("/api/categories")
 async def create_category(
     body: Dict[str, Any] = Body(...)
@@ -1329,14 +1396,11 @@ async def save_sku_attributes(sku_code: str, body: Dict[str, Any] = Body(...)):
                 "message": "No attributes provided"
             }
         
-        # Delete existing attributes first
+        # MERGE attributes: UPDATE if exists, INSERT if new (preserve old attributes)
         from sqlalchemy import text as sql_text
-        db.execute(
-            sql_text("DELETE FROM sku_attributes WHERE sku_id = :sku_id"),
-            {"sku_id": sku.id}
-        )
+        inserted_count = 0
+        updated_count = 0
         
-        # Insert new attributes
         for attr_name, attr_value in attributes.items():
             # Convert value to string if it's a list or dict
             if isinstance(attr_value, (list, dict)):
@@ -1344,27 +1408,40 @@ async def save_sku_attributes(sku_code: str, body: Dict[str, Any] = Body(...)):
             else:
                 attr_value = str(attr_value)
             
-            db.execute(
-                sql_text("""
-                    INSERT INTO sku_attributes (sku_id, attribute_name, attribute_value)
-                    VALUES (:sku_id, :attr_name, :attr_value)
-                """),
-                {
-                    "sku_id": sku.id,
-                    "attr_name": str(attr_name),
-                    "attr_value": attr_value
-                }
-            )
+            # Check if attribute already exists
+            existing = db.query(SKUAttribute).filter(
+                SKUAttribute.sku_id == sku.id,
+                SKUAttribute.attribute_name == str(attr_name)
+            ).first()
+            
+            if existing:
+                # Update existing attribute
+                existing.attribute_value = attr_value
+                updated_count += 1
+            else:
+                # Insert new attribute
+                new_attr = SKUAttribute(
+                    sku_id=sku.id,
+                    attribute_name=str(attr_name),
+                    attribute_value=attr_value
+                )
+                db.add(new_attr)
+                inserted_count += 1
         
         sku.updated_at = datetime.utcnow()
         db.commit()
         
-        logger.info(f"✅ Saved {len(attributes)} attributes for SKU: {sku_code}")
+        logger.info(
+            f"✅ SKU attributes: {inserted_count} inserted, {updated_count} updated "
+            f"for SKU: {sku_code}"
+        )
         
         return {
             "status": "saved",
             "sku_code": sku_code,
-            "attributes_count": len(attributes)
+            "inserted": inserted_count,
+            "updated": updated_count,
+            "total": len(attributes)
         }
     
     except HTTPException:

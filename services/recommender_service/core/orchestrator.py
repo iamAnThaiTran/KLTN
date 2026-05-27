@@ -30,7 +30,10 @@ class RecommendationOrchestrator:
         self.product_ranker = ProductRanker()
         self.crawl_service_client = CrawlServiceClient()  # ✅ HTTP client to Crawl Service (8003)
         self.product_service_client = ProductServiceClient()  # ✅ HTTP client to Product Service (8001)
-        self.category_validator = CategoryValidator(product_service_client=self.product_service_client)  # ✅ Pass ProductServiceClient
+        self.category_validator = CategoryValidator(
+            product_service_client=self.product_service_client,
+            crawl_service_client=self.crawl_service_client
+        )  # ✅ Pass ProductServiceClient and CrawlServiceClient
         
         # Cache management (Lazada-style)
         self.enable_cache = True  # Set to False to disable caching
@@ -1073,7 +1076,36 @@ Every suggestion MUST contain:
 - a product noun
 OR
 - a searchable ecommerce category
+==================================================
+CONVERSATIONAL RESPONSE RULES
+==================================================
 
+Besides suggestions, generate a SHORT natural Vietnamese assistant message.
+
+The message should:
+- feel empathetic
+- acknowledge the user's situation/intention
+- sound conversational and human
+- NOT sound robotic or repetitive
+- NOT always start with:
+  "Dựa trên nhu cầu của bạn"
+
+GOOD:
+- "Nghe có vẻ bạn đang muốn setup góc học tập thoải mái hơn."
+- "Có vẻ bạn đang tìm thứ gì đó để thư giãn sau giờ làm."
+- "Mình nghĩ bạn đang muốn tìm quà vừa dễ tặng vừa thực tế."
+- "Nếu theo vibe này thì có vài món khá hợp với bạn."
+
+BAD:
+- "Dựa trên nhu cầu của bạn..."
+- "Tôi đề xuất..."
+- "Sau đây là các sản phẩm..."
+
+Keep it:
+- short
+- natural
+- warm
+- Vietnamese conversational style
 ==================================================
 OUTPUT RULES
 ==================================================
@@ -1089,6 +1121,7 @@ OUTPUT FORMAT
 ==================================================
 
 {{
+"assistant_message": "natural conversational message",
   "suggestions": [
     {{
       "search_term": "concrete searchable product/category",
@@ -1114,7 +1147,7 @@ OUTPUT FORMAT
             
             data = json.loads(response.strip().replace("```json", "").replace("```", ""))
             suggestions = data.get("suggestions", [])
-            
+            logger.info(f"[CASE 4] LLM returned {(suggestions)} suggestions")
             if not suggestions:
                 return {
                     "status": "need_info",
@@ -1125,7 +1158,7 @@ OUTPUT FORMAT
             
             return {
                 "status": "need_info",
-                "question": "Dựa trên nhu cầu của bạn, tôi gợi ý một số loại sản phẩm sau:",
+                "question": data.get("assistant_message", "Dựa trên nhu cầu của bạn, tôi gợi ý một số loại sản phẩm sau:"),
                 "options": [
                     {
                         "label": s["search_term"],
