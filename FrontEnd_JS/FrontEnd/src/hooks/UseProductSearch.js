@@ -17,10 +17,12 @@ import { useSearchPolling } from './useSearchPolling';
  
 export const useProductSearch = ({ token, onAddMessage }) => {
   // ── Stable refs ──
-  const tokenRef      = useRef(token);
-  const onAddMsgRef   = useRef(onAddMessage);
-  tokenRef.current    = token;
-  onAddMsgRef.current = onAddMessage;
+  const tokenRef              = useRef(token);
+  const onAddMsgRef           = useRef(onAddMessage);
+  const processedJobIdRef     = useRef(null);  // Track processed job ID to avoid duplicates
+  const prevJobIdRef          = useRef(null);  // Track previous jobId to detect job changes
+  tokenRef.current            = token;
+  onAddMsgRef.current         = onAddMessage;
  
   // ── Loading ──
   const [productsLoading, setProductsLoading] = useState(false);  const [jobId, setJobId] = useState(null);
@@ -316,6 +318,7 @@ export const useProductSearch = ({ token, onAddMessage }) => {
     if (lastCategoryNameRef.current)
       searchWithFilters(lastCategoryNameRef.current, selectedFiltersRef.current, extractedAttrRef.current);
   }, [searchWithFilters]);
+
  
   const resetFilters = useCallback(() => {
     setSelectedFilters({});
@@ -354,6 +357,21 @@ export const useProductSearch = ({ token, onAddMessage }) => {
     }
     
     if (jobResult && !pollingLoading) {
+      // ⚠️ PREVENT DUPLICATE: Check if we already processed this job
+      // Reset tracking when jobId changes (new job started)
+      if (prevJobIdRef.current !== jobId) {
+        prevJobIdRef.current = jobId;
+        processedJobIdRef.current = null;  // Reset for new job
+      }
+      
+      // Skip if already processed this job
+      if (processedJobIdRef.current === jobId) {
+        console.log(`[UseProductSearch] ⏭️ Job ${jobId} already processed, skipping`);
+        return;
+      }
+      
+      processedJobIdRef.current = jobId;
+      
       console.log('[UseProductSearch] Job result received:', jobResult);
       setProductsLoading(false);
       
@@ -398,7 +416,7 @@ export const useProductSearch = ({ token, onAddMessage }) => {
       
       setJobId(null); // Reset job ID after processing
     }
-  }, [jobResult, pollingLoading, pollingError, appendProducts]);
+  }, [jobResult, pollingLoading, pollingError]);
  
   return {
     productsLoading,

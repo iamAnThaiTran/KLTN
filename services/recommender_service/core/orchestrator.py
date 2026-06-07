@@ -51,6 +51,72 @@ class RecommendationOrchestrator:
             pg_url=database_url
         )
     
+    def _sanitize_json_backslashes(self, json_text: str) -> str:
+        """
+        Fix unescaped backslashes in JSON strings (regex patterns).
+        
+        The LLM may generate JSON with patterns like:
+        - "value_pattern": "[8-9][0-9]?\s?gb"
+        
+        But JSON requires:
+        - "value_pattern": "[8-9][0-9]?\\s?gb"
+        
+        This function escapes unescaped backslashes in JSON string values.
+        """
+        # Strategy: Find all strings in the JSON and fix unescaped backslashes within them
+        result = []
+        i = 0
+        
+        while i < len(json_text):
+            char = json_text[i]
+            
+            # Check if we're starting a string
+            if char == '"':
+                result.append(char)
+                i += 1
+                
+                # Read until we find the closing quote
+                string_content = []
+                while i < len(json_text):
+                    char = json_text[i]
+                    
+                    if char == '\\':
+                        # Backslash found - check if it's already escaped
+                        if i + 1 < len(json_text):
+                            next_char = json_text[i + 1]
+                            
+                            # Already escaped? (\\, \", \/, \b, \f, \n, \r, \t, \u)
+                            if next_char in ['"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u']:
+                                # Valid JSON escape - keep as is
+                                string_content.append(char)
+                                i += 1
+                                string_content.append(json_text[i])
+                                i += 1
+                            else:
+                                # Unescaped backslash (regex pattern) - escape it
+                                string_content.append('\\\\')
+                                i += 1
+                        else:
+                            string_content.append(char)
+                            i += 1
+                    
+                    elif char == '"':
+                        # End of string
+                        result.extend(string_content)
+                        result.append(char)
+                        i += 1
+                        break
+                    
+                    else:
+                        string_content.append(char)
+                        i += 1
+            
+            else:
+                result.append(char)
+                i += 1
+        
+        return ''.join(result)
+    
     def _build_answer_response(
     self,
     category: str,
@@ -1811,6 +1877,10 @@ FINAL RULES
 
 * No explanations
 
+* IMPORTANT: For regex patterns in value_pattern, escape backslashes as JSON requires
+  - CORRECT: "value_pattern": "[8-9][0-9]?\\s?gb"
+  - WRONG: "value_pattern": "[8-9][0-9]?\s?gb"
+
 * Every attribute MUST include:
 
   * attr_type
@@ -1889,6 +1959,14 @@ FINAL RULES
                     logger.warning(
                         f"[⚠️ DEBUG] JSON was truncated. Added {missing_braces} closing braces"
                     )
+
+            # 🔧 FIX: Sanitize JSON strings with unescaped backslashes (regex patterns)
+            # The LLM may generate regex patterns like \s, \., \d without proper JSON escaping
+            json_text_before = json_text
+            json_text = self._sanitize_json_backslashes(json_text)
+            
+            if json_text != json_text_before:
+                logger.info("[✅ DEBUG] JSON backslashes sanitized")
 
             data = json.loads(json_text)
 

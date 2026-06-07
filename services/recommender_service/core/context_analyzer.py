@@ -482,17 +482,20 @@ class ContextAnalyzer:
         prompt = f"""
 You are a Vietnamese ecommerce conversational intent merger.
 
-Your task:
-Merge the latest user input with previous shopping context
-to reconstruct the user's CURRENT shopping intent.
+Your job:
+Reconstruct the user's CURRENT shopping intent
+from:
+- conversation history
+- previous shopping context
+- latest user message
 
-The system supports ONLY TWO intent types:
+The system supports ONLY TWO query types:
 
 - SPECIFIC
 - ABSTRACT
 
 ==================================================
-CONVERSATION CONTEXT
+CONTEXT
 ==================================================
 
 Search history:
@@ -509,70 +512,54 @@ LATEST USER INPUT
 "{user_input}"
 
 ==================================================
-CORE PRINCIPLE
+MAIN GOAL
 ==================================================
 
-The MOST IMPORTANT rule:
+You must determine whether the latest user input:
 
-If the reconstructed intent contains ANY purchasable
-commercial product, product category, brand,
-or ecommerce item,
-the intent MUST be classified as SPECIFIC.
+1. REFINES previous shopping intent
+2. SWITCHES to another product/category
+3. SWITCHES to abstract discovery intent
 
-This rule has ABSOLUTE PRIORITY over:
-- mood
-- vibe
-- lifestyle
-- activity
-- purpose
-- personality
-- aesthetic
-- adjectives
-- specs
-- attributes
+IMPORTANT:
+You MUST make this decision FIRST
+before reconstructing final intent.
+
+Never automatically preserve old product history.
 
 ==================================================
+QUERY TYPE DEFINITIONS
+==================================================
+
+--------------------------------------------------
 SPECIFIC
-==================================================
+--------------------------------------------------
 
-A reconstructed intent is SPECIFIC if it contains
-ANY purchasable product entity.
+SPECIFIC means the intent contains ANY purchasable product entity.
 
 Product entities include:
 - product categories
-- commercial goods
-- electronics
+- ecommerce items
+- commercial products
 - appliances
-- fashion items
+- electronics
 - beauty products
+- fashion items
 - furniture
-- household items
 - brands
 - model names
 
-IMPORTANT:
-Product entities may contain MULTIPLE WORDS.
-
 Examples:
+- giày
+- laptop
+- iphone
 - máy lọc không khí
 - robot hút bụi
-- nồi chiên không dầu
-- máy pha cà phê
 - bàn phím cơ
 - kem chống nắng
 - tai nghe bluetooth
-- ghế công thái học
 
 A SINGLE product entity is enough for SPECIFIC.
-
-Examples:
-- "giày"
-- "laptop"
-- "iphone"
-- "xiaomi"
-- "máy lọc không khí"
-
-→ ALL are SPECIFIC.
 
 Brands ALWAYS imply SPECIFIC.
 
@@ -582,176 +569,116 @@ Examples:
 - apple
 - samsung
 - xiaomi
-- asus
 
-Specs, purposes, adjectives, and attributes
-DO NOT change SPECIFIC into ABSTRACT.
+Attributes/specifications DO NOT change SPECIFIC.
 
 Examples:
-- "laptop gaming"
-- "tai nghe chống ồn"
-- "máy lọc không khí phòng 30m2"
-- "máy lọc không khí xiaomi hepa độ ồn thấp"
-- "ghế gaming cho dân IT"
+- laptop gaming
+- giày màu đen
+- tai nghe chống ồn
+- máy lọc không khí xiaomi
 
-→ ALL remain SPECIFIC.
+ALL remain SPECIFIC.
 
-==================================================
+--------------------------------------------------
 ABSTRACT
-==================================================
+--------------------------------------------------
 
-ABSTRACT applies ONLY IF:
-- there is NO product entity
-- NO product category
-- NO brand
-- NO ecommerce item
+ABSTRACT means:
+- NO product entity exists
+- NO brand exists
+- NO purchasable item exists
 
-AND the intent expresses ONLY:
-- mood
+AND the intent expresses:
 - emotion
-- vibe
+- mood
+- feeling
 - lifestyle
 - activity
 - purpose
-- personality
-- gift intent
+- vibe
 - aesthetic
+- gift intention
 
 Examples:
-- "tôi đang stress"
-- "cute"
-- "minimalist"
-- "gaming"
-- "vibe hàn quốc"
-- "quà cho bạn gái"
-- "để học online"
+- tôi stress
+- tôi buồn
+- muốn chill
+- cute
+- minimalist
+- gaming
+- vibe hàn quốc
+- quà cho bạn gái
+- để học online
 
 ==================================================
-INTENT MERGING RULES
+CRITICAL OVERRIDE RULE
 ==================================================
 
-The latest user input may:
+If the latest user input:
+- contains emotion
+- feeling
+- mental state
+- conversational emotional expression
 
-1. refine previous intent
-2. add attributes/specs
-3. switch product category
-4. switch into abstract discovery intent
+AND contains NO product entity,
 
---------------------------------------------------
-REFINEMENT
---------------------------------------------------
+then:
+- IGNORE previous product history completely
+- SWITCH to ABSTRACT
 
-If the latest input logically modifies or extends
-the previous product search,
-merge them together.
-
-Examples:
-
-History: "áo nam"
-Input: "đen"
-
-→ merged:
-"áo nam màu đen"
-
---------------------------------------------------
-
-History: "laptop"
-Input: "gaming"
-
-→ merged:
-"laptop gaming"
-
---------------------------------------------------
-
-History: "máy lọc không khí"
-Input: "xiaomi phòng 30m2"
-
-→ merged:
-"máy lọc không khí xiaomi phòng 30m2"
-
---------------------------------------------------
-CATEGORY SWITCH
---------------------------------------------------
-
-If the latest input introduces a completely different
-product/topic unrelated to the previous one,
-replace the old intent.
+This rule has VERY HIGH PRIORITY.
 
 Examples:
 
-History: "áo nam"
-Input: "robot hút bụi"
-
-→ new intent:
-"robot hút bụi"
-
---------------------------------------------------
-
-History: "laptop gaming"
-Input: "kem chống nắng"
-
-→ new intent:
-"kem chống nắng"
-
---------------------------------------------------
-ABSTRACT SWITCH
---------------------------------------------------
-
-If the latest input contains NO product entity
-and clearly expresses mood/lifestyle/emotion/purpose,
-switch to ABSTRACT.
-
-Examples:
-
-History: "áo nam"
-Input: "tôi đang stress"
-
-→ ABSTRACT
-
---------------------------------------------------
-
-History: "laptop"
-Input: "minimalist"
-
-→ ABSTRACT
-
-==================================================
-CATEGORY CHANGE RULE
-==================================================
-
-category_changed = true ONLY IF:
-- the user switches to a different product/topic
-- OR switches from SPECIFIC ↔ ABSTRACT
-
-category_changed = false IF:
-- the latest input only refines/modifies existing intent
-
-When uncertain:
-prefer false.
-
-==================================================
-IMPORTANT EDGE CASES
-==================================================
-
-History: "máy lọc không khí"
-Input: "xiaomi hepa độ ồn thấp"
+History: "giày"
+Input: "tôi stress"
 
 Output:
 {{
-  "intent": "máy lọc không khí xiaomi hepa độ ồn thấp",
-  "query_type": "SPECIFIC",
-  "category_changed": false,
+  "intent": "người dùng đang stress",
+  "query_type": "ABSTRACT",
+  "category_changed": true,
   "new_category": null
 }}
 
 --------------------------------------------------
 
-History: ""
-Input: "máy lọc không khí xiaomi phòng 30m2"
+History: "laptop gaming"
+Input: "tôi chán quá"
 
 Output:
 {{
-  "intent": "máy lọc không khí xiaomi phòng 30m2",
+  "intent": "người dùng đang chán",
+  "query_type": "ABSTRACT",
+  "category_changed": true,
+  "new_category": null
+}}
+
+==================================================
+REFINEMENT RULE
+==================================================
+
+If the latest input:
+- adds attributes
+- style
+- specs
+- vibe
+- aesthetic
+- purpose
+
+AND does NOT introduce a new unrelated product,
+
+then MERGE with previous product intent.
+
+Examples:
+
+History: "giày"
+Input: "đen"
+
+Output:
+{{
+  "intent": "giày đen",
   "query_type": "SPECIFIC",
   "category_changed": false,
   "new_category": null
@@ -772,18 +699,29 @@ Output:
 
 --------------------------------------------------
 
-History: ""
-Input: "gaming"
+History: "bàn học"
+Input: "minimalist"
 
 Output:
 {{
-  "intent": "người dùng muốn sản phẩm phục vụ gaming",
-  "query_type": "ABSTRACT",
+  "intent": "bàn học minimalist",
+  "query_type": "SPECIFIC",
   "category_changed": false,
   "new_category": null
 }}
 
---------------------------------------------------
+==================================================
+CATEGORY SWITCH RULE
+==================================================
+
+If latest input introduces:
+- another product category
+- another commercial item
+- another unrelated shopping target
+
+then REPLACE old intent completely.
+
+Examples:
 
 History: "áo nam"
 Input: "robot hút bụi"
@@ -796,24 +734,104 @@ Output:
   "new_category": "robot hút bụi"
 }}
 
+--------------------------------------------------
+
+History: "laptop gaming"
+Input: "kem chống nắng"
+
+Output:
+{{
+  "intent": "kem chống nắng",
+  "query_type": "SPECIFIC",
+  "category_changed": true,
+  "new_category": "kem chống nắng"
+}}
+
+==================================================
+ABSTRACT WITHOUT HISTORY
+==================================================
+
+If:
+- no valid product history exists
+AND
+- latest input contains only abstract concepts,
+
+then create a natural abstract intent sentence.
+
+Examples:
+
+Input: "gaming"
+
+Output:
+{{
+  "intent": "người dùng muốn sản phẩm phục vụ gaming",
+  "query_type": "ABSTRACT",
+  "category_changed": false,
+  "new_category": null
+}}
+
+--------------------------------------------------
+
+Input: "cute"
+
+Output:
+{{
+  "intent": "người dùng muốn sản phẩm phong cách cute",
+  "query_type": "ABSTRACT",
+  "category_changed": false,
+  "new_category": null
+}}
+
+==================================================
+CATEGORY_CHANGED RULE
+==================================================
+
+category_changed = true ONLY IF:
+- user switches to another product category
+OR
+- user switches between SPECIFIC ↔ ABSTRACT
+
+category_changed = false IF:
+- latest input only refines/modifies current intent
+
+==================================================
+IMPORTANT DECISION LOGIC
+==================================================
+
+STEP 1:
+Analyze latest input independently.
+
+STEP 2:
+Determine whether latest input is:
+- refinement
+- category switch
+- abstract switch
+
+STEP 3:
+Only preserve previous history if latest input is refinement.
+
+STEP 4:
+Construct final intent.
+
 ==================================================
 OUTPUT RULES
 ==================================================
 
 Return ONLY valid JSON.
 
+Do NOT explain.
 Do NOT output markdown.
-Do NOT explain outside JSON.
 
-Format:
+Output format:
 
 {{
-  "intent": "merged/reconstructed intent",
+  "intent": "reconstructed intent",
   "query_type": "SPECIFIC or ABSTRACT",
   "category_changed": true or false,
   "new_category": "new category if changed, else null"
 }}
 """
+        
         return prompt
 
     def detect_first_query_intent_type(self, user_input: str) -> str:
